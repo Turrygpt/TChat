@@ -2213,7 +2213,10 @@ function appendUpdaterLog(payload) {
   }
 }
 
+let lastUpdaterStatus = null;
+
 function broadcastUpdaterStatus(payload) {
+  lastUpdaterStatus = payload;
   appendUpdaterLog(payload);
   mainWindow?.webContents.send('updater:status', payload);
 }
@@ -4671,6 +4674,7 @@ ipcMain.handle('app:check-updates', async () => {
 ipcMain.handle('app:get-server-status', () => serverStatus);
 ipcMain.handle('app:get-info', () => ({
   version: app.getVersion(),
+  updaterStatus: lastUpdaterStatus,
   botConfig: {
     key: botConfigKey,
     url: `${serverStatus.url}/config/bot.json?key=${botConfigKey}`,
