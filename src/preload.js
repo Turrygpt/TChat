@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('tchat', {
   getServerStatus: () => ipcRenderer.invoke('app:get-server-status'),
   getAppInfo: () => ipcRenderer.invoke('app:get-info'),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  exportConfig: () => ipcRenderer.invoke('config:export'),
+  importConfig: () => ipcRenderer.invoke('config:import'),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
   openChatWindow: () => ipcRenderer.invoke('app:open-chat-window'),
   openBackoffice: () => ipcRenderer.invoke('app:open-backoffice'),

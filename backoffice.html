@@ -1765,8 +1765,14 @@
             </div>
             <div class="button-row">
               <button id="announceSaveButton" class="button" type="button">Сохранить</button>
-              <button id="downloadBotConfigButton" class="button button--ghost" type="button">Скачать конфиг</button>
+              <button id="exportConfigButton" class="button button--ghost" type="button">Скачать конфиг (файл)</button>
+              <button id="importConfigButton" class="button button--ghost" type="button">Загрузить конфиг в приложение</button>
+              <button id="downloadBotConfigButton" class="button button--ghost" type="button">Конфиг для бота</button>
             </div>
+            <p class="muted">
+              «Скачать конфиг (файл)» сохраняет все настройки: боты TG/MAX, ключи ИИ, каналы VK/Twitch/YouTube и токены DonationAlerts.
+              «Загрузить конфиг» применяет такой файл на новом ПК.
+            </p>
             <p id="announceConfigState" class="muted">—</p>
             <label class="field" style="margin-top: 8px;">
               <span>Конфиг для бота — все ключи одним файлом (не публикуй ссылку)</span>
@@ -5251,6 +5257,47 @@
 
       announceSaveButton?.addEventListener('click', saveAnnounceSettings);
       downloadBotConfigButton?.addEventListener('click', downloadBotConfig);
+
+      // Экспорт всех настроек в файл и импорт на новом ПК.
+      const exportConfigButton = document.querySelector('#exportConfigButton');
+      const importConfigButton = document.querySelector('#importConfigButton');
+
+      exportConfigButton?.addEventListener('click', async () => {
+        if (!window.tchat?.exportConfig) return;
+        announceConfigState.textContent = 'Сохраняю настройки и экспортирую...';
+        try {
+          await window.tchat.saveAnnounceSettings(collectAnnounceSettings());
+          const result = await window.tchat.exportConfig();
+          if (result?.canceled) {
+            announceConfigState.textContent = 'Экспорт отменён.';
+          } else if (result?.ok) {
+            announceConfigState.textContent = 'Конфиг сохранён: ' + result.path;
+          } else {
+            announceConfigState.textContent = 'Ошибка экспорта: ' + (result?.error || 'неизвестно');
+          }
+        } catch (error) {
+          announceConfigState.textContent = 'Ошибка экспорта: ' + error.message;
+        }
+      });
+
+      importConfigButton?.addEventListener('click', async () => {
+        if (!window.tchat?.importConfig) return;
+        announceConfigState.textContent = 'Выбери файл конфига...';
+        try {
+          const result = await window.tchat.importConfig();
+          if (result?.canceled) {
+            announceConfigState.textContent = 'Импорт отменён.';
+          } else if (result?.ok) {
+            announceConfigState.textContent =
+              'Применено: ' + (result.applied || []).join(', ') + '. Обновляю панель...';
+            setTimeout(() => window.location.reload(), 1200);
+          } else {
+            announceConfigState.textContent = 'Ошибка импорта: ' + (result?.error || 'неизвестно');
+          }
+        } catch (error) {
+          announceConfigState.textContent = 'Ошибка импорта: ' + error.message;
+        }
+      });
       announcePreviewButton?.addEventListener('click', previewAnnounce);
       announceSendButton?.addEventListener('click', sendAnnounce);
       announceCancelButton?.addEventListener('click', () => {

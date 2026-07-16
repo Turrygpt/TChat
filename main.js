@@ -113,7 +113,7 @@ let donationAlertsTimer = null;
 let donationAlertsToken = '';
 let donationAlertsRefreshToken = '';
 let donationAlertsClientId = '';
-let donationAlertsClientSecret = 'g0XNUi7OUsVz2yys87xNSMPFiItqd1uU1qPoEdki';
+let donationAlertsClientSecret = '';
 let donationAlertsBootstrapped = false;
 let donationAlertsSettingsFile = '';
 let alertSettingsFile = '';
@@ -147,12 +147,15 @@ let donationAlertsState = {
   donations: [],
 };
 const donationAlertsIds = new Set();
+// Каналы не зашиты в приложение: подтягиваются из настроек (channels.json)
+// или задаются в бэкофисе / импортом конфига.
 let currentChannels = {
-  twitch: 'turry_ru',
-  vk: 'https://live.vkvideo.ru/turry/',
-  youtube: 'https://www.youtube.com/@Turry_ru',
+  twitch: '',
+  vk: '',
+  youtube: '',
   rutube: '',
 };
+let channelsFile = '';
 let chatStats = {
   messages: 0,
   users: new Set(),
@@ -214,6 +217,7 @@ function setupDonationAlertsStorage() {
   streamWidgetsFile = path.join(storageDir, 'stream-widgets.json');
   announceSettingsFile = path.join(storageDir, 'announce.json');
   botConfigFile = path.join(storageDir, 'bot-config.json');
+  channelsFile = path.join(storageDir, 'channels.json');
   loadDonationAlertsToken();
   loadAlertSettings();
   loadWindowState();
@@ -221,7 +225,38 @@ function setupDonationAlertsStorage() {
   loadGoalState();
   loadStreamWidgets();
   loadAnnounceSettings();
+  loadChatChannels();
   writeBotConfig();
+}
+
+function loadChatChannels() {
+  if (!channelsFile || !fs.existsSync(channelsFile)) {
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(fs.readFileSync(channelsFile, 'utf8'));
+    currentChannels = {
+      twitch: String(saved.twitch || '').trim(),
+      vk: String(saved.vk || '').trim(),
+      youtube: String(saved.youtube || '').trim(),
+      rutube: String(saved.rutube || '').trim(),
+    };
+  } catch (error) {
+    console.error(`Не удалось прочитать каналы чата: ${error.message}`);
+  }
+}
+
+function saveChatChannels() {
+  if (!channelsFile) {
+    return;
+  }
+
+  try {
+    fs.writeFileSync(channelsFile, JSON.stringify(currentChannels, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить каналы чата: ${error.message}`);
+  }
 }
 
 function loadAnnounceSettings() {
@@ -1388,7 +1423,7 @@ function loadDonationAlertsToken() {
     donationAlertsToken = String(settings.token || '').trim();
     donationAlertsRefreshToken = String(settings.refreshToken || '').trim();
     donationAlertsClientId = String(settings.clientId || '').trim();
-    donationAlertsClientSecret = String(settings.clientSecret || donationAlertsClientSecret || '').trim();
+    donationAlertsClientSecret = String(settings.clientSecret || '').trim();
   } catch (error) {
     console.error(`Не удалось прочитать настройки DonationAlerts: ${error.message}`);
   }
@@ -4446,6 +4481,14 @@ app.whenReady().then(async () => {
   purgeTestAlerts();
   broadcastGoalState();
   createChatWindow();
+
+  // Глобальный хоткей полупрозрачного режима — регистрируем сразу после создания
+  // окна, до подключения чатов (они могут долго висеть и не должны задерживать хоткей).
+  const ghostShortcutOk = globalShortcut.register('Control+Alt+G', toggleGhostMode);
+  if (!ghostShortcutOk) {
+    console.error('Не удалось зарегистрировать хоткей Ctrl+Alt+G (занят другим приложением).');
+  }
+
   if (donationAlertsToken) {
     startDonationAlertsSync(donationAlertsToken);
   }
@@ -4453,12 +4496,6 @@ app.whenReady().then(async () => {
   startChatPolling();
   ensureCountdownTicking();
   setupAutoUpdater();
-
-  // Глобальный хоткей полупрозрачного режима — работает и когда фокус в игре.
-  const ghostShortcutOk = globalShortcut.register('Control+Alt+G', toggleGhostMode);
-  if (!ghostShortcutOk) {
-    console.error('Не удалось зарегистрировать хоткей Ctrl+Alt+G (занят другим приложением).');
-  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -4489,6 +4526,89 @@ app.on('before-quit', async () => {
     youtubeClient.stop();
   }
   await stopLocalServer();
+});
+
+// Полный конфиг приложения одним файлом: боты TG/MAX, ключи ИИ, каналы чатов,
+// токены DonationAlerts. Экспорт — чтобы перенести на другой ПК, импорт — применить.
+function collectFullConfig() {
+  return {
+    tchatConfig: 1,
+    exportedAt: new Date().toISOString(),
+    version: app.getVersion(),
+    announce: announceSettings,
+    channels: { ...currentChannels },
+    donationAlerts: {
+      clientId: donationAlertsClientId,
+      clientSecret: donationAlertsClientSecret,
+      token: donationAlertsToken,
+      refreshToken: donationAlertsRefreshToken,
+    },
+  };
+}
+
+ipcMain.handle('config:export', async () => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Сохранить конфиг TChat',
+    defaultPath: 'tchat-config.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (canceled || !filePath) {
+    return { ok: false, canceled: true };
+  }
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(collectFullConfig(), null, 2));
+    return { ok: true, path: filePath };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle('config:import', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Выбрать конфиг TChat',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile'],
+  });
+  if (canceled || !filePaths?.[0]) {
+    return { ok: false, canceled: true };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+    const applied = [];
+
+    if (raw.announce && typeof raw.announce === 'object') {
+      saveAnnounceSettings(raw.announce);
+      applied.push('боты и ключи');
+    }
+
+    if (raw.donationAlerts && typeof raw.donationAlerts === 'object') {
+      donationAlertsClientId = String(raw.donationAlerts.clientId || '').trim();
+      donationAlertsClientSecret = String(raw.donationAlerts.clientSecret || '').trim();
+      donationAlertsRefreshToken = String(raw.donationAlerts.refreshToken || '').trim();
+      const importedToken = String(raw.donationAlerts.token || '').trim();
+      startDonationAlertsSync(importedToken);
+      applied.push('DonationAlerts');
+    }
+
+    if (raw.channels && typeof raw.channels === 'object') {
+      await connectChatSources({
+        twitch: parseTwitchChannel(raw.channels.twitch || ''),
+        vk: String(raw.channels.vk || '').trim(),
+        youtube: String(raw.channels.youtube || '').trim(),
+        rutube: String(raw.channels.rutube || '').trim(),
+      });
+      saveChatChannels();
+      applied.push('каналы чатов');
+    }
+
+    if (!applied.length) {
+      return { ok: false, error: 'в файле нет настроек TChat' };
+    }
+    return { ok: true, applied };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
 });
 
 ipcMain.handle('app:check-updates', async () => {
@@ -4540,6 +4660,7 @@ ipcMain.handle('chat:update-channels', async (_event, channels) => {
     youtube: channels?.youtube || currentChannels.youtube,
     rutube: channels?.rutube || currentChannels.rutube,
   });
+  saveChatChannels();
 });
 
 ipcMain.handle('chat:get-status', () => getChatStatusPayload());
