@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Countdown Widget</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./widget.css" />
+  </head>
+  <body class="widget-page widget-page--countdown">
+    <section class="stream-countdown stream-countdown--standalone" id="countdownRoot" hidden>
+      <div class="stream-countdown__glow" aria-hidden="true"></div>
+      <div class="stream-countdown__title">До конца стрима</div>
+      <div class="stream-countdown__clock" id="countdownClock" aria-live="polite">
+        <span class="stream-countdown__segment" data-part="hours">00</span>
+        <span class="stream-countdown__sep">:</span>
+        <span class="stream-countdown__segment" data-part="minutes">00</span>
+        <span class="stream-countdown__sep">:</span>
+        <span class="stream-countdown__segment" data-part="seconds">00</span>
+      </div>
+    </section>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./countdown.js"></script>
+  </body>
+</html>

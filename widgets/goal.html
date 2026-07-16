@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Goal Widget</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./widget.css" />
+  </head>
+  <body class="widget-page widget-page--goal">
+    <section class="goal cs-skin-cities" id="goalRoot">
+      <div class="goal-card" id="goalCard">
+        <div class="goal-info-row">
+          <div id="goalTitle" class="goal-title">Сбор</div>
+          <div class="goal-amounts">
+            <span id="goalCurrent" class="goal-num">0</span>
+            <span id="goalCurrencyCurrent" class="goal-cur">RUB</span>
+            <span class="goal-slash">/</span>
+            <span id="goalTarget" class="goal-num goal-target-num">1</span>
+            <span id="goalCurrencyTarget" class="goal-cur">RUB</span>
+          </div>
+          <div id="goalPercent" class="goal-percent">0%</div>
+        </div>
+        <div class="goal-bar-wrap" aria-hidden="true">
+          <div class="goal-bar-track">
+            <div id="goalProgress" class="goal-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./goal.js"></script>
+  </body>
+</html>

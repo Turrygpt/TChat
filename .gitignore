@@ -1,0 +1,27 @@
+node_modules/
+dist/
+*.log
+npm-debug.log*
+.env
+.DS_Store
+
+# Ресурсы сборки: нужен только icon.ico
+build/*
+!build/icon.ico
+
+# Рантайм-данные (история чата, настройки) — не для репозитория
+data/
+
+# Кеш озвучки
+assets/tts/
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+
+# Релизы на сервере
+releases/

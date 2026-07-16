@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "proxy": "http://127.0.0.1:10810",
+  "vless": "vless://3af5449f-6436-4c60-83cb-9296296a9513@c6a2ca08.vip:443?type=tcp&security=reality&sni=max.ru&fp=firefox&pbk=VPFO3LF2-xTVIGaUDjn5zLhVsh0PyM2CdfPEZphIBxI&sid=9ce8a5aad6ea2996&spx=%2F&flow=xtls-rprx-vision#VIPASS%3AWork",
+  "_comment": "Обход только для YouTube и только в TChat. enabled:false — вернуть всё как было. proxy — локальный HTTP-порт backend'а (Xray/ByeDPI). vless — ссылка, из неё бэкофис пересобирает youtube-bypass/xray-config.json."
+}

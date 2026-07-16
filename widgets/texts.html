@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Texts</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./widget.css?v=2" />
+  </head>
+  <body class="widget-page widget-page--texts">
+    <section class="stream-text stream-text--standalone" id="textsRoot" hidden>
+      <div class="stream-text__frame">
+        <div class="stream-text__glow" aria-hidden="true"></div>
+        <p class="stream-text__content" id="textsContent" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./texts.js?v=2"></script>
+  </body>
+</html>

@@ -1,0 +1,67 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "http-in",
+      "listen": "127.0.0.1",
+      "port": 10810,
+      "protocol": "http",
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "c6a2ca08.vip",
+            "port": 443,
+            "users": [
+              {
+                "id": "3af5449f-6436-4c60-83cb-9296296a9513",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "fingerprint": "firefox",
+          "serverName": "max.ru",
+          "publicKey": "VPFO3LF2-xTVIGaUDjn5zLhVsh0PyM2CdfPEZphIBxI",
+          "shortId": "9ce8a5aad6ea2996",
+          "spiderX": "/"
+        }
+      }
+    },
+    { "tag": "direct", "protocol": "freedom" },
+    { "tag": "block", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "proxy",
+        "domain": [
+          "geosite:youtube",
+          "domain:youtube.com",
+          "domain:youtu.be",
+          "domain:youtube-nocookie.com",
+          "domain:googlevideo.com",
+          "domain:ytimg.com",
+          "domain:ggpht.com",
+          "domain:youtubei.googleapis.com"
+        ]
+      },
+      { "type": "field", "outboundTag": "direct", "network": "tcp,udp" }
+    ]
+  }
+}

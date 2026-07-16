@@ -1,0 +1,91 @@
+{
+  "name": "tchat",
+  "version": "1.0.1",
+  "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/start-electron.js",
+    "serve": "node scripts/serve.js",
+    "server:check": "node scripts/check-server.js",
+    "smoke:test": "node scripts/smoke-test.js",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "pack": "electron-builder --dir"
+  },
+  "keywords": [],
+  "author": "TChat",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
+    "electron-updater": "^6.8.9",
+    "express": "^5.2.1",
+    "node-edge-tts": "^1.2.10",
+    "socket.io": "^4.8.3",
+    "tmi.js": "^1.8.5",
+    "youtube-chat": "^2.2.0"
+  },
+  "devDependencies": {
+    "electron": "^42.4.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.tchat.app",
+    "productName": "TChat",
+    "copyright": "Copyright © 2026 TChat",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "backoffice.html",
+      "chat-window.html",
+      "src/**/*",
+      "widgets/**/*",
+      "scripts/**/*",
+      "assets/**/*",
+      "youtube-bypass/**/*",
+      "!dist/**",
+      "!android/**",
+      "!deploy/**",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TChat",
+      "artifactName": "TChat-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "TChat-${version}-portable.exe"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://195.62.49.244/tchat/download/"
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat - окно алертов</title>
+    <link rel="stylesheet" href="./widget.css" />
+  </head>
+  <body class="widget-page widget-page--stream-alerts">
+    <section id="streamAlert" class="stream-alert" aria-live="polite">
+      <img id="streamAlertImage" class="stream-alert__image" alt="" hidden />
+      <video id="streamAlertVideo" class="stream-alert__image" muted playsinline loop hidden></video>
+      <div class="stream-alert__body">
+        <span id="streamAlertTitle" class="stream-alert__title">Новый донат</span>
+        <strong id="streamAlertUser" class="stream-alert__user">Зритель</strong>
+        <p id="streamAlertMessage" class="stream-alert__message">Ожидаем событие...</p>
+      </div>
+      <audio id="streamAlertSound"></audio>
+    </section>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./alerts.js"></script>
+  </body>
+</html>

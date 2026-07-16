@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Donation Alert</title>
+    <link rel="stylesheet" href="./widget.css" />
+  </head>
+  <body class="widget-page widget-page--alert">
+    <section id="donationAlert" class="donation-alert" aria-live="polite">
+      <span id="donationTitle">Новый донат</span>
+      <strong id="donationAmount">0 RUB</strong>
+      <p id="donationMessage">Ожидаем событие...</p>
+    </section>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./alert.js"></script>
+  </body>
+</html>

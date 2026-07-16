@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat — удалённая панель</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: #0b0e14;
+        color: #e8ecf4;
+        --panel: #141926;
+        --panel-2: #171d2c;
+        --border: #232b3d;
+        --border-soft: #1c2333;
+        --muted: #8b94a7;
+        --accent: #8b5cf6;
+        --accent-2: #6366f1;
+        --green: #34d399;
+        --danger: #fb7185;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(900px 420px at 50% -10%, rgb(99 102 241 / 12%), transparent 60%),
+          #0b0e14;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      .page {
+        display: grid;
+        gap: 16px;
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .topbar,
+      .panel,
+      .status-pill {
+        border: 1px solid var(--border-soft);
+        border-radius: 14px;
+        background: linear-gradient(180deg, var(--panel-2), var(--panel));
+        box-shadow: 0 18px 48px rgb(0 0 0 / 30%);
+      }
+
+      .topbar {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 24px;
+        font-weight: 800;
+      }
+
+      h2 {
+        margin-bottom: 12px;
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+        margin-bottom: 12px;
+        color: #cbd5df;
+      }
+
+      .field input,
+      .field select,
+      .field textarea {
+        min-height: 42px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #0d1119;
+        color: #ffffff;
+        padding: 0 12px;
+        transition: border-color 140ms ease, box-shadow 140ms ease;
+      }
+
+      .field input:focus-visible,
+      .field select:focus-visible,
+      .field textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgb(139 92 246 / 22%);
+      }
+
+      .field textarea {
+        min-height: 88px;
+        padding: 10px 12px;
+        resize: vertical;
+      }
+
+      .button-row,
+      .quick-row,
+      .stats-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .button {
+        min-height: 42px;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #ffffff;
+        font-weight: 700;
+        padding: 0 16px;
+        cursor: pointer;
+        box-shadow: 0 6px 16px rgb(99 102 241 / 30%);
+        transition: filter 140ms ease, transform 140ms ease;
+      }
+
+      .button:hover:not(:disabled) {
+        filter: brightness(1.1);
+        transform: translateY(-1px);
+      }
+
+      .button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .button--ghost {
+        border: 1px solid var(--border);
+        background: rgb(255 255 255 / 3%);
+        color: #e8ecf4;
+        box-shadow: none;
+      }
+
+      .button--ghost:hover:not(:disabled) {
+        border-color: #33405f;
+        background: rgb(255 255 255 / 6%);
+        filter: none;
+      }
+
+      .button--danger {
+        border: 0;
+        background: linear-gradient(135deg, #f43f5e, #fb7185);
+        color: #ffffff;
+        box-shadow: 0 6px 16px rgb(244 63 94 / 25%);
+      }
+
+      .panel {
+        padding: 16px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 14px;
+        box-shadow: none;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--danger);
+        box-shadow: 0 0 8px rgb(251 113 133 / 60%);
+      }
+
+      .status-dot.is-online {
+        background: var(--green);
+        box-shadow: 0 0 8px rgb(52 211 153 / 60%);
+      }
+
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .stat {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #0d1119;
+        padding: 12px;
+        color: var(--muted);
+      }
+
+      .stat strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 22px;
+        color: #ffffff;
+      }
+
+      .goal-progress {
+        overflow: hidden;
+        height: 14px;
+        border-radius: 999px;
+        background: #0d1119;
+        margin: 12px 0;
+      }
+
+      .goal-progress__fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--accent-2), var(--accent) 60%, #22d3ee);
+        box-shadow: 0 0 12px rgb(139 92 246 / 40%);
+        transition: width 240ms ease;
+      }
+
+      .widget-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #0d1119;
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .widget-card:last-child {
+        margin-bottom: 0;
+      }
+
+      .widget-card__title {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+        font-weight: 800;
+      }
+
+      .poll-options {
+        display: grid;
+        gap: 8px;
+      }
+
+      .poll-option-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+
+      .toast {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        max-width: min(360px, calc(100vw - 32px));
+        border: 1px solid rgb(139 92 246 / 45%);
+        border-radius: 12px;
+        background: #171d2c;
+        color: #e8ecf4;
+        box-shadow: 0 18px 44px rgb(0 0 0 / 45%);
+        padding: 12px 14px;
+        opacity: 0;
+        transform: translateY(12px);
+        transition: opacity 180ms ease, transform 180ms ease;
+        pointer-events: none;
+      }
+
+      .toast.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .toast--error {
+        border-color: var(--danger);
+      }
+
+      @media (max-width: 560px) {
+        .stats-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <h1>Удалённая панель TChat</h1>
+          <p class="muted">Управление сбором, виджетами и голосованием с другого ПК в локальной сети.</p>
+        </div>
+        <label class="field">
+          <span>Адрес TChat на ПК стримера</span>
+          <input id="hostInput" type="url" placeholder="http://192.168.1.2:3000" autocomplete="off" />
+        </label>
+        <div class="button-row">
+          <button id="connectButton" class="button" type="button">Подключиться</button>
+          <span id="connectionStatus" class="status-pill">
+            <span id="connectionDot" class="status-dot"></span>
+            <span id="connectionText">Не подключено</span>
+          </span>
+        </div>
+        <p id="legacyBanner" class="muted" hidden style="margin-top: 8px; color: #ffb347;">
+          Запущена старая версия TChat. Перезапустите приложение на ПК стримера, чтобы работали виджеты, голосования и донаты.
+        </p>
+      </header>
+
+      <section class="panel" id="statsPanel" hidden>
+        <h2>Статистика эфира</h2>
+        <div class="stats-row">
+          <div class="stat">Зрители<strong id="totalViewers">0</strong></div>
+          <div class="stat">Twitch<strong id="twitchViewers">0</strong></div>
+          <div class="stat">VK<strong id="vkViewers">0</strong></div>
+          <div class="stat">YouTube<strong id="youtubeViewers">0</strong></div>
+        </div>
+      </section>
+
+      <section class="panel" id="goalPanel" hidden>
+        <h2>Основная полоска сбора</h2>
+        <div class="goal-progress" aria-hidden="true">
+          <div id="goalProgressFill" class="goal-progress__fill" style="width: 0%"></div>
+        </div>
+        <p id="goalSummary" class="muted">0 / 0 RUB</p>
+        <label class="field">
+          <span>Назначение</span>
+          <input id="goalTitleInput" type="text" />
+        </label>
+        <label class="field">
+          <span>Цель</span>
+          <input id="goalTargetInput" type="number" min="1" />
+        </label>
+        <label class="field">
+          <span>Текущая сумма</span>
+          <input id="goalCurrentInput" type="number" min="0" />
+        </label>
+        <label class="field">
+          <span>Валюта</span>
+          <input id="goalCurrencyInput" type="text" maxlength="8" />
+        </label>
+        <div class="button-row">
+          <button id="saveGoalButton" class="button" type="button">Сохранить</button>
+          <button id="resetGoalButton" class="button button--ghost" type="button">Сбросить сумму</button>
+        </div>
+        <div class="quick-row">
+          <button class="button button--ghost" type="button" data-add-amount="100">+100</button>
+          <button class="button button--ghost" type="button" data-add-amount="500">+500</button>
+          <button class="button button--ghost" type="button" data-add-amount="1000">+1000</button>
+          <input id="customAddAmountInput" type="number" min="1" placeholder="Сумма" style="width: 110px; min-height: 42px; border-radius: 10px; border: 1px solid #232b3d; background: #0d1119; color: #fff; padding: 0 10px;" />
+          <button id="customAddAmountButton" class="button button--ghost" type="button">Добавить</button>
+        </div>
+      </section>
+
+      <section class="panel" id="widgetsPanel" hidden>
+        <h2>Виджеты на overlay</h2>
+        <p class="muted">Отдельные полоски сбора из рабочей области бэкоффиса.</p>
+        <div id="widgetCards"></div>
+      </section>
+
+      <section class="panel" id="pollPanel" hidden>
+        <h2>Голосование</h2>
+        <p id="pollStatusText" class="muted">Нет активного голосования.</p>
+        <label class="field">
+          <span>Заголовок</span>
+          <input id="pollTitleInput" type="text" value="Что выбираем?" />
+        </label>
+        <label class="field">
+          <span>Длительность, сек (0 = без таймера)</span>
+          <input id="pollDurationInput" type="number" min="0" value="300" />
+        </label>
+        <div id="pollOptionsList" class="poll-options"></div>
+        <div class="button-row">
+          <button id="addPollOptionButton" class="button button--ghost" type="button">+ Вариант</button>
+          <button id="startPollButton" class="button" type="button">Старт</button>
+          <button id="showPollButton" class="button button--ghost" type="button">Показать</button>
+          <button id="finishPollButton" class="button button--ghost" type="button">Завершить</button>
+          <button id="hidePollButton" class="button button--danger" type="button">Скрыть</button>
+        </div>
+      </section>
+
+      <section class="panel" id="donationPanel" hidden>
+        <h2>Тестовый донат</h2>
+        <label class="field">
+          <span>Ник</span>
+          <input id="donationUserInput" type="text" value="Удалённый зритель" />
+        </label>
+        <label class="field">
+          <span>Сумма</span>
+          <input id="donationAmountInput" type="number" min="1" value="500" />
+        </label>
+        <label class="field">
+          <span>Сообщение</span>
+          <textarea id="donationMessageInput">Проверка с удалённой панели</textarea>
+        </label>
+        <button id="sendDonationButton" class="button" type="button">Отправить тестовый донат</button>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./remote.js"></script>
+  </body>
+</html>

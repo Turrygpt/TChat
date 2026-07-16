@@ -1,0 +1,4683 @@
+const http = require('node:http');
+const path = require('node:path');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const express = require('express');
+const { Server } = require('socket.io');
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut } = require('electron');
+const tmi = require('tmi.js');
+const { LiveChat } = require('youtube-chat');
+const { EdgeTTS } = require('node-edge-tts');
+const announce = require('./src/announce');
+
+// Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+} catch (error) {
+  console.error('[updater] модуль не загружен:', error && error.message);
+}
+
+// Точечный обход только для YouTube и только для TChat (плеер + чат + метаданные).
+// Всё остальное (VK, Twitch, Rutube, DonationAlerts, localhost) идёт напрямую.
+try {
+  require('./src/net/ytProxy').install({ app });
+} catch (error) {
+  console.error('[ytProxy] не удалось инициализировать:', error && error.message);
+}
+
+// Настройка обхода YouTube из бэкофиса: получить/сохранить vless-ссылку.
+let vlessConfig = null;
+try {
+  vlessConfig = require('./src/net/vlessConfig');
+} catch (error) {
+  console.error('[vless] модуль не загружен:', error && error.message);
+}
+
+if (vlessConfig) {
+  ipcMain.handle('youtube-proxy:get', () => {
+    try {
+      return { ok: true, ...vlessConfig.getState() };
+    } catch (error) {
+      return { ok: false, error: error && error.message };
+    }
+  });
+
+  ipcMain.handle('youtube-proxy:save', (_event, payload) => {
+    try {
+      return vlessConfig.saveLink(payload || {});
+    } catch (error) {
+      return { ok: false, error: (error && error.message) || 'Не удалось сохранить' };
+    }
+  });
+}
+
+function installBrokenPipeGuard() {
+  for (const stream of [process.stdout, process.stderr]) {
+    if (!stream || typeof stream.on !== 'function') {
+      continue;
+    }
+
+    stream.on('error', (error) => {
+      if (error?.code === 'EPIPE') {
+        return;
+      }
+    });
+  }
+}
+
+function logInfo(...args) {
+  try {
+    console.log(...args);
+  } catch (error) {
+    if (error?.code !== 'EPIPE') {
+      throw error;
+    }
+  }
+}
+
+installBrokenPipeGuard();
+
+const SERVER_HOST = '0.0.0.0';
+const SERVER_PORT = Number(process.env.TCHAT_PORT || 3000);
+const DONATION_ALERTS_REDIRECT_PATH = '/oauth/donationalerts';
+// Public base URL for OAuth redirects. On a hosted (headless) copy set
+// TCHAT_PUBLIC_URL, e.g. http://195.62.49.244:3100 — desktop keeps localhost.
+const PUBLIC_BASE_URL = (process.env.TCHAT_PUBLIC_URL || `http://localhost:${SERVER_PORT}`).replace(/\/+$/, '');
+const DONATION_ALERTS_REDIRECT_URI = `${PUBLIC_BASE_URL}${DONATION_ALERTS_REDIRECT_PATH}`;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const EDGE_TTS_DEFAULT_VOICE = 'ru-RU-SvetlanaNeural';
+const FIRST_MESSAGE_BELL_IMAGE =
+  'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22%3E%3Crect width=%22128%22 height=%22128%22 rx=%2228%22 fill=%22%2313191f%22/%3E%3Cpath d=%22M64 112a14 14 0 0 0 13.6-10.7H50.4A14 14 0 0 0 64 112Z%22 fill=%22%23ffd166%22/%3E%3Cpath d=%22M104 91H24c7.5-7.2 11.3-17.2 11.3-30V51c0-17.2 10.7-31.8 25.8-36.1V9h5.8v5.9C82 19.2 92.7 33.8 92.7 51v10c0 12.8 3.8 22.8 11.3 30Z%22 fill=%22%23ffd166%22/%3E%3Cpath d=%22M91.2 24.8 99.8 16l6.2 6.1-8.6 8.8-6.2-6.1ZM22 22.1l6.2-6.1 8.6 8.8-6.2 6.1L22 22.1Z%22 fill=%22%23f77f00%22/%3E%3C/svg%3E';
+
+let mainWindow = null;
+let chatWindow = null;
+let httpServer = null;
+let socketServer = null;
+let twitchClient = null;
+let youtubeClient = null;
+let vkPollTimer = null;
+let viewerPollTimer = null;
+let vkChatBootstrapped = false;
+let vkConnectionState = {
+  consecutiveFailures: 0,
+  lastSuccessAt: 0,
+  lastViewers: 0,
+  lastChatAvailable: false,
+  lastError: '',
+  lastChatMessageId: 0,
+};
+let donationAlertsTimer = null;
+let donationAlertsToken = '';
+let donationAlertsRefreshToken = '';
+let donationAlertsClientId = '';
+let donationAlertsClientSecret = 'g0XNUi7OUsVz2yys87xNSMPFiItqd1uU1qPoEdki';
+let donationAlertsBootstrapped = false;
+let donationAlertsSettingsFile = '';
+let alertSettingsFile = '';
+let windowStateFile = '';
+let chatUiSettingsFile = '';
+let goalStateFile = '';
+let streamWidgetsFile = '';
+let announceSettingsFile = '';
+let announceSettings = announce.createDefaultSettings();
+let botConfigFile = '';
+let botConfigKey = '';
+let windowState = createDefaultWindowState();
+let chatUiSettings = createDefaultChatUiSettings();
+let alertSettings = createDefaultAlertSettings();
+let goalState = createDefaultGoalState();
+let streamWidgets = [];
+let activePoll = null;
+let pollFinishTimer = null;
+let countdownTickTimer = null;
+const DEFAULT_COUNTDOWN_SECONDS = 7200;
+const DEFAULT_TEXTS_FONT_SIZE = 32;
+let alertQueue = [];
+let musicQueue = [];
+let firstMessageGreetingDay = getChatDayKey();
+let firstMessageGreetingUsers = new Set();
+const startedMusicIds = new Set();
+let donationAlertsState = {
+  status: 'токен не задан',
+  lastSyncAt: '',
+  error: '',
+  donations: [],
+};
+const donationAlertsIds = new Set();
+let currentChannels = {
+  twitch: 'turry_ru',
+  vk: 'https://live.vkvideo.ru/turry/',
+  youtube: 'https://www.youtube.com/@Turry_ru',
+  rutube: '',
+};
+let chatStats = {
+  messages: 0,
+  users: new Set(),
+  vkMessageIds: new Set(),
+  viewers: {
+    twitch: 0,
+    vk: 0,
+    youtube: 0,
+    rutube: 0,
+  },
+  platformStatus: {
+    twitch: 'подключаем',
+    vk: 'подключаем',
+    youtube: 'ожидает подключения',
+    rutube: 'ожидает подключения',
+  },
+};
+let chatHistory = [];
+let chatHistoryFile = '';
+let serverStatus = {
+  isReady: false,
+  host: SERVER_HOST,
+  port: SERVER_PORT,
+  url: `http://localhost:${SERVER_PORT}`,
+  error: null,
+};
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const windowToFocus = chatWindow && !chatWindow.isDestroyed() ? chatWindow : mainWindow;
+    if (!windowToFocus || windowToFocus.isDestroyed()) {
+      return;
+    }
+
+    if (windowToFocus.isMinimized()) {
+      windowToFocus.restore();
+    }
+    windowToFocus.focus();
+  });
+}
+
+function setupChatStorage() {
+  const storageDir = path.join(app.getPath('userData'), 'chat-history');
+  fs.mkdirSync(storageDir, { recursive: true });
+  chatHistoryFile = path.join(storageDir, 'chat.jsonl');
+  loadChatHistory();
+}
+
+function setupDonationAlertsStorage() {
+  const storageDir = path.join(app.getPath('userData'), 'settings');
+  fs.mkdirSync(storageDir, { recursive: true });
+  donationAlertsSettingsFile = path.join(storageDir, 'donationalerts.json');
+  alertSettingsFile = path.join(storageDir, 'alert-rules.json');
+  windowStateFile = path.join(storageDir, 'window-state.json');
+  chatUiSettingsFile = path.join(storageDir, 'chat-ui.json');
+  goalStateFile = path.join(storageDir, 'goal-state.json');
+  streamWidgetsFile = path.join(storageDir, 'stream-widgets.json');
+  announceSettingsFile = path.join(storageDir, 'announce.json');
+  botConfigFile = path.join(storageDir, 'bot-config.json');
+  loadDonationAlertsToken();
+  loadAlertSettings();
+  loadWindowState();
+  loadChatUiSettings();
+  loadGoalState();
+  loadStreamWidgets();
+  loadAnnounceSettings();
+  writeBotConfig();
+}
+
+function loadAnnounceSettings() {
+  if (!announceSettingsFile || !fs.existsSync(announceSettingsFile)) {
+    announceSettings = announce.createDefaultSettings();
+    return;
+  }
+
+  try {
+    announceSettings = announce.normalizeSettings(JSON.parse(fs.readFileSync(announceSettingsFile, 'utf8')));
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки оповещения: ${error.message}`);
+    announceSettings = announce.createDefaultSettings();
+  }
+}
+
+function saveAnnounceSettings(settings) {
+  announceSettings = announce.normalizeSettings(settings);
+
+  if (announceSettingsFile) {
+    try {
+      fs.writeFileSync(announceSettingsFile, JSON.stringify(announceSettings, null, 2));
+    } catch (error) {
+      console.error(`Не удалось сохранить настройки оповещения: ${error.message}`);
+    }
+  }
+
+  writeBotConfig();
+  return announceSettings;
+}
+
+// Конфиг для внешнего бота: все ключи и токены одним файлом.
+// Раздаётся сервером по /config/bot.json только с верным секретным ключом.
+function getBotConfigPayload() {
+  return {
+    updatedAt: new Date().toISOString(),
+    telegram: { token: announceSettings.telegram.token, chatId: announceSettings.telegram.chatId },
+    max: {
+      token: announceSettings.max.token,
+      chatId: announceSettings.max.chatId,
+      channelUrl: announceSettings.max.channelUrl,
+    },
+    polza: { apiKey: announceSettings.polza.apiKey, model: announceSettings.polza.model },
+    anthropic: { apiKey: announceSettings.anthropic.apiKey },
+    ollama: { baseUrl: announceSettings.ollama.baseUrl, model: announceSettings.ollama.model },
+    channels: { vk: announceSettings.channelUrl, twitch: announceSettings.twitchUrl },
+  };
+}
+
+function writeBotConfig() {
+  if (!botConfigFile) {
+    return;
+  }
+
+  if (!botConfigKey) {
+    try {
+      botConfigKey = String(JSON.parse(fs.readFileSync(botConfigFile, 'utf8')).key || '').trim();
+    } catch {
+      botConfigKey = '';
+    }
+    if (!botConfigKey) {
+      botConfigKey = crypto.randomBytes(24).toString('hex');
+    }
+  }
+
+  try {
+    fs.writeFileSync(botConfigFile, JSON.stringify({ key: botConfigKey, ...getBotConfigPayload() }, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить конфиг бота: ${error.message}`);
+  }
+}
+
+function isValidBotConfigKey(candidate) {
+  const expected = Buffer.from(String(botConfigKey || ''));
+  const actual = Buffer.from(String(candidate || ''));
+  return expected.length > 0 && expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function createDefaultWindowState() {
+  return {
+    chatWindow: {
+      width: 520,
+      height: 760,
+      x: null,
+      y: null,
+      isMaximized: false,
+    },
+    backoffice: {
+      width: 920,
+      height: 680,
+      x: null,
+      y: null,
+      isMaximized: false,
+    },
+  };
+}
+
+function createDefaultChatUiSettings() {
+  return {
+    fontSize: 20,
+    gap: 4,
+    direction: 'top-down',
+  };
+}
+
+function createDefaultGoalState() {
+  return normalizeGoal({
+    title: 'Сбор',
+    current: 0,
+    target: 10000,
+    currency: 'RUB',
+  });
+}
+
+function loadGoalState() {
+  if (!fs.existsSync(goalStateFile)) {
+    goalState = createDefaultGoalState();
+    saveGoalState(goalState);
+    return;
+  }
+
+  try {
+    goalState = normalizeGoal(JSON.parse(fs.readFileSync(goalStateFile, 'utf8')));
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки сбора: ${error.message}`);
+    goalState = createDefaultGoalState();
+  }
+}
+
+function saveGoalState(nextState = goalState) {
+  goalState = normalizeGoal(nextState);
+
+  if (!goalStateFile) {
+    return goalState;
+  }
+
+  try {
+    fs.writeFileSync(goalStateFile, JSON.stringify(goalState, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить настройки сбора: ${error.message}`);
+  }
+
+  return goalState;
+}
+
+function createDefaultStreamWidgets() {
+  return [
+    {
+      id: 'builtin-alerts',
+      type: 'alerts',
+      title: 'Оповещения',
+      enabled: true,
+      x: 34,
+      y: 34,
+      width: 42,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-chat',
+      type: 'chat',
+      title: 'Чат на экране',
+      enabled: false,
+      x: 4,
+      y: 48,
+      width: 30,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-music',
+      type: 'music',
+      title: 'Музыка',
+      enabled: true,
+      x: 68,
+      y: 10,
+      width: 28,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-poll',
+      type: 'poll',
+      title: 'Голосование',
+      enabled: true,
+      x: 60,
+      y: 56,
+      width: 34,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-countdown',
+      type: 'countdown',
+      title: 'До конца стрима',
+      enabled: true,
+      x: 72,
+      y: 4,
+      width: 18,
+      status: 'paused',
+      remainingSeconds: DEFAULT_COUNTDOWN_SECONDS,
+      totalSeconds: DEFAULT_COUNTDOWN_SECONDS,
+      setupMode: 'duration',
+      targetEndsAt: '',
+      endsAt: '',
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-texts',
+      type: 'texts',
+      title: 'Тексты',
+      enabled: false,
+      x: 8,
+      y: 18,
+      width: 44,
+      fontSize: DEFAULT_TEXTS_FONT_SIZE,
+      textItems: [
+        {
+          id: 'builtin-text-welcome',
+          content: 'Донат от 500 открывает карточку с призом',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      activeTextId: 'builtin-text-welcome',
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-tasks',
+      type: 'tasks',
+      title: 'Задачи на стрим',
+      enabled: false,
+      x: 4,
+      y: 8,
+      width: 26,
+      subtitle: 'План на эфир',
+      footer: 'Live overlay',
+      skin: 'farming-simulator-25',
+      taskItems: [
+        { id: 'task-1', text: 'Сбор урожая', done: false },
+        { id: 'task-2', text: 'Запустить ресторан', done: false },
+        { id: 'task-3', text: 'Сделать моцареллу', done: false },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
+
+function loadStreamWidgets() {
+  if (!fs.existsSync(streamWidgetsFile)) {
+    streamWidgets = createDefaultStreamWidgets();
+    saveStreamWidgets(streamWidgets);
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(fs.readFileSync(streamWidgetsFile, 'utf8'));
+    streamWidgets = mergeDefaultStreamWidgets(Array.isArray(saved?.items) ? saved.items.map(normalizeStreamWidget).filter(Boolean) : []);
+    saveStreamWidgets(streamWidgets);
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки виджетов: ${error.message}`);
+    streamWidgets = createDefaultStreamWidgets();
+  }
+}
+
+function mergeDefaultStreamWidgets(items = []) {
+  const existingIds = new Set(items.map((item) => item.id));
+  const defaults = createDefaultStreamWidgets().filter((item) => !existingIds.has(item.id));
+  return [...defaults, ...items];
+}
+
+function saveStreamWidgets(items = streamWidgets) {
+  streamWidgets = (Array.isArray(items) ? items : []).map(normalizeStreamWidget).filter(Boolean);
+
+  if (!streamWidgetsFile) {
+    return streamWidgets;
+  }
+
+  try {
+    fs.writeFileSync(streamWidgetsFile, JSON.stringify({ items: streamWidgets }, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить настройки виджетов: ${error.message}`);
+  }
+
+  return streamWidgets;
+}
+
+function normalizeTextItem(item = {}, index = 0) {
+  const id = String(item.id || `text-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`);
+  return {
+    id,
+    content: String(item.content || ''),
+    createdAt: item.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeTextsWidget(widget = {}) {
+  const textItems = (Array.isArray(widget.textItems) ? widget.textItems : []).map((item, index) =>
+    normalizeTextItem(item, index),
+  );
+  const migratedItems = textItems.map((item) => {
+    if (
+      item.id === 'builtin-text-welcome' &&
+      ['Добро пожаловать на стрим!', 'Сегодня играем вместе — заходите в чат'].includes(String(item.content || '').trim())
+    ) {
+      return {
+        ...item,
+        content: 'Донат от 500 открывает карточку с призом',
+      };
+    }
+
+    return item;
+  });
+  let activeTextId = String(widget.activeTextId || '').trim();
+
+  if (!migratedItems.some((item) => item.id === activeTextId)) {
+    activeTextId = migratedItems[0]?.id || '';
+  }
+
+  const normalized = {
+    ...widget,
+    textItems: migratedItems,
+    activeTextId,
+    fontSize: Math.min(Math.max(Number(widget.fontSize || DEFAULT_TEXTS_FONT_SIZE), 14), 96),
+  };
+
+  delete normalized.height;
+
+  return normalized;
+}
+
+function normalizeTaskItem(item = {}, index = 0) {
+  const id = String(item.id || `task-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`);
+  return {
+    id,
+    text: String(item.text || '').trim(),
+    done: item.done === true,
+  };
+}
+
+function normalizeTasksWidget(widget = {}) {
+  const taskItems = (Array.isArray(widget.taskItems) ? widget.taskItems : [])
+    .map((item, index) => normalizeTaskItem(item, index))
+    .filter((item) => item.text)
+    .slice(0, 12);
+
+  return {
+    ...widget,
+    title: String(widget.title || 'Задачи на стрим').trim() || 'Задачи на стрим',
+    subtitle: String(widget.subtitle || 'План на эфир').trim() || 'План на эфир',
+    footer: String(widget.footer || 'Live overlay').trim() || 'Live overlay',
+    skin: ['cities', 'farming-simulator-25', 'mir-korabley'].includes(widget.skin) ? widget.skin : 'farming-simulator-25',
+    taskItems: taskItems.length
+      ? taskItems
+      : [
+          { id: 'task-1', text: 'Задача 1', done: false },
+          { id: 'task-2', text: 'Задача 2', done: false },
+          { id: 'task-3', text: 'Задача 3', done: false },
+        ],
+  };
+}
+
+function normalizeWidgetCoord(value, fallback = 0) {
+  const num = Number(value ?? fallback);
+  return Number.isFinite(num) ? Math.round(num * 100) / 100 : fallback;
+}
+
+function normalizeWidgetHeight(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.round(num * 100) / 100 : null;
+}
+
+function normalizeStreamWidget(widget = {}) {
+  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'countdown', 'texts', 'tasks', 'custom']);
+  const type = knownTypes.has(widget.type) ? widget.type : 'goal';
+  const id = String(widget.id || `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const minWidgetWidth = ['countdown', 'texts'].includes(type) ? 5 : 14;
+  const height = normalizeWidgetHeight(widget.height);
+  const base = {
+    id,
+    type,
+    title: String(widget.title || widgetTitleByType(type)).trim() || widgetTitleByType(type),
+    enabled: widget.enabled !== false,
+    x: normalizeWidgetCoord(widget.x, defaultWidgetPosition(type).x),
+    y: normalizeWidgetCoord(widget.y, defaultWidgetPosition(type).y),
+    width: Math.max(Number(widget.width ?? defaultWidgetPosition(type).width), minWidgetWidth),
+    createdAt: widget.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (height != null) {
+    base.height = height;
+  }
+
+  const widgetSource = { ...widget };
+  if (height != null) {
+    widgetSource.height = height;
+  } else {
+    delete widgetSource.height;
+  }
+
+  if (type === 'goal') {
+    return {
+      ...base,
+      current: Math.max(Number(widget.current || 0), 0),
+      target: Math.max(Number(widget.target || 10000), 1),
+      currency: String(widget.currency || 'RUB').trim() || 'RUB',
+    };
+  }
+
+  if (type === 'countdown') {
+    return normalizeCountdownWidget({
+      ...base,
+      ...widgetSource,
+      id: base.id,
+      type: 'countdown',
+      title: String(widget.title || 'До конца стрима').trim() || 'До конца стрима',
+      createdAt: widget.createdAt || base.createdAt,
+    });
+  }
+
+  if (type === 'texts') {
+    return normalizeTextsWidget({
+      ...base,
+      ...widgetSource,
+      id: base.id,
+      type: 'texts',
+      title: String(widget.title || 'Тексты').trim() || 'Тексты',
+      createdAt: widget.createdAt || base.createdAt,
+    });
+  }
+
+  if (type === 'tasks') {
+    return normalizeTasksWidget({
+      ...base,
+      ...widgetSource,
+      id: base.id,
+      type: 'tasks',
+      title: String(widget.title || 'Задачи на стрим').trim() || 'Задачи на стрим',
+      createdAt: widget.createdAt || base.createdAt,
+    });
+  }
+
+  return base;
+}
+
+function getCountdownRemainingSeconds(widget = {}) {
+  if (widget.status === 'running' && widget.endsAt) {
+    return Math.max(Math.ceil((new Date(widget.endsAt).getTime() - Date.now()) / 1000), 0);
+  }
+
+  if (widget.status === 'finished') {
+    return 0;
+  }
+
+  return Math.max(Number(widget.remainingSeconds || 0), 0);
+}
+
+function parseCountdownEndAt(value = '') {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function normalizeCountdownWidget(widget = {}) {
+  const setupMode = widget.setupMode === 'datetime' ? 'datetime' : 'duration';
+  const status = ['running', 'paused', 'finished'].includes(widget.status) ? widget.status : 'paused';
+  let remainingSeconds = Math.max(Number(widget.remainingSeconds ?? DEFAULT_COUNTDOWN_SECONDS), 0);
+  const totalSeconds = Math.max(Number(widget.totalSeconds || remainingSeconds || DEFAULT_COUNTDOWN_SECONDS), 1);
+  let endsAt = String(widget.endsAt || '').trim();
+  let targetEndsAt = setupMode === 'datetime' ? String(widget.targetEndsAt || endsAt || '').trim() : '';
+
+  if (status === 'running') {
+    if (setupMode === 'datetime' && targetEndsAt) {
+      endsAt = targetEndsAt;
+    } else if (!endsAt || Number.isNaN(new Date(endsAt).getTime())) {
+      endsAt = new Date(Date.now() + remainingSeconds * 1000).toISOString();
+    }
+
+    const liveRemaining = getCountdownRemainingSeconds({ status: 'running', endsAt });
+    return {
+      ...widget,
+      setupMode,
+      targetEndsAt: setupMode === 'datetime' ? endsAt : '',
+      status: liveRemaining > 0 ? 'running' : 'finished',
+      endsAt: liveRemaining > 0 ? endsAt : '',
+      remainingSeconds: liveRemaining > 0 ? liveRemaining : 0,
+      totalSeconds,
+    };
+  }
+
+  if (setupMode === 'datetime' && targetEndsAt && status === 'paused') {
+    const targetRemaining = Math.max(Math.ceil((new Date(targetEndsAt).getTime() - Date.now()) / 1000), 0);
+    if (targetRemaining > 0) {
+      remainingSeconds = targetRemaining;
+    }
+  }
+
+  return {
+    ...widget,
+    setupMode,
+    targetEndsAt,
+    status,
+    endsAt: '',
+    remainingSeconds: status === 'finished' ? 0 : remainingSeconds,
+    totalSeconds,
+  };
+}
+
+function updateCountdownWidget(id, patch = {}) {
+  const widgetId = String(id || patch.id || '');
+  const current = streamWidgets.find((item) => item.id === widgetId && item.type === 'countdown');
+  if (!current) {
+    throw new Error('Виджет таймера не найден.');
+  }
+
+  return updateStreamWidget(widgetId, normalizeCountdownWidget({ ...current, ...patch, id: widgetId }));
+}
+
+function adjustCountdownWidget(id, deltaSeconds = 0) {
+  const widget = streamWidgets.find((item) => item.id === id && item.type === 'countdown');
+  if (!widget) {
+    throw new Error('Виджет таймера не найден.');
+  }
+
+  const delta = Number(deltaSeconds || 0);
+
+  if (widget.setupMode === 'datetime') {
+    const savedTargetMs = widget.targetEndsAt || widget.endsAt
+      ? new Date(widget.targetEndsAt || widget.endsAt).getTime()
+      : NaN;
+    const baseTargetMs = Number.isFinite(savedTargetMs) && savedTargetMs > Date.now()
+      ? savedTargetMs
+      : Date.now() + getCountdownRemainingSeconds(widget) * 1000;
+    const nextTargetMs = baseTargetMs + delta * 1000;
+    const nextRemaining = Math.max(Math.ceil((nextTargetMs - Date.now()) / 1000), 0);
+    const nextTargetIso = new Date(nextTargetMs).toISOString();
+
+    return updateCountdownWidget(id, {
+      enabled: true,
+      setupMode: 'datetime',
+      targetEndsAt: nextTargetIso,
+      status: nextRemaining > 0 ? (widget.status === 'finished' ? 'paused' : widget.status) : 'finished',
+      endsAt: widget.status === 'running' && nextRemaining > 0 ? nextTargetIso : '',
+      remainingSeconds: nextRemaining,
+      totalSeconds: Math.max(Number(widget.totalSeconds || nextRemaining), nextRemaining, 1),
+    });
+  }
+
+  const nextRemaining = Math.max(getCountdownRemainingSeconds(widget) + delta, 0);
+  const nextTotal = Math.max(Number(widget.totalSeconds || nextRemaining), nextRemaining, 1);
+
+  if (widget.status === 'running') {
+    return updateCountdownWidget(id, {
+      enabled: true,
+      setupMode: 'duration',
+      targetEndsAt: '',
+      status: nextRemaining > 0 ? 'running' : 'finished',
+      endsAt: nextRemaining > 0 ? new Date(Date.now() + nextRemaining * 1000).toISOString() : '',
+      remainingSeconds: nextRemaining,
+      totalSeconds: nextTotal,
+    });
+  }
+
+  return updateCountdownWidget(id, {
+    enabled: true,
+    setupMode: 'duration',
+    targetEndsAt: '',
+    status: nextRemaining > 0 ? widget.status : 'finished',
+    remainingSeconds: nextRemaining,
+    totalSeconds: nextTotal,
+  });
+}
+
+function setCountdownWidgetTime(id, payload = {}) {
+  const widget = streamWidgets.find((item) => item.id === id && item.type === 'countdown');
+  if (!widget) {
+    throw new Error('Виджет таймера не найден.');
+  }
+
+  const mode = payload.mode === 'datetime' ? 'datetime' : 'duration';
+
+  if (mode === 'datetime') {
+    const targetDate = parseCountdownEndAt(payload.endAt || payload.targetEndsAt);
+    if (!targetDate) {
+      throw new Error('Укажите корректные дату и время окончания.');
+    }
+
+    const remaining = Math.max(Math.ceil((targetDate.getTime() - Date.now()) / 1000), 0);
+    if (remaining <= 0) {
+      throw new Error('Время окончания должно быть в будущем.');
+    }
+
+    const targetEndsAt = targetDate.toISOString();
+    const patch = {
+      enabled: true,
+      setupMode: 'datetime',
+      targetEndsAt,
+      remainingSeconds: remaining,
+      totalSeconds: remaining,
+      status: widget.status === 'finished' ? 'paused' : widget.status,
+    };
+
+    if (widget.status === 'running') {
+      patch.endsAt = targetEndsAt;
+    }
+
+    if (payload.title) {
+      patch.title = String(payload.title).trim();
+    }
+
+    return updateCountdownWidget(id, patch);
+  }
+
+  const hours = Math.max(Number(payload.hours || 0), 0);
+  const minutes = Math.min(Math.max(Number(payload.minutes || 0), 0), 59);
+  const seconds = Math.min(Math.max(Number(payload.seconds || 0), 0), 59);
+  const total = hours * 3600 + minutes * 60 + seconds;
+
+  if (total <= 0) {
+    throw new Error('Укажите длительность больше нуля.');
+  }
+
+  const patch = {
+    enabled: true,
+    setupMode: 'duration',
+    targetEndsAt: '',
+    remainingSeconds: total,
+    totalSeconds: total,
+    status: widget.status === 'finished' ? 'paused' : widget.status,
+  };
+
+  if (widget.status === 'running') {
+    patch.endsAt = new Date(Date.now() + total * 1000).toISOString();
+  }
+
+  if (payload.title) {
+    patch.title = String(payload.title).trim();
+  }
+
+  return updateCountdownWidget(id, patch);
+}
+
+function startCountdownWidget(id) {
+  const widget = streamWidgets.find((item) => item.id === id && item.type === 'countdown');
+  if (!widget) {
+    throw new Error('Виджет таймера не найден.');
+  }
+
+  let endsAtIso = '';
+  let remainingSeconds = 0;
+  let targetEndsAt = '';
+
+  if (widget.setupMode === 'datetime' && (widget.targetEndsAt || widget.endsAt)) {
+    targetEndsAt = widget.targetEndsAt || widget.endsAt;
+    const targetMs = new Date(targetEndsAt).getTime();
+    remainingSeconds = Math.max(Math.ceil((targetMs - Date.now()) / 1000), 0);
+    if (remainingSeconds <= 0) {
+      throw new Error('Время окончания уже прошло. Задайте новое.');
+    }
+    endsAtIso = new Date(targetMs).toISOString();
+  } else {
+    remainingSeconds = Math.max(getCountdownRemainingSeconds(widget), 1);
+    endsAtIso = new Date(Date.now() + remainingSeconds * 1000).toISOString();
+  }
+
+  const result = updateCountdownWidget(id, {
+    enabled: true,
+    status: 'running',
+    endsAt: endsAtIso,
+    remainingSeconds,
+    totalSeconds: Math.max(Number(widget.totalSeconds || remainingSeconds), remainingSeconds),
+    setupMode: widget.setupMode === 'datetime' ? 'datetime' : 'duration',
+    targetEndsAt: widget.setupMode === 'datetime' ? endsAtIso : '',
+  });
+  ensureCountdownTicking();
+  return result;
+}
+
+function pauseCountdownWidget(id) {
+  const widget = streamWidgets.find((item) => item.id === id && item.type === 'countdown');
+  if (!widget) {
+    throw new Error('Виджет таймера не найден.');
+  }
+
+  const remainingSeconds = getCountdownRemainingSeconds(widget);
+
+  return updateCountdownWidget(id, {
+    status: 'paused',
+    endsAt: '',
+    remainingSeconds,
+    targetEndsAt:
+      widget.setupMode === 'datetime' && remainingSeconds > 0
+        ? new Date(Date.now() + remainingSeconds * 1000).toISOString()
+        : widget.targetEndsAt || '',
+  });
+}
+
+function resumeCountdownWidget(id) {
+  return startCountdownWidget(id);
+}
+
+function resetCountdownWidget(id, seconds = DEFAULT_COUNTDOWN_SECONDS) {
+  const total = Math.max(Number(seconds || DEFAULT_COUNTDOWN_SECONDS), 1);
+  return updateCountdownWidget(id, {
+    enabled: true,
+    status: 'paused',
+    endsAt: '',
+    remainingSeconds: total,
+    totalSeconds: total,
+    setupMode: 'duration',
+    targetEndsAt: '',
+  });
+}
+
+function tickCountdownWidgets() {
+  let changed = false;
+
+  streamWidgets = streamWidgets.map((widget) => {
+    if (widget.type !== 'countdown' || widget.status !== 'running' || !widget.endsAt) {
+      return widget;
+    }
+
+    const remaining = getCountdownRemainingSeconds(widget);
+    if (remaining > 0) {
+      return normalizeCountdownWidget({
+        ...widget,
+        remainingSeconds: remaining,
+      });
+    }
+
+    changed = true;
+    return normalizeCountdownWidget({
+      ...widget,
+      status: 'finished',
+      endsAt: '',
+      remainingSeconds: 0,
+    });
+  });
+
+  if (changed) {
+    saveStreamWidgets(streamWidgets);
+    broadcastStreamWidgets();
+  }
+}
+
+function ensureCountdownTicking() {
+  const hasRunningCountdown = streamWidgets.some((widget) => widget.type === 'countdown' && widget.status === 'running');
+  if (!hasRunningCountdown) {
+    if (countdownTickTimer) {
+      clearInterval(countdownTickTimer);
+      countdownTickTimer = null;
+    }
+    return;
+  }
+
+  if (countdownTickTimer) {
+    return;
+  }
+
+  countdownTickTimer = setInterval(() => {
+    tickCountdownWidgets();
+    const stillRunning = streamWidgets.some((widget) => widget.type === 'countdown' && widget.status === 'running');
+    if (!stillRunning && countdownTickTimer) {
+      clearInterval(countdownTickTimer);
+      countdownTickTimer = null;
+    }
+  }, 1000);
+}
+
+function widgetTitleByType(type) {
+  return {
+    alerts: 'Оповещения',
+    chat: 'Чат на экране',
+    music: 'Музыка',
+    goal: 'Сбор',
+    poll: 'Голосование',
+    countdown: 'Обратный отсчёт',
+    texts: 'Тексты',
+    tasks: 'Задачи на стрим',
+    custom: 'Кастомный виджет',
+  }[type] || 'Виджет';
+}
+
+function defaultWidgetPosition(type) {
+  return {
+    alerts: { x: 34, y: 34, width: 42 },
+    chat: { x: 4, y: 48, width: 30 },
+    music: { x: 68, y: 10, width: 28 },
+    goal: { x: 18, y: 6, width: 64 },
+    poll: { x: 60, y: 56, width: 34 },
+    countdown: { x: 72, y: 4, width: 18 },
+    texts: { x: 8, y: 18, width: 44 },
+    tasks: { x: 4, y: 8, width: 26 },
+    custom: { x: 12, y: 18, width: 32 },
+  }[type] || { x: 10, y: 10, width: 32 };
+}
+
+function getStreamWidgetsPayload() {
+  return {
+    items: streamWidgets,
+    poll: activePoll,
+    urls: {
+      stream: `http://localhost:${SERVER_PORT}/widgets/stream.html`,
+      alerts: `http://localhost:${SERVER_PORT}/widgets/alerts.html`,
+      chat: `http://localhost:${SERVER_PORT}/widgets/chat.html`,
+      goal: `http://localhost:${SERVER_PORT}/widgets/goal.html`,
+      music: `http://localhost:${SERVER_PORT}/widgets/music.html`,
+      countdown: `http://localhost:${SERVER_PORT}/widgets/countdown.html`,
+      texts: `http://localhost:${SERVER_PORT}/widgets/texts.html`,
+      tasks: `http://localhost:${SERVER_PORT}/widgets/tasks.html`,
+    },
+  };
+}
+
+function broadcastStreamWidgets() {
+  const payload = getStreamWidgetsPayload();
+  mainWindow?.webContents.send('widgets:state', payload);
+  chatWindow?.webContents.send('widgets:state', payload);
+  socketServer?.emit('widgets:state', payload);
+}
+
+function createStreamWidget(payload = {}) {
+  const widget = normalizeStreamWidget(payload);
+  streamWidgets.unshift(widget);
+  streamWidgets = mergeDefaultStreamWidgets(streamWidgets);
+  saveStreamWidgets(streamWidgets);
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function updateStreamWidget(id, payload = {}) {
+  const widgetId = String(id || payload.id || '');
+  streamWidgets = streamWidgets.map((widget) => {
+    if (widget.id !== widgetId) {
+      return widget;
+    }
+
+    const merged = { ...widget, ...payload, id: widget.id, createdAt: widget.createdAt };
+    if ('height' in payload && normalizeWidgetHeight(payload.height) == null) {
+      delete merged.height;
+    }
+
+    return normalizeStreamWidget(merged);
+  });
+  streamWidgets = mergeDefaultStreamWidgets(streamWidgets);
+  saveStreamWidgets(streamWidgets);
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function deleteStreamWidget(id) {
+  const widgetId = String(id || '');
+  streamWidgets = streamWidgets.filter((widget) => widget.id !== widgetId);
+  saveStreamWidgets(streamWidgets);
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function normalizePoll(payload = {}) {
+  const options = (Array.isArray(payload.options) ? payload.options : [])
+    .map((option) => String(option || '').trim())
+    .filter(Boolean)
+    .slice(0, 10)
+    .map((text, index) => ({
+      id: String(index + 1),
+      index: index + 1,
+      text,
+      votes: 0,
+    }));
+
+  if (options.length < 2) {
+    throw new Error('Для голосования нужно минимум два варианта.');
+  }
+
+  const durationSeconds = Math.max(Number(payload.durationSeconds || 0), 0);
+  const startedAt = new Date().toISOString();
+
+  return {
+    id: `poll-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title: String(payload.title || 'Голосование').trim() || 'Голосование',
+    options,
+    voters: {},
+    status: 'running',
+    visible: payload.visible !== false,
+    startedAt,
+    durationSeconds,
+    endsAt: durationSeconds > 0 ? new Date(Date.now() + durationSeconds * 1000).toISOString() : '',
+    finishedAt: '',
+  };
+}
+
+function startPoll(payload = {}) {
+  activePoll = normalizePoll(payload);
+  schedulePollFinish();
+  broadcastStreamWidgets();
+  return activePoll;
+}
+
+function schedulePollFinish() {
+  clearTimeout(pollFinishTimer);
+  pollFinishTimer = null;
+
+  if (!activePoll?.endsAt || activePoll.status !== 'running') {
+    return;
+  }
+
+  const delay = Math.max(new Date(activePoll.endsAt).getTime() - Date.now(), 0);
+  pollFinishTimer = setTimeout(() => finishPoll(), delay);
+}
+
+function finishPoll() {
+  if (!activePoll) {
+    return null;
+  }
+
+  clearTimeout(pollFinishTimer);
+  pollFinishTimer = null;
+  activePoll = {
+    ...activePoll,
+    status: 'finished',
+    finishedAt: new Date().toISOString(),
+  };
+  broadcastStreamWidgets();
+  return activePoll;
+}
+
+function hidePoll() {
+  if (!activePoll) {
+    return getStreamWidgetsPayload();
+  }
+
+  activePoll = {
+    ...activePoll,
+    visible: false,
+  };
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function showPoll() {
+  if (!activePoll) {
+    return getStreamWidgetsPayload();
+  }
+
+  activePoll = {
+    ...activePoll,
+    visible: true,
+  };
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function clearPoll() {
+  clearTimeout(pollFinishTimer);
+  pollFinishTimer = null;
+  activePoll = null;
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function registerPollVote(message = {}) {
+  if (!activePoll || activePoll.status !== 'running') {
+    return;
+  }
+
+  const text = String(message.text || '').trim();
+  const match = text.match(/^(\d{1,2})$/);
+  if (!match) {
+    return;
+  }
+
+  const optionIndex = Number(match[1]);
+  const option = activePoll.options.find((item) => item.index === optionIndex);
+  if (!option) {
+    return;
+  }
+
+  const voterKey = `${message.platform || 'chat'}:${message.user || 'guest'}`.toLowerCase();
+  const previousId = activePoll.voters[voterKey];
+  if (previousId) {
+    return;
+  }
+
+  const options = activePoll.options.map((item) => {
+    if (item.id === option.id) {
+      return { ...item, votes: Number(item.votes || 0) + 1 };
+    }
+    return item;
+  });
+
+  activePoll = {
+    ...activePoll,
+    options,
+    voters: {
+      ...activePoll.voters,
+      [voterKey]: option.id,
+    },
+  };
+  broadcastStreamWidgets();
+}
+
+function loadWindowState() {
+  if (!fs.existsSync(windowStateFile)) {
+    windowState = createDefaultWindowState();
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(fs.readFileSync(windowStateFile, 'utf8'));
+    windowState = {
+      ...createDefaultWindowState(),
+      ...saved,
+      chatWindow: {
+        ...createDefaultWindowState().chatWindow,
+        ...(saved?.chatWindow || {}),
+      },
+      backoffice: {
+        ...createDefaultWindowState().backoffice,
+        ...(saved?.backoffice || {}),
+      },
+    };
+  } catch (error) {
+    console.error(`Не удалось прочитать размеры окон: ${error.message}`);
+    windowState = createDefaultWindowState();
+  }
+}
+
+function saveWindowState() {
+  if (!windowStateFile) {
+    return;
+  }
+
+  try {
+    fs.writeFileSync(windowStateFile, JSON.stringify(windowState, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить размеры окон: ${error.message}`);
+  }
+}
+
+function loadChatUiSettings() {
+  if (!fs.existsSync(chatUiSettingsFile)) {
+    chatUiSettings = createDefaultChatUiSettings();
+    return;
+  }
+
+  try {
+    chatUiSettings = normalizeChatUiSettings(JSON.parse(fs.readFileSync(chatUiSettingsFile, 'utf8')));
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки чата: ${error.message}`);
+    chatUiSettings = createDefaultChatUiSettings();
+  }
+}
+
+function saveChatUiSettings(settings = chatUiSettings) {
+  chatUiSettings = normalizeChatUiSettings({
+    ...chatUiSettings,
+    ...settings,
+  });
+
+  if (!chatUiSettingsFile) {
+    return chatUiSettings;
+  }
+
+  try {
+    fs.writeFileSync(chatUiSettingsFile, JSON.stringify(chatUiSettings, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить настройки чата: ${error.message}`);
+  }
+
+  broadcastChatUiSettings();
+  return chatUiSettings;
+}
+
+function normalizeChatUiSettings(settings = {}) {
+  const defaults = createDefaultChatUiSettings();
+  const direction = ['bottom-up', 'top-down'].includes(settings.direction) ? settings.direction : defaults.direction;
+  return {
+    fontSize: Math.min(Math.max(Number(settings.fontSize || defaults.fontSize), 12), 64),
+    gap: Math.min(Math.max(Number(settings.gap ?? defaults.gap), 0), 20),
+    direction,
+  };
+}
+
+function getSavedWindowBounds(name, defaults) {
+  const saved = windowState[name] || {};
+  const bounds = {
+    width: Number(saved.width || defaults.width),
+    height: Number(saved.height || defaults.height),
+  };
+
+  if (Number.isFinite(saved.x)) {
+    bounds.x = Number(saved.x);
+  }
+
+  if (Number.isFinite(saved.y)) {
+    bounds.y = Number(saved.y);
+  }
+
+  return bounds;
+}
+
+function trackWindowState(win, name) {
+  let timer = null;
+
+  const persist = () => {
+    if (win.isDestroyed()) {
+      return;
+    }
+
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (win.isDestroyed()) {
+        return;
+      }
+
+      const bounds = win.getBounds();
+      windowState[name] = {
+        width: bounds.width,
+        height: bounds.height,
+        x: bounds.x,
+        y: bounds.y,
+        isMaximized: win.isMaximized(),
+      };
+      saveWindowState();
+    }, 300);
+  };
+
+  win.on('resize', persist);
+  win.on('move', persist);
+  win.on('close', () => {
+    clearTimeout(timer);
+
+    if (win.isDestroyed()) {
+      return;
+    }
+
+    const bounds = win.getBounds();
+    windowState[name] = {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      isMaximized: win.isMaximized(),
+    };
+    saveWindowState();
+  });
+
+  if (windowState[name]?.isMaximized) {
+    win.maximize();
+  }
+}
+
+function loadDonationAlertsToken() {
+  if (!fs.existsSync(donationAlertsSettingsFile)) {
+    return;
+  }
+
+  try {
+    const settings = JSON.parse(fs.readFileSync(donationAlertsSettingsFile, 'utf8'));
+    donationAlertsToken = String(settings.token || '').trim();
+    donationAlertsRefreshToken = String(settings.refreshToken || '').trim();
+    donationAlertsClientId = String(settings.clientId || '').trim();
+    donationAlertsClientSecret = String(settings.clientSecret || donationAlertsClientSecret || '').trim();
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки DonationAlerts: ${error.message}`);
+  }
+}
+
+function saveDonationAlertsSettings() {
+  if (!donationAlertsSettingsFile) {
+    return;
+  }
+
+  try {
+    fs.writeFileSync(
+      donationAlertsSettingsFile,
+      JSON.stringify(
+        {
+          token: donationAlertsToken,
+          refreshToken: donationAlertsRefreshToken,
+          clientId: donationAlertsClientId,
+          clientSecret: donationAlertsClientSecret,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (error) {
+    console.error(`Не удалось сохранить настройки DonationAlerts: ${error.message}`);
+  }
+}
+
+function createDefaultAlertSettings() {
+  return {
+    displaySeconds: 8,
+    systemAlerts: {
+      subscriber: {
+        id: 'subscriber-welcome',
+        enabled: true,
+        type: 'subscriber',
+        title: 'Добро пожаловать!',
+        image: '',
+        sound: '',
+        volume: 100,
+      },
+      subscriptionRenewal: {
+        id: 'subscription-renewal',
+        enabled: true,
+        type: 'subscriptionRenewal',
+        title: 'Продление подписки',
+        image: '',
+        sound: '',
+        volume: 100,
+      },
+      raid: {
+        id: 'raid-welcome',
+        enabled: true,
+        type: 'raid',
+        title: 'Рейд!',
+        image: '',
+        sound: '',
+        volume: 100,
+      },
+      firstMessage: {
+        id: 'first-message-welcome',
+        enabled: false,
+        type: 'firstMessage',
+        title: 'Колокольчик',
+        image: FIRST_MESSAGE_BELL_IMAGE,
+        sound: '',
+        volume: 100,
+      },
+      portal: {
+        id: 'portal-welcome',
+        enabled: true,
+        type: 'portal',
+        title: 'Гость из портала!',
+        image: '',
+        sound: '',
+        volume: 100,
+      },
+    },
+    rules: [
+      {
+        id: 'base-donation-100-100000',
+        enabled: true,
+        type: 'interval',
+        title: 'Базовый донат',
+        min: 100,
+        max: 100000,
+        image: '',
+        sound: '',
+        volume: 100,
+      },
+    ],
+  };
+}
+
+function loadAlertSettings() {
+  if (!fs.existsSync(alertSettingsFile)) {
+    saveAlertSettings(alertSettings);
+    return;
+  }
+
+  try {
+    alertSettings = migrateAlertSettings(normalizeAlertSettings(JSON.parse(fs.readFileSync(alertSettingsFile, 'utf8'))));
+    saveAlertSettings(alertSettings);
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки алертов: ${error.message}`);
+  }
+}
+
+function saveAlertSettings(settings) {
+  alertSettings = normalizeAlertSettings(settings);
+
+  if (!alertSettingsFile) {
+    return alertSettings;
+  }
+
+  try {
+    fs.writeFileSync(alertSettingsFile, JSON.stringify(alertSettings, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить настройки алертов: ${error.message}`);
+  }
+
+  return alertSettings;
+}
+
+async function pickAlertAsset(kind = 'image') {
+  const isSound = kind === 'sound';
+  const result = await dialog.showOpenDialog(mainWindow || chatWindow || undefined, {
+    title: isSound ? 'Выберите мелодию алерта' : 'Выберите картинку алерта',
+    properties: ['openFile'],
+    filters: isSound
+      ? [{ name: 'Аудио', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac'] }]
+      : [{ name: 'Картинки', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return { canceled: true, url: '' };
+  }
+
+  const sourcePath = result.filePaths[0];
+  const extension = path.extname(sourcePath).toLowerCase() || (isSound ? '.mp3' : '.png');
+  const safeName = `${kind}-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`;
+  const relativePath = path.join('alerts', safeName);
+  const targetPath = path.join(__dirname, 'assets', relativePath);
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+
+  return {
+    canceled: false,
+    url: getAssetPublicUrl(relativePath),
+    name: path.basename(sourcePath),
+  };
+}
+
+function normalizeAlertSettings(settings = {}) {
+  const defaults = createDefaultAlertSettings();
+  const rules = Array.isArray(settings.rules) ? settings.rules : defaults.rules;
+  const systemAlerts = settings.systemAlerts || {};
+
+  return {
+    displaySeconds: Math.max(Number(settings.displaySeconds || defaults.displaySeconds), 3),
+    systemAlerts: {
+      subscriber: normalizeSystemAlertRule(systemAlerts.subscriber, defaults.systemAlerts.subscriber),
+      subscriptionRenewal: normalizeSystemAlertRule(systemAlerts.subscriptionRenewal, defaults.systemAlerts.subscriptionRenewal),
+      raid: normalizeSystemAlertRule(systemAlerts.raid, defaults.systemAlerts.raid),
+      firstMessage: normalizeSystemAlertRule(systemAlerts.firstMessage, defaults.systemAlerts.firstMessage),
+      portal: normalizeSystemAlertRule(systemAlerts.portal, defaults.systemAlerts.portal),
+    },
+    rules: rules.map((rule, index) => ({
+      id: String(rule.id || `rule-${Date.now()}-${index}`),
+      enabled: rule.enabled !== false,
+      type: ['amount', 'nickname', 'interval'].includes(rule.type) ? rule.type : 'interval',
+      title: String(rule.title || 'Алерт'),
+      nickname: String(rule.nickname || '').trim(),
+      amount: rule.amount === '' ? '' : Number(rule.amount || 0),
+      min: rule.min === '' ? '' : Number(rule.min || 0),
+      max: rule.max === '' ? '' : Number(rule.max || 0),
+      image: String(rule.image || '').trim(),
+      sound: String(rule.sound || '').trim(),
+      volume: Math.min(Math.max(Number(rule.volume || 100), 0), 100),
+    })),
+  };
+}
+
+function normalizeSystemAlertRule(rule = {}, fallback = {}) {
+  return {
+    id: String(rule.id || fallback.id),
+    enabled: rule.enabled !== false,
+    type: String(fallback.type || rule.type || 'system'),
+    title: String(rule.title || fallback.title || 'Алерт'),
+    image: String(rule.image || fallback.image || '').trim(),
+    sound: String(rule.sound || fallback.sound || '').trim(),
+    volume: Math.min(Math.max(Number(rule.volume || fallback.volume || 100), 0), 100),
+  };
+}
+
+function migrateAlertSettings(settings = {}) {
+  const oldDefaultIds = new Set(['amount-666', 'music-link', 'interval-100-499', 'interval-500-1000', 'interval-1000-plus']);
+  const customRules = (Array.isArray(settings.rules) ? settings.rules : []).filter((rule) => {
+    return rule.type !== 'music' && !oldDefaultIds.has(rule.id);
+  });
+  const hasBaseRule = customRules.some((rule) => rule.id === 'base-donation-100-100000');
+
+  return {
+    displaySeconds: Math.max(Number(settings.displaySeconds || 8), 3),
+    systemAlerts: {
+      ...normalizeAlertSettings(settings).systemAlerts,
+      firstMessage: {
+        ...normalizeAlertSettings(settings).systemAlerts.firstMessage,
+        enabled: false,
+      },
+    },
+    rules: hasBaseRule ? customRules : [createDefaultAlertSettings().rules[0], ...customRules],
+  };
+}
+
+function getChatDayKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) {
+    return getChatDayKey(new Date());
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getChatUserKey(message = {}) {
+  const platform = String(message.platform || 'chat').trim().toLowerCase();
+  const user = String(message.user || 'guest').trim().toLowerCase();
+  return `${platform}:${user}`;
+}
+
+function refreshFirstMessageGreetingUsers() {
+  firstMessageGreetingDay = getChatDayKey();
+  firstMessageGreetingUsers = new Set(
+    chatHistory
+      .filter((message) => getChatDayKey(message.createdAt) === firstMessageGreetingDay)
+      .map(getChatUserKey),
+  );
+}
+
+function loadChatHistory() {
+  if (!fs.existsSync(chatHistoryFile)) {
+    chatHistory = [];
+    refreshFirstMessageGreetingUsers();
+    return;
+  }
+
+  const lines = fs.readFileSync(chatHistoryFile, 'utf8').split(/\r?\n/).filter(Boolean);
+  chatHistory = lines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  chatStats.messages = chatHistory.length;
+  chatStats.users = new Set(chatHistory.map((message) => `${message.platform}:${message.user}`.toLowerCase()));
+  refreshFirstMessageGreetingUsers();
+
+  if (chatHistory.length > CHAT_HISTORY_MEMORY_LIMIT) {
+    chatHistory = chatHistory.slice(-CHAT_HISTORY_MEMORY_LIMIT);
+  }
+}
+
+const CHAT_HISTORY_MEMORY_LIMIT = 2000;
+
+function saveChatMessage(message) {
+  chatHistory.push(message);
+  if (chatHistory.length > CHAT_HISTORY_MEMORY_LIMIT) {
+    chatHistory.splice(0, chatHistory.length - CHAT_HISTORY_MEMORY_LIMIT);
+  }
+  fs.appendFile(chatHistoryFile, `${JSON.stringify(message)}\n`, (error) => {
+    if (error) {
+      console.error(`Не удалось сохранить сообщение чата: ${error.message}`);
+    }
+  });
+}
+
+function getRecentChatMessages(limit = 30) {
+  return chatHistory.slice(-limit).reverse();
+}
+
+function getAssetPublicUrl(relativePath) {
+  return `http://localhost:${SERVER_PORT}/assets/${relativePath.replaceAll('\\', '/')}`;
+}
+
+function getPlatformIconUrl(platform) {
+  const safePlatform = String(platform || 'demo').toLowerCase();
+  const knownPlatforms = new Set(['twitch', 'vk', 'youtube', 'rutube', 'demo']);
+  const iconName = knownPlatforms.has(safePlatform) ? safePlatform : 'demo';
+  return getAssetPublicUrl(`chat/platforms/${iconName}.svg`);
+}
+
+async function cacheRemoteAsset(url, group = 'emotes') {
+  if (!url) {
+    return '';
+  }
+
+  try {
+    const parsedUrl = new URL(url.startsWith('//') ? `https:${url}` : url);
+    const extension = path.extname(parsedUrl.pathname).split('?')[0] || '.png';
+    const safeName = Buffer.from(parsedUrl.href).toString('base64url').slice(0, 80);
+    const relativePath = path.join('chat', group, `${safeName}${extension}`);
+    const filePath = path.join(__dirname, 'assets', relativePath);
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+    if (!fs.existsSync(filePath)) {
+      const response = await fetch(parsedUrl.href);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(filePath, buffer);
+    }
+
+    return getAssetPublicUrl(relativePath);
+  } catch (error) {
+    console.error(`Не удалось сохранить ассет чата: ${error.message}`);
+    return url;
+  }
+}
+
+function normalizeMessageParts(text = '', parts = []) {
+  if (parts.length) {
+    return parts;
+  }
+
+  return [{ type: 'text', text: String(text) }];
+}
+
+function normalizeTtsText(value = '') {
+  return String(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 700);
+}
+
+function escapeSsmlText(value = '') {
+  return normalizeTtsText(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
+
+function getEdgeTtsCachePath(text, options = {}) {
+  const cacheDir = path.join(__dirname, 'assets', 'tts');
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const hash = crypto
+    .createHash('sha1')
+    .update(JSON.stringify({ text, ...options }))
+    .digest('hex');
+
+  return path.join(cacheDir, `${hash}.mp3`);
+}
+
+async function getEdgeTtsAudioPath(text, options = {}) {
+  const normalizedText = normalizeTtsText(text);
+  if (!normalizedText) {
+    throw new Error('text is required');
+  }
+
+  const ttsOptions = {
+    voice: options.voice || EDGE_TTS_DEFAULT_VOICE,
+    lang: options.lang || 'ru-RU',
+    outputFormat: options.outputFormat || 'audio-24khz-48kbitrate-mono-mp3',
+    rate: options.rate || '+0%',
+    volume: options.volume || '+0%',
+    pitch: options.pitch || '+0Hz',
+    timeout: 20000,
+  };
+  const filePath = getEdgeTtsCachePath(normalizedText, ttsOptions);
+
+  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+    return filePath;
+  }
+
+  const edgeTts = new EdgeTTS(ttsOptions);
+  await edgeTts.ttsPromise(escapeSsmlText(normalizedText), filePath);
+  return filePath;
+}
+
+function createLocalServer() {
+  const expressApp = express();
+  const widgetsPath = path.join(__dirname, 'widgets');
+  const assetsPath = path.join(__dirname, 'assets');
+
+  expressApp.use(express.json());
+  expressApp.use((request, response, next) => {
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (request.method === 'OPTIONS') {
+      response.sendStatus(204);
+      return;
+    }
+    next();
+  });
+  expressApp.use('/widgets', (request, response, next) => {
+    if (/\.(?:js|css|html)$/.test(request.path)) {
+      response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      response.setHeader('Pragma', 'no-cache');
+      response.setHeader('Expires', '0');
+    }
+    next();
+  });
+  expressApp.use('/widgets', express.static(widgetsPath));
+  expressApp.use('/assets', express.static(assetsPath));
+
+  expressApp.get('/', (_request, response) => {
+    response.redirect('/widgets/remote.html');
+  });
+
+  expressApp.get('/tts/edge', async (request, response) => {
+    try {
+      const filePath = await getEdgeTtsAudioPath(request.query?.text || '', {
+        voice: request.query?.voice,
+        rate: request.query?.rate,
+        volume: request.query?.volume,
+        pitch: request.query?.pitch,
+      });
+
+      response.type('audio/mpeg').sendFile(filePath);
+    } catch (error) {
+      console.error(`Edge TTS error: ${error.message}`);
+      response.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  expressApp.get('/health', (_request, response) => {
+    response.json({
+      ok: true,
+      name: 'TChat',
+      version: app.getVersion(),
+      message: 'Сервер виджетов живёт.',
+      host: SERVER_HOST,
+      port: SERVER_PORT,
+      widgets: {
+        stream: '/widgets/stream.html',
+        alerts: '/widgets/alerts.html',
+        chat: '/widgets/chat.html',
+        goal: '/widgets/goal.html',
+        music: '/widgets/music.html',
+        countdown: '/widgets/countdown.html',
+        texts: '/widgets/texts.html',
+        tasks: '/widgets/tasks.html',
+        remote: '/widgets/remote.html',
+      },
+    });
+  });
+
+  expressApp.get('/chat/status', (_request, response) => {
+    response.json(getChatStatusPayload());
+  });
+
+  // Конфиг для внешнего бота (токены TG/MAX, ключ polza.ai). Доступ только по ключу
+  // из bot-config.json: /config/bot.json?key=... или заголовок X-Config-Key.
+  expressApp.get('/config/bot.json', (request, response) => {
+    const candidate = request.query.key || request.get('x-config-key');
+    if (!isValidBotConfigKey(candidate)) {
+      response.status(403).json({ ok: false, error: 'нужен верный ключ (?key= или X-Config-Key)' });
+      return;
+    }
+    response.json(getBotConfigPayload());
+  });
+
+  expressApp.get('/remote/info', (_request, response) => {
+    response.json({
+      ok: true,
+      name: 'TChat',
+      port: SERVER_PORT,
+      goal: goalState,
+      chat: getChatStatusPayload(),
+      widgets: getStreamWidgetsPayload(),
+      poll: activePoll,
+    });
+  });
+
+  expressApp.post('/remote/goal/update', (request, response) => {
+    const payload = updateGoalState(request.body);
+    response.json({ ok: true, goal: payload });
+  });
+
+  expressApp.post('/remote/goal/add', (request, response) => {
+    const amount = Math.max(Number(request.body?.amount || 0), 0);
+    if (!amount) {
+      response.status(400).json({ ok: false, error: 'Укажите сумму больше нуля.' });
+      return;
+    }
+
+    const payload = updateGoalState({
+      current: Number(goalState.current || 0) + amount,
+    });
+    response.json({ ok: true, goal: payload });
+  });
+
+  expressApp.post('/remote/goal/reset', (_request, response) => {
+    const payload = updateGoalState({ current: 0 });
+    response.json({ ok: true, goal: payload });
+  });
+
+  expressApp.post('/remote/widgets/update', (request, response) => {
+    const id = String(request.body?.id || '');
+    if (!id) {
+      response.status(400).json({ ok: false, error: 'id виджета не задан.' });
+      return;
+    }
+
+    const payload = updateStreamWidget(id, request.body);
+    response.json({ ok: true, ...payload });
+  });
+
+  expressApp.post('/remote/poll/start', (request, response) => {
+    try {
+      const poll = startPoll(request.body);
+      response.json({ ok: true, poll });
+    } catch (error) {
+      response.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  expressApp.post('/remote/poll/finish', (_request, response) => {
+    response.json({ ok: true, poll: finishPoll() });
+  });
+
+  expressApp.post('/remote/poll/hide', (_request, response) => {
+    response.json({ ok: true, ...hidePoll() });
+  });
+
+  expressApp.post('/remote/poll/show', (_request, response) => {
+    response.json({ ok: true, ...showPoll() });
+  });
+
+  expressApp.post('/remote/poll/clear', (_request, response) => {
+    response.json({ ok: true, ...clearPoll() });
+  });
+
+  expressApp.post('/remote/demo/donation', (request, response) => {
+    const item = enqueueDonationAlert({
+      id: `remote-${Date.now()}`,
+      username: request.body?.username || 'Удалённый донат',
+      amount: Number(request.body?.amount || 100),
+      currency: request.body?.currency || 'RUB',
+      message: request.body?.message || 'Донат с удалённой панели',
+      createdAt: new Date().toISOString(),
+      isTest: request.body?.isTest !== false,
+      showInChat: request.body?.showInChat !== false,
+    });
+    response.json({ ok: true, item });
+  });
+
+  expressApp.get(DONATION_ALERTS_REDIRECT_PATH, async (request, response) => {
+    if (request.query?.code) {
+      try {
+        await exchangeDonationAlertsCode(String(request.query.code));
+        response.type('html').send(getDonationAlertsOauthResultPage('Готово. Токен сохранён, синхронизация донатов запущена. Это окно можно закрыть.'));
+      } catch (error) {
+        response.type('html').send(getDonationAlertsOauthResultPage(`Не удалось получить токен DonationAlerts: ${error.message}`));
+      }
+      return;
+    }
+
+    response.type('html').send(getDonationAlertsOauthPage());
+  });
+
+  expressApp.post(`${DONATION_ALERTS_REDIRECT_PATH}/token`, (request, response) => {
+    const state = startDonationAlertsSync(request.body?.token || '');
+    response.json({ ok: Boolean(request.body?.token), state });
+  });
+
+  expressApp.post('/demo/chat', (request, response) => {
+    const payload = normalizeChatMessage(request.body);
+    broadcastChatMessage(payload);
+    response.json({ ok: true, payload });
+  });
+
+  expressApp.post('/demo/donation', (request, response) => {
+    if (!isInternalDemoRequest(request)) {
+      response.status(403).json({ ok: false, error: 'Demo endpoint доступен только из TChat.' });
+      return;
+    }
+
+    const payload = normalizeDonation({ ...request.body, isTest: request.body?.isTest ?? true, showInChat: request.body?.showInChat ?? true });
+    const item = enqueueDonationAlert(payload);
+    response.json({ ok: true, payload, item });
+  });
+
+  expressApp.post('/demo/goal', (request, response) => {
+    const payload = updateGoalState(request.body);
+    response.json({ ok: true, payload });
+  });
+
+  expressApp.post('/demo/music', async (request, response) => {
+    try {
+      const url = String(request.body?.url || '').trim();
+      if (!url) {
+        response.status(400).json({ ok: false, error: 'url is required' });
+        return;
+      }
+
+      await addManualMusicUrl({
+        url,
+        username: request.body?.username || 'Smoke test',
+      });
+      response.json({ ok: true, queue: getMusicQueuePayload() });
+    } catch (error) {
+      response.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  expressApp.post('/demo/music/reset', (request, response) => {
+    if (!isInternalDemoRequest(request)) {
+      response.status(403).json({ ok: false, error: 'Demo endpoint доступен только из TChat.' });
+      return;
+    }
+
+    musicQueue = musicQueue.filter((item) => {
+      const username = String(item.donation?.username || '').trim().toLowerCase();
+      return username !== 'smoke test';
+    });
+    startedMusicIds.clear();
+    broadcastMusicQueue();
+    response.json({ ok: true, queue: getMusicQueuePayload() });
+  });
+
+  expressApp.post('/demo/subscriber', (request, response) => {
+    if (!isInternalDemoRequest(request)) {
+      response.status(403).json({ ok: false, error: 'Demo endpoint доступен только из TChat.' });
+      return;
+    }
+
+    const item = enqueueSubscriberAlert({
+      id: `smoke-sub-${Date.now()}`,
+      platform: request.body?.platform || 'demo',
+      username: request.body?.username || 'SmokeSubscriber',
+      message: request.body?.message || 'подписался на канал',
+      createdAt: new Date().toISOString(),
+      isTest: true,
+    });
+    if (item?.id) {
+      markAlertPlayed(item.id);
+    }
+    response.json({ ok: true, item });
+  });
+
+  expressApp.get('/alerts/state', (_request, response) => {
+    response.json({
+      settings: alertSettings,
+      queue: alertQueue.slice(0, 30),
+    });
+  });
+
+  expressApp.get('/music/state', (_request, response) => {
+    response.json(getMusicQueuePayload());
+  });
+
+  expressApp.get('/goal/state', (_request, response) => {
+    response.json(goalState);
+  });
+
+  expressApp.get('/widgets/state', (_request, response) => {
+    response.json(getStreamWidgetsPayload());
+  });
+
+  expressApp.post('/goal/update', (request, response) => {
+    const payload = updateGoalState(request.body);
+    response.json({ ok: true, goal: payload });
+  });
+
+  httpServer = http.createServer(expressApp);
+  socketServer = new Server(httpServer, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+  });
+
+  socketServer.on('connection', (socket) => {
+    logInfo(`Виджет подключён: ${socket.id}`);
+    socket.emit('system:ready', {
+      message: 'Связь с локальным сервером установлена.',
+      connectedAt: new Date().toISOString(),
+    });
+    socket.emit('chat:ui-settings', chatUiSettings);
+    socket.emit('chat:status', getChatStatusPayload());
+    socket.emit('widgets:state', getStreamWidgetsPayload());
+
+    socket.on('disconnect', () => {
+      // Не логируем отключение: в Electron/OBS console.log может выбросить EPIPE и уронить приложение.
+    });
+
+    socket.on('alert:played', (payload) => {
+      markAlertPlayed(payload?.id);
+    });
+
+    socket.on('music:started', (payload) => {
+      markMusicStarted(payload?.id);
+    });
+
+    socket.on('music:played', (payload) => {
+      markMusicPlayed(payload?.id);
+    });
+
+    socket.on('music:bootstrap', (callback) => {
+      finalizePlayingMusicOnWidgetBootstrap();
+      if (typeof callback === 'function') {
+        callback({ ok: true });
+      }
+    });
+  });
+
+  // Headless mode: expose the IPC brain to plain browsers (backoffice / chat).
+  if (process.env.TCHAT_HEADLESS) {
+    require('./src/headless/web-bridge').attach({ io: socketServer, app: expressApp });
+  }
+}
+
+function startLocalServer() {
+  createLocalServer();
+
+  return new Promise((resolve) => {
+    httpServer.once('error', (error) => {
+      serverStatus = {
+        isReady: false,
+        host: SERVER_HOST,
+        port: SERVER_PORT,
+        url: `http://localhost:${SERVER_PORT}`,
+        error: error.message,
+      };
+      console.error(`Сервер виджетов не запущён: ${error.message}`);
+      resolve(serverStatus);
+    });
+
+    httpServer.listen(SERVER_PORT, SERVER_HOST, () => {
+      serverStatus = {
+        isReady: true,
+        host: SERVER_HOST,
+        port: SERVER_PORT,
+        url: `http://localhost:${SERVER_PORT}`,
+        error: null,
+      };
+      logInfo(`Сервер виджетов запущён: ${serverStatus.url} (${SERVER_HOST}:${SERVER_PORT})`);
+      resolve(serverStatus);
+    });
+  });
+}
+
+function stopLocalServer() {
+  return new Promise((resolve) => {
+    if (!httpServer || !socketServer) {
+      resolve();
+      return;
+    }
+
+    socketServer.close(() => {
+      httpServer.close(() => {
+        console.log('Сервер виджетов остановлён.');
+        resolve();
+      });
+    });
+  });
+}
+
+// Проверка обновлений: при старте и вручную из бэкофиса. Когда обновление
+// скачано — предлагаем перезапуститься; при отказе поставится при выходе.
+function setupAutoUpdater() {
+  if (!autoUpdater || !app.isPackaged) {
+    return;
+  }
+
+  autoUpdater.on('update-downloaded', (info) => {
+    const version = info?.version || 'новая версия';
+    dialog
+      .showMessageBox({
+        type: 'info',
+        title: 'Обновление TChat',
+        message: `Скачано обновление ${version}. Установить сейчас?`,
+        detail: 'Приложение перезапустится. Если отложить — обновление установится при выходе.',
+        buttons: ['Установить сейчас', 'Позже'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      })
+      .catch(() => {});
+  });
+
+  autoUpdater.on('error', (error) => {
+    console.error('[updater]', error?.message || error);
+  });
+
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+// «Призрачный» режим по Ctrl+Alt+G: окно чата становится полупрозрачным и
+// некликабельным — клики проходят сквозь него в игру. Повторное нажатие возвращает всё как было.
+const GHOST_MODE_OPACITY = 0.5;
+let ghostModeEnabled = false;
+
+function applyGhostMode(targetWindow) {
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+  targetWindow.setOpacity(ghostModeEnabled ? GHOST_MODE_OPACITY : 1);
+  targetWindow.setIgnoreMouseEvents(ghostModeEnabled, { forward: true });
+}
+
+function toggleGhostMode() {
+  ghostModeEnabled = !ghostModeEnabled;
+  applyGhostMode(chatWindow);
+}
+
+function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+    return;
+  }
+
+  mainWindow = new BrowserWindow({
+    ...getSavedWindowBounds('backoffice', { width: 920, height: 680 }),
+    minWidth: 720,
+    minHeight: 520,
+    title: 'TChat - бэкоффис',
+    autoHideMenuBar: true,
+    backgroundColor: '#111315',
+    webPreferences: {
+      preload: path.join(__dirname, 'src', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  trackWindowState(mainWindow, 'backoffice');
+  mainWindow.loadFile(path.join(__dirname, 'backoffice.html'));
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+function createChatWindow() {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.focus();
+    return;
+  }
+
+  chatWindow = new BrowserWindow({
+    ...getSavedWindowBounds('chatWindow', { width: 520, height: 760 }),
+    minWidth: 320,
+    minHeight: 420,
+    title: 'TChat - чат',
+    autoHideMenuBar: true,
+    backgroundColor: '#101418',
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'src', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  // Поверх всех окон, включая безрамочные полноэкранные игры.
+  chatWindow.setAlwaysOnTop(true, 'screen-saver');
+  applyGhostMode(chatWindow);
+
+  trackWindowState(chatWindow, 'chatWindow');
+  chatWindow.loadFile(path.join(__dirname, 'chat-window.html'));
+
+  chatWindow.webContents.once('did-finish-load', () => {
+    chatWindow?.webContents.send('chat:history', getRecentChatMessages());
+    broadcastChatStatus();
+  });
+
+  chatWindow.on('closed', () => {
+    chatWindow = null;
+  });
+}
+
+function broadcastChatMessage(message) {
+  saveChatMessage(message);
+  chatStats.messages += 1;
+  chatStats.users.add(`${message.platform}:${message.user}`.toLowerCase());
+  registerPollVote(message);
+  maybeEnqueueFirstMessageAlert(message);
+  maybeEnqueuePortalAlert(message);
+  socketServer?.emit('chat:message', message);
+  mainWindow?.webContents.send('chat:message', message);
+  chatWindow?.webContents.send('chat:message', message);
+  broadcastChatStatus();
+}
+
+function broadcastChatUiSettings() {
+  socketServer?.emit('chat:ui-settings', chatUiSettings);
+  mainWindow?.webContents.send('chat:ui-settings', chatUiSettings);
+  chatWindow?.webContents.send('chat:ui-settings', chatUiSettings);
+}
+
+function getChatStatusPayload() {
+  const viewerTotal = Object.values(chatStats.viewers).reduce((sum, value) => sum + Number(value || 0), 0);
+
+  return {
+    messages: chatStats.messages,
+    users: chatStats.users.size,
+    platforms: Object.values(chatStats.platformStatus).filter((status) => status === 'подключён').length,
+    viewers: {
+      ...chatStats.viewers,
+      total: viewerTotal,
+    },
+    statuses: chatStats.platformStatus,
+    channels: currentChannels,
+  };
+}
+
+function broadcastChatStatus() {
+  const payload = getChatStatusPayload();
+  mainWindow?.webContents.send('chat:status', payload);
+  chatWindow?.webContents.send('chat:status', payload);
+  socketServer?.emit('chat:status', payload);
+}
+
+function getDonationAlertsState() {
+  return {
+    ...donationAlertsState,
+    hasToken: Boolean(donationAlertsToken),
+  };
+}
+
+function broadcastDonationAlertsState() {
+  const payload = getDonationAlertsState();
+  mainWindow?.webContents.send('donationalerts:state', payload);
+  chatWindow?.webContents.send('donationalerts:state', payload);
+}
+
+function getAlertQueuePayload() {
+  return {
+    queue: alertQueue.slice(0, 50),
+    settings: alertSettings,
+  };
+}
+
+function getMusicQueuePayload() {
+  return {
+    queue: musicQueue
+      .filter((item) => item.status !== 'played' && !item.played)
+      .slice(0, 50),
+    minViews: 5000,
+  };
+}
+
+function broadcastAlertQueue() {
+  const payload = getAlertQueuePayload();
+  mainWindow?.webContents.send('alerts:queue', payload);
+  chatWindow?.webContents.send('alerts:queue', payload);
+  socketServer?.emit('alerts:queue', payload);
+}
+
+function broadcastMusicQueue() {
+  const payload = getMusicQueuePayload();
+  mainWindow?.webContents.send('music:queue', payload);
+  chatWindow?.webContents.send('music:queue', payload);
+  socketServer?.emit('music:queue', payload);
+}
+
+function broadcastMusicChatRequest(item) {
+  if (!item?.id) {
+    return;
+  }
+
+  chatWindow?.webContents.send('chat:music-request', item);
+  socketServer?.emit('chat:music-request', item);
+}
+
+function broadcastGoalState() {
+  mainWindow?.webContents.send('goal:state', goalState);
+  chatWindow?.webContents.send('goal:state', goalState);
+  socketServer?.emit('goal:update', goalState);
+}
+
+function updateGoalState(payload = {}) {
+  goalState = saveGoalState({
+    ...goalState,
+    ...payload,
+  });
+  broadcastGoalState();
+  return goalState;
+}
+
+function addDonationToGoal(amount) {
+  const value = Math.max(Number(amount || 0), 0);
+  if (!value) {
+    return goalState;
+  }
+
+  updateGoalState({
+    current: Number(goalState.current || 0) + value,
+  });
+
+  let hasGoalWidgets = false;
+  streamWidgets = streamWidgets.map((widget) => {
+    if (widget.type !== 'goal') {
+      return widget;
+    }
+
+    hasGoalWidgets = true;
+    return normalizeStreamWidget({
+      ...widget,
+      current: Number(widget.current || 0) + value,
+    });
+  });
+
+  if (hasGoalWidgets) {
+    saveStreamWidgets(streamWidgets);
+    broadcastStreamWidgets();
+  }
+
+  return goalState;
+}
+
+function normalizeFirstMessageGreeting(message = {}) {
+  const username = String(message.user || 'Зритель').trim() || 'Зритель';
+  return {
+    id: `first-message:${getChatDayKey(message.createdAt)}:${getChatUserKey(message)}`,
+    platform: message.platform || 'chat',
+    username,
+    message: `${username} появился в чате`,
+    createdAt: message.createdAt || new Date().toISOString(),
+    isTest: message.platform === 'demo',
+  };
+}
+
+function enqueueFirstMessageAlert(message = {}) {
+  const normalized = normalizeFirstMessageGreeting(message);
+  const rule = getSystemAlertRule('firstMessage');
+  if (!rule.enabled) {
+    return null;
+  }
+
+  const alertItem = {
+    id: normalized.id,
+    kind: 'firstMessage',
+    firstMessage: normalized,
+    rule,
+    displaySeconds: 3,
+    played: false,
+    queuedAt: new Date().toISOString(),
+  };
+
+  alertQueue.unshift(alertItem);
+  alertQueue = alertQueue.slice(0, 100);
+  socketServer?.emit('alert:play', alertItem);
+  broadcastAlertQueue();
+  return alertItem;
+}
+
+function maybeEnqueueFirstMessageAlert(message = {}) {
+  const day = getChatDayKey(message.createdAt);
+  if (day !== firstMessageGreetingDay) {
+    firstMessageGreetingDay = day;
+    firstMessageGreetingUsers.clear();
+  }
+
+  const userKey = getChatUserKey(message);
+  if (firstMessageGreetingUsers.has(userKey)) {
+    return null;
+  }
+
+  firstMessageGreetingUsers.add(userKey);
+  return enqueueFirstMessageAlert(message);
+}
+
+// «Пришёл из портала» — сервисное сообщение ChatBot о зрителе, занесённом порталом VK.
+const PORTAL_MESSAGE_REGEX = /^(.+?)\s+приш(?:[её]л|ла)\s+из\s+портала!?$/i;
+
+function buildPortalGreeting(username) {
+  return (
+    `Привет, ${username}! Тебя занесло весьма удачно - у нас тут весело и лампово!\n` +
+    'Жми "отслеживать" и плюхайся на диван'
+  );
+}
+
+function normalizePortalGuest(payload = {}) {
+  const username = String(payload.username || 'Зритель').trim() || 'Зритель';
+  return {
+    id: `portal-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    platform: payload.platform || 'chat',
+    username,
+    message: buildPortalGreeting(username),
+    createdAt: payload.createdAt || new Date().toISOString(),
+    isTest: payload.platform === 'demo',
+  };
+}
+
+function enqueuePortalAlert(payload = {}) {
+  const normalized = normalizePortalGuest(payload);
+  const rule = getSystemAlertRule('portal');
+  if (!rule.enabled) {
+    return null;
+  }
+
+  const alertItem = {
+    id: normalized.id,
+    kind: 'portal',
+    portal: normalized,
+    rule,
+    played: false,
+    queuedAt: new Date().toISOString(),
+  };
+
+  alertQueue.unshift(alertItem);
+  alertQueue = alertQueue.slice(0, 100);
+  socketServer?.emit('alert:play', alertItem);
+  broadcastAlertQueue();
+  return alertItem;
+}
+
+function maybeEnqueuePortalAlert(message = {}) {
+  if (String(message.user || '').trim().toLowerCase() !== 'chatbot') {
+    return null;
+  }
+
+  const match = String(message.text || '').trim().match(PORTAL_MESSAGE_REGEX);
+  if (!match) {
+    return null;
+  }
+
+  return enqueuePortalAlert({
+    username: match[1].trim(),
+    platform: message.platform,
+    createdAt: message.createdAt,
+  });
+}
+
+function enqueueSubscriberAlert(subscriber = {}) {
+  const normalized = normalizeSubscriber(subscriber);
+  const rule = getSystemAlertRule('subscriber');
+  if (!rule.enabled) {
+    return null;
+  }
+
+  const alertItem = {
+    id: normalized.id,
+    kind: 'subscriber',
+    subscriber: normalized,
+    rule,
+    played: false,
+    queuedAt: new Date().toISOString(),
+  };
+
+  alertQueue.unshift(alertItem);
+  alertQueue = alertQueue.slice(0, 100);
+
+  if (!normalized.isTest) {
+    socketServer?.emit('subscriber:alert', normalized);
+    socketServer?.emit('alert:play', alertItem);
+  }
+
+  broadcastAlertQueue();
+  return alertItem;
+}
+
+function enqueueSubscriptionRenewalAlert(renewal = {}) {
+  const normalized = normalizeSubscriptionRenewal(renewal);
+  const rule = getSystemAlertRule('subscriptionRenewal');
+  if (!rule.enabled) {
+    return null;
+  }
+
+  const alertItem = {
+    id: normalized.id,
+    kind: 'subscriptionRenewal',
+    renewal: normalized,
+    rule,
+    played: false,
+    queuedAt: new Date().toISOString(),
+  };
+
+  alertQueue.unshift(alertItem);
+  alertQueue = alertQueue.slice(0, 100);
+
+  if (!normalized.isTest) {
+    socketServer?.emit('subscription-renewal:alert', normalized);
+    socketServer?.emit('alert:play', alertItem);
+  }
+
+  broadcastAlertQueue();
+  return alertItem;
+}
+
+function enqueueRaidAlert(raid = {}) {
+  const normalized = normalizeRaid(raid);
+  const rule = getSystemAlertRule('raid');
+  if (!rule.enabled) {
+    return null;
+  }
+
+  const alertItem = {
+    id: normalized.id,
+    kind: 'raid',
+    raid: normalized,
+    rule,
+    played: false,
+    queuedAt: new Date().toISOString(),
+  };
+
+  alertQueue.unshift(alertItem);
+  alertQueue = alertQueue.slice(0, 100);
+
+  if (!normalized.isTest) {
+    socketServer?.emit('raid:alert', normalized);
+    socketServer?.emit('alert:play', alertItem);
+  }
+
+  broadcastAlertQueue();
+  return alertItem;
+}
+
+function getSystemAlertRule(type) {
+  return normalizeSystemAlertRule(alertSettings.systemAlerts?.[type], createDefaultAlertSettings().systemAlerts[type]);
+}
+
+function normalizeSubscriber(payload = {}) {
+  return {
+    id: String(payload.id || `sub-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    platform: payload.platform || 'demo',
+    username: payload.username || 'Зритель',
+    message: payload.message || 'подписался на канал',
+    createdAt: payload.createdAt || new Date().toISOString(),
+    isTest: Boolean(payload.isTest),
+  };
+}
+
+function normalizeSubscriptionRenewal(payload = {}) {
+  return {
+    id: String(payload.id || `renewal-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    platform: payload.platform || 'demo',
+    username: payload.username || 'Зритель',
+    tier: String(payload.tier || '').trim(),
+    months: Math.max(Number(payload.months || 0), 0),
+    message: payload.message || 'продлил подписку',
+    createdAt: payload.createdAt || new Date().toISOString(),
+    isTest: Boolean(payload.isTest),
+  };
+}
+
+function normalizeRaid(payload = {}) {
+  return {
+    id: String(payload.id || `raid-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    platform: payload.platform || 'demo',
+    username: payload.username || 'Зритель',
+    viewers: Math.max(Number(payload.viewers || 0), 0),
+    message: payload.message || 'привёл рейд',
+    createdAt: payload.createdAt || new Date().toISOString(),
+    isTest: Boolean(payload.isTest),
+  };
+}
+
+function enqueueDonationAlert(donation) {
+  const normalizedDonation = normalizeDonation(donation);
+  addDonationToGoal(normalizedDonation.amount);
+  const musicLinks = extractMusicLinks(normalizedDonation.message || '');
+
+  if (musicLinks.length) {
+    enqueueMusicDonation(normalizedDonation, musicLinks[0]).catch((error) => {
+      console.error(`Не удалось обработать музыкальный донат: ${error.message}`);
+    });
+    return null;
+  }
+
+  const classification = classifyDonationAlert(normalizedDonation);
+  const alertItem = {
+    id: normalizedDonation.id || `donation-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    kind: 'donation',
+    donation: normalizedDonation,
+    rule: classification.rule,
+    reason: classification.reason,
+    isMusic: classification.isMusic,
+    musicLinks: classification.musicLinks,
+    played: false,
+    queuedAt: new Date().toISOString(),
+  };
+
+  alertQueue.unshift(alertItem);
+  alertQueue = alertQueue.slice(0, 100);
+
+  if (!normalizedDonation.isTest || normalizedDonation.showInChat) {
+    socketServer?.emit('donation:alert', normalizedDonation);
+  }
+
+  if (normalizedDonation.showInChat) {
+    donationAlertsState = {
+      ...donationAlertsState,
+      donations: [
+        {
+          ...normalizedDonation,
+          isNew: true,
+          played: false,
+        },
+        ...donationAlertsState.donations.filter((donation) => donation.id !== normalizedDonation.id),
+      ].slice(0, 30),
+    };
+    broadcastDonationAlertsState();
+  }
+
+  if (!normalizedDonation.isTest || normalizedDonation.showInChat) {
+    chatWindow?.webContents.send('chat:donation-alert', alertItem);
+  }
+
+  socketServer?.emit('alert:play', alertItem);
+  broadcastAlertQueue();
+  return alertItem;
+}
+
+async function enqueueMusicDonation(donation, url, options = {}) {
+  const skipViewsCheck = options.skipViewsCheck === true;
+  const musicItem = {
+    id: donation.id || `music-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    kind: 'music',
+    donation,
+    url,
+    embedUrl: '',
+    platform: detectMusicPlatform(url),
+    title: 'Музыкальная заявка',
+    views: 0,
+    minViews: 5000,
+    status: 'checking',
+    reason: '',
+    played: false,
+    manual: skipViewsCheck,
+    queuedAt: new Date().toISOString(),
+  };
+
+  musicQueue.push(musicItem);
+  musicQueue = musicQueue.slice(0, 100);
+  broadcastMusicQueue();
+
+  const metadata = await fetchMusicMetadata(url);
+  musicQueue = musicQueue.map((item) => {
+    if (item.id !== musicItem.id) {
+      return item;
+    }
+
+    const hasVerifiedViews = metadata.views !== null && metadata.views !== undefined && Number.isFinite(Number(metadata.views));
+    const isAllowed = skipViewsCheck || !hasVerifiedViews || Number(metadata.views) >= musicItem.minViews;
+    return {
+      ...item,
+      ...metadata,
+      viewsVerified: skipViewsCheck ? false : hasVerifiedViews,
+      status: isAllowed ? 'ready' : 'rejected',
+      reason: isAllowed ? '' : 'Недостаточно просмотров',
+    };
+  });
+
+  const readyItem = musicQueue.find((item) => item.id === musicItem.id && item.status === 'ready');
+  const resolvedItem = musicQueue.find((item) => item.id === musicItem.id) || musicItem;
+  broadcastMusicQueue();
+  broadcastMusicChatRequest(resolvedItem);
+
+  if (readyItem) {
+    socketServer?.emit('music:play', { ...readyItem, force: !musicQueue.some((item) => item.status === 'ready' && !item.played && item.id !== readyItem.id) });
+  }
+}
+
+function markMusicStarted(id) {
+  if (!id) {
+    return;
+  }
+
+  startedMusicIds.add(id);
+  const startedAt = new Date().toISOString();
+  musicQueue = musicQueue.map((item) =>
+    item.id === id && item.status !== 'played'
+      ? { ...item, status: 'playing', startedAt: item.startedAt || startedAt }
+      : item,
+  );
+  broadcastMusicQueue();
+}
+
+function markMusicPlayed(id) {
+  if (!id) {
+    return;
+  }
+
+  const nextQueue = musicQueue.filter((item) => item.id !== id);
+
+  if (nextQueue.length === musicQueue.length) {
+    return;
+  }
+
+  musicQueue = nextQueue;
+  startedMusicIds.delete(id);
+  broadcastMusicQueue();
+}
+
+function finalizePlayingMusicOnWidgetBootstrap() {
+  const idsToRemove = new Set();
+
+  for (const item of musicQueue) {
+    if (item.status === 'playing' || startedMusicIds.has(item.id)) {
+      idsToRemove.add(item.id);
+      startedMusicIds.delete(item.id);
+    }
+  }
+
+  if (!idsToRemove.size) {
+    return;
+  }
+
+  musicQueue = musicQueue.filter((item) => !idsToRemove.has(item.id));
+  broadcastMusicQueue();
+}
+
+async function addManualMusicUrl(payload = {}) {
+  const url = String(payload.url || '').trim();
+
+  if (!url) {
+    throw new Error('Ссылка на музыку не задана');
+  }
+
+  const musicLinks = extractMusicLinks(url);
+
+  if (!musicLinks.length) {
+    throw new Error('Поддерживаются ссылки YouTube, VK Видео и Rutube');
+  }
+
+  await enqueueMusicDonation(
+    {
+      id: `manual-music-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      username: payload.username || 'Бэкоффис',
+      amount: 0,
+      currency: 'RUB',
+      message: url,
+      createdAt: new Date().toISOString(),
+    },
+    musicLinks[0],
+    { skipViewsCheck: true },
+  );
+
+  return getMusicQueuePayload();
+}
+
+function removeMusicItem(id) {
+  if (!id) {
+    return getMusicQueuePayload();
+  }
+
+  musicQueue = musicQueue.filter((item) => item.id !== id);
+  broadcastMusicQueue();
+  return getMusicQueuePayload();
+}
+
+function removeDonationAlert(id) {
+  if (!id) {
+    return getDonationAlertsState();
+  }
+
+  alertQueue = alertQueue.filter((item) => item.id !== id && item.donation?.id !== id);
+  donationAlertsState = {
+    ...donationAlertsState,
+    donations: donationAlertsState.donations.filter((donation) => donation.id !== id),
+  };
+  broadcastDonationAlertsState();
+  broadcastAlertQueue();
+  return getDonationAlertsState();
+}
+
+function markAlertPlayed(id) {
+  if (!id) {
+    return;
+  }
+
+  alertQueue = alertQueue.map((item) => (item.id === id ? { ...item, played: true, playedAt: new Date().toISOString() } : item));
+  donationAlertsState = {
+    ...donationAlertsState,
+    donations: donationAlertsState.donations.map((donation) => (donation.id === id ? { ...donation, played: true } : donation)),
+  };
+  broadcastDonationAlertsState();
+  broadcastAlertQueue();
+}
+
+function classifyDonationAlert(donation) {
+  const rules = alertSettings.rules.filter((rule) => rule.enabled);
+  const amount = Number(donation.amount || 0);
+  const exactAmountRule = rules.find((rule) => rule.type === 'amount' && Number(rule.amount) === amount);
+  const nicknameRule = rules.find((rule) => rule.type === 'nickname' && sameText(rule.nickname, donation.username));
+  const intervalRule = rules.find((rule) => {
+    if (rule.type !== 'interval') {
+      return false;
+    }
+
+    const min = rule.min === '' ? 0 : Number(rule.min || 0);
+    const max = rule.max === '' ? Number.POSITIVE_INFINITY : Number(rule.max || 0);
+    return amount >= min && amount <= max;
+  });
+  const fallbackRule = {
+    id: 'fallback',
+    type: 'fallback',
+    title: 'Обычный донат',
+    image: '',
+    sound: '',
+  };
+  const selectedRule = exactAmountRule || nicknameRule || intervalRule || fallbackRule;
+
+  return {
+    rule: selectedRule,
+    reason: exactAmountRule ? 'amount' : nicknameRule ? 'nickname' : intervalRule ? 'interval' : 'fallback',
+    isMusic: false,
+    musicLinks: [],
+  };
+}
+
+function sameText(left, right) {
+  return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+}
+
+function extractMusicLinks(text = '') {
+  const urlMatches = String(text).match(/https?:\/\/[^\s<>"']+/gi) || [];
+  const musicDomains = /(youtube\.com|youtu\.be|rutube\.ru|vk\.com\/video|vkvideo\.ru\/video|vk\.com\/clip|vkvideo\.ru\/clip)/i;
+  return urlMatches.filter((url) => musicDomains.test(url));
+}
+
+function detectMusicPlatform(url = '') {
+  if (/youtu\.be|youtube\.com/i.test(url)) return 'youtube';
+  if (/rutube\.ru/i.test(url)) return 'rutube';
+  if (/vk\.com|vkvideo\.ru/i.test(url)) return 'vk';
+  return 'unknown';
+}
+
+async function fetchMusicMetadata(url) {
+  const platform = detectMusicPlatform(url);
+  const fallback = createMusicMetadataFallback(url, platform);
+
+  try {
+    let metadata = fallback;
+
+    if (platform === 'youtube') metadata = await fetchYouTubeMusicMetadata(url);
+    if (platform === 'rutube') metadata = await fetchRutubeMusicMetadata(url);
+    if (platform === 'vk') metadata = await fetchVkMusicMetadata(url);
+
+    return normalizeMusicMetadata(fallback, metadata);
+  } catch {
+    return fallback;
+  }
+}
+
+function createMusicMetadataFallback(url, platform = detectMusicPlatform(url)) {
+  return {
+    platform,
+    title: formatFallbackMusicTitle(url, platform),
+    views: null,
+    viewsVerified: false,
+    duration: null,
+    embedUrl: buildMusicEmbedUrl(url, platform),
+  };
+}
+
+function normalizeMusicMetadata(fallback, metadata = {}) {
+  const views = metadata.views === undefined ? fallback.views : metadata.views;
+  const title = isUsableMusicTitle(metadata.title) ? metadata.title : fallback.title;
+  const duration = Number(metadata.duration || fallback.duration || 0);
+  return {
+    ...fallback,
+    ...metadata,
+    title,
+    views,
+    duration: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : null,
+    viewsVerified: views !== null && views !== undefined && Number.isFinite(Number(views)),
+    embedUrl: metadata.embedUrl || fallback.embedUrl,
+  };
+}
+
+function extractYouTubeDuration(html = '') {
+  const seconds = String(html).match(/"lengthSeconds":"(\d+)"/)?.[1];
+  if (seconds) {
+    return Number(seconds);
+  }
+
+  const milliseconds = String(html).match(/"approxDurationMs":"(\d+)"/)?.[1];
+  return milliseconds ? Math.round(Number(milliseconds) / 1000) : null;
+}
+
+function extractVkDuration(html = '') {
+  return extractFirstNumber(String(html), [/"duration"\s*:\s*(\d+)/, /"videoDuration"\s*:\s*(\d+)/]);
+}
+
+function buildMusicEmbedUrl(url = '', platform = detectMusicPlatform(url)) {
+  if (platform === 'youtube') {
+    const videoId = extractYouTubeVideoId(url);
+    return videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&playsinline=1` : url;
+  }
+
+  if (platform === 'rutube') {
+    const videoId = extractRutubeVideoId(url);
+    return videoId ? `https://rutube.ru/play/embed/${videoId}?autoplay=true&autostartmute=false` : url;
+  }
+
+  if (platform === 'vk') {
+    const videoParts = extractVkVideoParts(url);
+    return videoParts ? `https://vk.com/video_ext.php?oid=${videoParts.oid}&id=${videoParts.id}&autoplay=1&js_api=1&muted=1` : url;
+  }
+
+  return url;
+}
+
+function formatFallbackMusicTitle(url = '', platform = detectMusicPlatform(url)) {
+  if (platform === 'youtube') {
+    const videoId = extractYouTubeVideoId(url);
+    return videoId ? `YouTube - ${videoId}` : 'YouTube';
+  }
+
+  if (platform === 'rutube') {
+    const videoId = extractRutubeVideoId(url);
+    return videoId ? `Rutube - ${videoId}` : 'Rutube';
+  }
+
+  if (platform === 'vk') {
+    const videoParts = extractVkVideoParts(url);
+    return videoParts ? `VK Видео - video${videoParts.oid}_${videoParts.id}` : 'VK Видео';
+  }
+
+  return url || 'Музыкальная заявка';
+}
+
+function extractTitleFromHtml(html = '', fallback = '') {
+  const patterns = [
+    /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i,
+    /<title>(.*?)<\/title>/i,
+    /"title"\s*:\s*"([^"]+)"/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = String(html).match(pattern);
+    if (match?.[1]) {
+      return cleanupTitle(match[1]);
+    }
+  }
+
+  return fallback;
+}
+
+function isUsableMusicTitle(title = '') {
+  const value = String(title || '').trim();
+  return Boolean(value) && !/^https?:\/\//i.test(value) && !/^(YouTube|Rutube|VK Видео)$/i.test(value);
+}
+
+async function fetchTextWithTimeout(url, timeoutMs = 8000, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
+const VK_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  Accept: 'application/json',
+  Referer: 'https://live.vkvideo.ru/',
+};
+
+async function fetchJsonWithTimeout(url, timeoutMs = 8000, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...VK_FETCH_HEADERS,
+        ...(options.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('таймаут запроса');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function delay(ms = 1000) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isVkTransientError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  const code = String(error?.cause?.code || error?.code || '').toUpperCase();
+
+  return (
+    message.includes('fetch failed') ||
+    message.includes('таймаут') ||
+    message.includes('timeout') ||
+    message.includes('econnrefused') ||
+    message.includes('econnreset') ||
+    message.includes('enetunreach') ||
+    message.includes('socket hang up') ||
+    ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)
+  );
+}
+
+function formatVkFetchError(error) {
+  const code = error?.cause?.code || error?.code;
+  if (code) {
+    return String(code);
+  }
+
+  return String(error?.message || error || 'неизвестная ошибка');
+}
+
+async function fetchJsonWithRetry(url, timeoutMs = 20000, options = {}, attempts = 3) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchJsonWithTimeout(url, timeoutMs, options);
+    } catch (error) {
+      lastError = error;
+      if (!isVkTransientError(error) || attempt >= attempts) {
+        throw error;
+      }
+
+      await delay(attempt * 1000);
+    }
+  }
+
+  throw lastError || new Error('VK API недоступен');
+}
+
+function rememberVkMessageId(id) {
+  chatStats.vkMessageIds.add(id);
+
+  if (chatStats.vkMessageIds.size <= 5000) {
+    return;
+  }
+
+  chatStats.vkMessageIds = new Set([...chatStats.vkMessageIds].slice(-3000));
+}
+
+function getVkPlatformStatus(chatAvailable = false) {
+  if (vkConnectionState.consecutiveFailures > 5) {
+    return `ошибка: ${vkConnectionState.lastError || 'VK Live недоступен'}`;
+  }
+
+  if (vkConnectionState.consecutiveFailures > 0) {
+    return `переподключение... (${vkConnectionState.consecutiveFailures})`;
+  }
+
+  return chatAvailable ? 'подключён' : 'чат VK недоступен';
+}
+
+function unwrapVkStreamPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+
+  if (payload.count || payload.hasChat !== undefined || payload.isOnline !== undefined || payload.title) {
+    return payload;
+  }
+
+  if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
+    return payload.data;
+  }
+
+  return payload;
+}
+
+function extractVkViewerCount(stream = {}) {
+  const topLevel = Number(stream?.count?.viewers);
+  if (Number.isFinite(topLevel) && topLevel > 0) {
+    return topLevel;
+  }
+
+  const sources = stream?.count?.sources;
+  if (Array.isArray(sources)) {
+    const fromSources = sources.reduce((sum, source) => sum + Number(source?.viewers || 0), 0);
+    if (fromSources > 0) {
+      return fromSources;
+    }
+  }
+
+  return Number.isFinite(topLevel) ? Math.max(topLevel, 0) : 0;
+}
+
+async function fetchVkViewerCount(channelUrl) {
+  const slug = parseVkChannelSlug(channelUrl);
+  if (!slug) {
+    return 0;
+  }
+
+  const streamPath = `/blog/${encodeURIComponent(slug)}/public_video_stream`;
+  const payload = await fetchJsonWithRetry(`${VK_API_BASE}${streamPath}`, 15000, {}, 2);
+  const stream = unwrapVkStreamPayload(payload);
+  return extractVkViewerCount(stream);
+}
+
+function parseVkChannelSlug(channelUrl = '') {
+  const raw = String(channelUrl || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const url = new URL(raw);
+    return url.pathname.split('/').filter(Boolean)[0] || '';
+  } catch {
+    const match = raw.match(/live\.vkvideo\.ru\/([^/?#]+)/i);
+    return (match?.[1] || raw.replace(/^\/+|\/+$/g, '')).trim();
+  }
+}
+
+async function fetchYouTubeMusicMetadata(url) {
+  const videoId = extractYouTubeVideoId(url);
+  const watchUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
+  let html = '';
+  let views = null;
+  let title = await fetchYouTubeOEmbedTitle(watchUrl).catch(() => '');
+
+  try {
+    html = await fetchTextWithTimeout(watchUrl);
+    views = extractFirstNumber(html, [/"viewCount":"(\d+)"/, /"views":"(\d+)"/]);
+  } catch {
+    html = '';
+  }
+
+  if (!isUsableMusicTitle(title)) {
+    title = extractTitleFromHtml(html, 'YouTube');
+  }
+
+  return {
+    platform: 'youtube',
+    title,
+    views,
+    duration: extractYouTubeDuration(html),
+    embedUrl: buildMusicEmbedUrl(url, 'youtube'),
+  };
+}
+
+async function fetchRutubeMusicMetadata(url) {
+  const html = await fetchTextWithTimeout(url);
+  const views = extractFirstNumber(html, [/"views"\s*:\s*(\d+)/, /"hits"\s*:\s*(\d+)/, /"viewCount"\s*:\s*(\d+)/]);
+
+  return {
+    platform: 'rutube',
+    title: extractTitleFromHtml(html, 'Rutube'),
+    views,
+    embedUrl: buildMusicEmbedUrl(url, 'rutube'),
+  };
+}
+
+async function fetchVkMusicMetadata(url) {
+  const html = await fetchTextWithTimeout(url);
+  const views = extractFirstNumber(html, [/"views"\s*:\s*(\d+)/, /"count"\s*:\s*\{"views"\s*:\s*(\d+)/, /(\d[\d\s.,]*)\s+просмотр/i]);
+
+  return {
+    platform: 'vk',
+    title: extractTitleFromHtml(html, 'VK Видео'),
+    views,
+    duration: extractVkDuration(html),
+    embedUrl: buildMusicEmbedUrl(url, 'vk'),
+  };
+}
+
+async function fetchYouTubeOEmbedTitle(watchUrl) {
+  const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`;
+  const payload = JSON.parse(await fetchTextWithTimeout(endpoint));
+  return cleanupTitle(payload.title || '');
+}
+
+function extractYouTubeVideoId(url = '') {
+  const value = String(url);
+  return value.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/)?.[1] || value.match(/[?&]v=([a-zA-Z0-9_-]{11})/)?.[1] || value.match(/\/shorts\/([a-zA-Z0-9_-]{11})/)?.[1] || '';
+}
+
+function extractRutubeVideoId(url = '') {
+  return String(url).match(/rutube\.ru\/video\/([a-zA-Z0-9]+)/i)?.[1] || String(url).match(/rutube\.ru\/play\/embed\/([a-zA-Z0-9]+)/i)?.[1] || '';
+}
+
+function extractVkVideoParts(url = '') {
+  const match = String(url).match(/video(-?\d+)_(\d+)/i) || String(url).match(/clip(-?\d+)_(\d+)/i);
+  return match ? { oid: match[1], id: match[2] } : null;
+}
+
+function extractFirstNumber(text, patterns) {
+  for (const pattern of patterns) {
+    const match = String(text).match(pattern);
+    if (match) {
+      return Number(String(match[1]).replace(/\D/g, '') || 0);
+    }
+  }
+
+  return null;
+}
+
+function cleanupTitle(title = '') {
+  return String(title)
+    .replace(/\\u0026/g, '&')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+-\s+YouTube$/i, '')
+    .replace(/\s+-\s+смотреть видео онлайн.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function updateDonationAlertsCredentials(credentials = {}) {
+  donationAlertsClientId = String(credentials.clientId || donationAlertsClientId || '').trim();
+  donationAlertsClientSecret = String(credentials.clientSecret || donationAlertsClientSecret || '').trim();
+  saveDonationAlertsSettings();
+}
+
+function getDonationAlertsCredentials() {
+  return {
+    clientId: donationAlertsClientId,
+    clientSecret: donationAlertsClientSecret,
+    redirectUri: DONATION_ALERTS_REDIRECT_URI,
+  };
+}
+
+function getDonationAlertsAuthUrl(credentials = {}) {
+  updateDonationAlertsCredentials(credentials);
+  if (!donationAlertsClientId) {
+    throw new Error('ID приложения DonationAlerts не задан');
+  }
+
+  const redirectUri = DONATION_ALERTS_REDIRECT_URI;
+  const params = new URLSearchParams({
+    client_id: donationAlertsClientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'oauth-donation-index',
+  });
+
+  return `https://www.donationalerts.com/oauth/authorize?${params.toString()}`;
+}
+
+async function exchangeDonationAlertsCode(code) {
+  if (!donationAlertsClientId || !donationAlertsClientSecret) {
+    throw new Error('ID приложения или секрет DonationAlerts не задан');
+  }
+
+  const redirectUri = DONATION_ALERTS_REDIRECT_URI;
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: donationAlertsClientId,
+    client_secret: donationAlertsClientSecret,
+    redirect_uri: redirectUri,
+    code,
+  });
+  const response = await fetch('https://www.donationalerts.com/oauth/token', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.message || `HTTP ${response.status}`);
+  }
+
+  donationAlertsToken = String(payload.access_token || '').trim();
+  donationAlertsRefreshToken = String(payload.refresh_token || '').trim();
+  saveDonationAlertsSettings();
+  startDonationAlertsSync(donationAlertsToken);
+}
+
+function getDonationAlertsOauthPage() {
+  return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TChat - DonationAlerts</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #111418;
+        color: #eef2f5;
+        font-family: "Segoe UI", Arial, sans-serif;
+      }
+
+      main {
+        max-width: 560px;
+        border: 1px solid #27313a;
+        border-radius: 8px;
+        background: #181e24;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #cbd5df;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>DonationAlerts подключается</h1>
+      <p id="state">Получаем токен и передаём его в TChat.</p>
+    </main>
+    <script>
+      const state = document.querySelector('#state');
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const token = params.get('access_token');
+
+      if (!token) {
+        state.textContent = 'Токен не найден. Вернитесь в бэкоффис и попробуйте ещё раз.';
+      } else {
+        fetch('/oauth/donationalerts/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+          .then((response) => response.json())
+          .then(() => {
+            localStorage.setItem('tchat.donationAlertsToken', token);
+            state.textContent = 'Готово. Токен сохранён, синхронизация донатов запущена. Это окно можно закрыть.';
+          })
+          .catch((error) => {
+            state.textContent = 'Не удалось передать токен в TChat: ' + error.message;
+          });
+      }
+    </script>
+  </body>
+</html>`;
+}
+
+function getDonationAlertsOauthResultPage(message) {
+  return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TChat - DonationAlerts</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #111418;
+        color: #eef2f5;
+        font-family: "Segoe UI", Arial, sans-serif;
+      }
+
+      main {
+        max-width: 560px;
+        border: 1px solid #27313a;
+        border-radius: 8px;
+        background: #181e24;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0;
+        color: #cbd5df;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>DonationAlerts</h1>
+      <p>${escapeHtml(message)}</p>
+    </main>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function startDonationAlertsSync(token) {
+  const nextToken = String(token || '').trim();
+  clearInterval(donationAlertsTimer);
+  donationAlertsToken = nextToken;
+  saveDonationAlertsSettings();
+  donationAlertsBootstrapped = false;
+  donationAlertsIds.clear();
+
+  if (!donationAlertsToken) {
+    donationAlertsState = {
+      status: 'токен не задан',
+      lastSyncAt: '',
+      error: '',
+      donations: [],
+    };
+    broadcastDonationAlertsState();
+    return getDonationAlertsState();
+  }
+
+  donationAlertsState = {
+    ...donationAlertsState,
+    status: 'синхронизируем',
+    error: '',
+  };
+  broadcastDonationAlertsState();
+  syncDonationAlerts();
+  donationAlertsTimer = setInterval(syncDonationAlerts, 30000);
+  return getDonationAlertsState();
+}
+
+async function syncDonationAlerts() {
+  if (!donationAlertsToken) {
+    return;
+  }
+
+  try {
+    const response = await fetch('https://www.donationalerts.com/api/v1/alerts/donations', {
+      headers: {
+        Authorization: `Bearer ${donationAlertsToken}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const donations = (Array.isArray(payload?.data) ? payload.data : [])
+      .map(normalizeDonationAlert)
+      .filter((donation) => donation.id);
+    const newDonations = [];
+
+    for (const donation of donations) {
+      if (!donationAlertsIds.has(donation.id)) {
+        donationAlertsIds.add(donation.id);
+
+        if (donationAlertsBootstrapped) {
+          donation.isNew = true;
+          newDonations.push(donation);
+        }
+      }
+    }
+
+    const previousById = new Map(donationAlertsState.donations.map((donation) => [donation.id, donation]));
+    const testDonations = donationAlertsState.donations.filter((donation) => donation.isTest && donation.showInChat);
+    donationAlertsState = {
+      status: 'подключён',
+      lastSyncAt: new Date().toISOString(),
+      error: '',
+      donations: [
+        ...testDonations,
+        ...donations.slice(0, 30).map((donation) => ({
+          ...donation,
+          isNew: Boolean(newDonations.find((newDonation) => newDonation.id === donation.id) || previousById.get(donation.id)?.isNew),
+          played: Boolean(previousById.get(donation.id)?.played || alertQueue.find((item) => item.id === donation.id)?.played),
+        })),
+      ].slice(0, 30),
+    };
+    donationAlertsBootstrapped = true;
+
+    for (const donation of newDonations) {
+      enqueueDonationAlert(donation);
+    }
+
+    broadcastDonationAlertsState();
+  } catch (error) {
+    donationAlertsState = {
+      ...donationAlertsState,
+      status: 'ошибка синхронизации',
+      error: error.message,
+      lastSyncAt: new Date().toISOString(),
+    };
+    console.error(`DonationAlerts не синхронизирован: ${error.message}`);
+    broadcastDonationAlertsState();
+  }
+}
+
+function normalizeDonationAlert(item = {}) {
+  const amount = Number(item.amount || item.amount_in_user_currency || 0);
+
+  return {
+    id: String(item.id || item.alert_id || item.created_at || ''),
+    username: item.username || item.name || item.user?.name || 'Зритель',
+    amount,
+    currency: item.currency || item.currency_code || 'RUB',
+    message: item.message || '',
+    createdAt: item.created_at || item.createdAt || new Date().toISOString(),
+    isNew: false,
+  };
+}
+
+function normalizeChatMessage(payload = {}) {
+  const platform = payload.platform || 'demo';
+  const text = payload.text || 'Пустое сообщение';
+
+  return {
+    platform,
+    platformIcon: payload.platformIcon || getPlatformIconUrl(platform),
+    user: payload.user || 'Гость',
+    text,
+    parts: normalizeMessageParts(text, payload.parts),
+    badges: Array.isArray(payload.badges) ? payload.badges : [],
+    createdAt: payload.createdAt || new Date().toISOString(),
+  };
+}
+
+function parseTwitchChannel(value = '') {
+  const trimmedValue = String(value).trim();
+
+  if (!trimmedValue) {
+    return '';
+  }
+
+  try {
+    const url = new URL(trimmedValue);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    return (pathParts[0] || '').replace(/^@/, '').toLowerCase();
+  } catch {
+    return trimmedValue.replace(/^@/, '').replace(/^#/, '').toLowerCase();
+  }
+}
+
+async function connectChatSources(channels = currentChannels) {
+  const previousVkChannel = currentChannels.vk;
+  currentChannels = {
+    ...currentChannels,
+    ...channels,
+  };
+
+  if (previousVkChannel !== currentChannels.vk) {
+    vkChatBootstrapped = false;
+    vkConnectionState = {
+      consecutiveFailures: 0,
+      lastSuccessAt: 0,
+      lastViewers: 0,
+      lastChatAvailable: false,
+      lastError: '',
+      lastChatMessageId: 0,
+    };
+    chatStats.vkMessageIds = new Set();
+  }
+
+  await connectTwitchChat(parseTwitchChannel(currentChannels.twitch));
+  await connectYouTubeChat(currentChannels.youtube);
+  await connectRutubeChat(currentChannels.rutube);
+  await refreshViewerCounts();
+  await pollVkChat();
+  broadcastChatStatus();
+}
+
+async function connectTwitchChat(channel) {
+  if (twitchClient) {
+    try {
+      await twitchClient.disconnect();
+    } catch (error) {
+      console.error(`Не удалось отключить старый Twitch-чат: ${error.message}`);
+    }
+  }
+
+  if (!channel) {
+    chatStats.platformStatus.twitch = 'канал не задан';
+    broadcastChatStatus();
+    return;
+  }
+
+  chatStats.platformStatus.twitch = 'подключаем';
+  broadcastChatStatus();
+
+  twitchClient = new tmi.Client({
+    connection: {
+      reconnect: true,
+      secure: true,
+    },
+    channels: [channel],
+  });
+
+  twitchClient.on('connected', () => {
+    chatStats.platformStatus.twitch = 'подключён';
+    console.log(`Twitch-чат подключён: ${channel}`);
+    broadcastChatStatus();
+  });
+
+  twitchClient.on('disconnected', (reason) => {
+    chatStats.platformStatus.twitch = `отключён: ${reason || 'причина неизвестна'}`;
+    console.log(`Twitch-чат отключён: ${reason || 'причина неизвестна'}`);
+    broadcastChatStatus();
+  });
+
+  twitchClient.on('message', (_channel, tags, message, self) => {
+    if (self) {
+      return;
+    }
+
+    createTwitchMessage(tags, message)
+      .then((chatMessage) => broadcastChatMessage(chatMessage))
+      .catch((error) => console.error(`Не удалось обработать Twitch-сообщение: ${error.message}`));
+  });
+
+  twitchClient.on('subscription', (_channel, username, _methods, message) => {
+    enqueueSubscriberAlert({
+      id: `twitch:sub:${username}:${Date.now()}`,
+      platform: 'twitch',
+      username,
+      message: message || 'оформил подписку',
+    });
+  });
+
+  twitchClient.on('resub', (_channel, username, months, message) => {
+    enqueueSubscriptionRenewalAlert({
+      id: `twitch:renewal:${username}:${Date.now()}`,
+      platform: 'twitch',
+      username,
+      months: Number(months || 0),
+      message: message || 'продлил подписку',
+    });
+  });
+
+  twitchClient.on('subgift', (_channel, username, _streakMonths, recipient) => {
+    enqueueSubscriberAlert({
+      id: `twitch:gift:${recipient}:${Date.now()}`,
+      platform: 'twitch',
+      username: recipient,
+      message: `получил подарочную подписку от ${username}`,
+    });
+  });
+
+  twitchClient.on('raided', (_channel, username, viewers) => {
+    enqueueRaidAlert({
+      id: `twitch:raid:${username}:${Date.now()}`,
+      platform: 'twitch',
+      username,
+      viewers,
+      message: `рейд на ${viewers || 0} зрителей`,
+    });
+  });
+
+  try {
+    await twitchClient.connect();
+  } catch (error) {
+    chatStats.platformStatus.twitch = `ошибка: ${error.message}`;
+    console.error(`Twitch-чат не подключён: ${error.message}`);
+    broadcastChatStatus();
+  }
+}
+
+async function connectYouTubeChat(channelUrl) {
+  if (youtubeClient) {
+    youtubeClient.stop();
+    youtubeClient = null;
+  }
+
+  if (!channelUrl) {
+    chatStats.platformStatus.youtube = 'канал не задан';
+    broadcastChatStatus();
+    return;
+  }
+
+  chatStats.platformStatus.youtube = 'подключаем';
+  broadcastChatStatus();
+
+  try {
+    const liveId = await resolveYouTubeLiveId(channelUrl);
+
+    if (!liveId) {
+      chatStats.platformStatus.youtube = 'эфир не найден';
+      broadcastChatStatus();
+      return;
+    }
+
+    youtubeClient = new LiveChat({ liveId });
+    youtubeClient.on('start', () => {
+      chatStats.platformStatus.youtube = 'подключён';
+      broadcastChatStatus();
+    });
+    youtubeClient.on('end', (reason) => {
+      chatStats.platformStatus.youtube = `отключён: ${reason || 'эфир завершён'}`;
+      broadcastChatStatus();
+    });
+    youtubeClient.on('error', (error) => {
+      chatStats.platformStatus.youtube = `ошибка: ${error.message || error}`;
+      broadcastChatStatus();
+    });
+    youtubeClient.on('chat', async (chatItem) => {
+      const parts = await buildYouTubeMessageParts(chatItem.message || []);
+      const text = parts.map((part) => part.text || part.alt || '').join('');
+      const badges = await buildYouTubeBadges(chatItem);
+
+      broadcastChatMessage({
+        platform: 'youtube',
+        platformIcon: getPlatformIconUrl('youtube'),
+        user: chatItem.author?.name || 'Зритель',
+        text,
+        parts,
+        badges,
+        createdAt: (chatItem.timestamp || new Date()).toISOString(),
+      });
+    });
+
+    const ok = await youtubeClient.start();
+    if (!ok) {
+      chatStats.platformStatus.youtube = 'не удалось подключить';
+      broadcastChatStatus();
+    }
+  } catch (error) {
+    chatStats.platformStatus.youtube = `ошибка: ${error.message}`;
+    broadcastChatStatus();
+  }
+}
+
+async function buildYouTubeBadges(chatItem) {
+  const badges = [
+    chatItem.isOwner ? { label: 'owner' } : null,
+    chatItem.isModerator ? { label: 'moderator' } : null,
+    chatItem.isVerified ? { label: 'verified' } : null,
+    chatItem.isMembership ? { label: 'member' } : null,
+  ].filter(Boolean);
+
+  if (chatItem.author?.badge?.thumbnail?.url) {
+    badges.push({
+      label: chatItem.author.badge.label || 'badge',
+      url: await cacheRemoteAsset(chatItem.author.badge.thumbnail.url, 'badges'),
+    });
+  }
+
+  return badges;
+}
+
+async function resolveYouTubeLiveId(channelUrl) {
+  const value = String(channelUrl || '').trim();
+
+  if (!value) {
+    return '';
+  }
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(value)) {
+    return value;
+  }
+
+  const url = value.startsWith('http') ? value : `https://www.youtube.com/${value}`;
+  const liveUrl = url.includes('/live') || url.includes('/watch') ? url : `${url.replace(/\/$/, '')}/live`;
+  const response = await fetch(liveUrl);
+  const html = await response.text();
+  const watchMatch = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/) || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+  return watchMatch ? watchMatch[1] : '';
+}
+
+async function buildYouTubeMessageParts(messageParts) {
+  const parts = [];
+
+  for (const part of messageParts) {
+    if ('text' in part) {
+      parts.push({ type: 'text', text: part.text });
+      continue;
+    }
+
+    if (part.url) {
+      const localUrl = await cacheRemoteAsset(part.url, 'emotes');
+      parts.push({ type: 'image', url: localUrl, alt: part.emojiText || part.alt || '' });
+    }
+  }
+
+  return parts.length ? parts : [{ type: 'text', text: '' }];
+}
+
+async function connectRutubeChat(channelUrl) {
+  if (!channelUrl) {
+    chatStats.platformStatus.rutube = 'канал не задан';
+    chatStats.viewers.rutube = 0;
+    broadcastChatStatus();
+    return;
+  }
+
+  chatStats.platformStatus.rutube = 'ожидает доступный чат';
+  chatStats.viewers.rutube = await fetchRutubeViewerCount(channelUrl).catch(() => 0);
+  broadcastChatStatus();
+}
+
+async function fetchRutubeViewerCount(channelUrl) {
+  const response = await fetch(channelUrl);
+  const html = await response.text();
+  const match = html.match(/"viewers_count"\s*:\s*(\d+)/) || html.match(/"viewersCount"\s*:\s*(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
+async function createTwitchMessage(tags, message) {
+  return {
+    platform: 'twitch',
+    platformIcon: getPlatformIconUrl('twitch'),
+    user: tags['display-name'] || tags.username || 'Зритель',
+    text: message,
+    parts: await buildTwitchMessageParts(message, tags.emotes || {}),
+    badges: Object.keys(tags.badges || {}),
+    color: tags.color || '',
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function buildTwitchMessageParts(message, emotes) {
+  const ranges = [];
+
+  for (const [emoteId, positions] of Object.entries(emotes || {})) {
+    for (const position of positions) {
+      const [start, end] = position.split('-').map(Number);
+      ranges.push({ emoteId, start, end });
+    }
+  }
+
+  ranges.sort((left, right) => left.start - right.start);
+
+  if (!ranges.length) {
+    return [{ type: 'text', text: message }];
+  }
+
+  const parts = [];
+  let cursor = 0;
+
+  for (const range of ranges) {
+    if (range.start > cursor) {
+      parts.push({ type: 'text', text: message.slice(cursor, range.start) });
+    }
+
+    const emoteText = message.slice(range.start, range.end + 1);
+    const remoteUrl = `https://static-cdn.jtvnw.net/emoticons/v2/${range.emoteId}/default/dark/1.0`;
+    const localUrl = await cacheRemoteAsset(remoteUrl, 'emotes');
+    parts.push({ type: 'image', url: localUrl, alt: emoteText });
+    cursor = range.end + 1;
+  }
+
+  if (cursor < message.length) {
+    parts.push({ type: 'text', text: message.slice(cursor) });
+  }
+
+  return parts;
+}
+
+function startChatPolling() {
+  clearInterval(vkPollTimer);
+  clearInterval(viewerPollTimer);
+
+  vkPollTimer = setInterval(() => {
+    pollVkChat().catch((error) => {
+      vkConnectionState.consecutiveFailures += 1;
+      vkConnectionState.lastError = formatVkFetchError(error);
+      chatStats.viewers.vk = vkConnectionState.lastViewers || 0;
+      chatStats.platformStatus.vk = getVkPlatformStatus(vkConnectionState.lastChatAvailable);
+      broadcastChatStatus();
+      console.error(`VK Live: неожиданная ошибка опроса: ${vkConnectionState.lastError}`);
+    });
+  }, 5000);
+
+  viewerPollTimer = setInterval(() => {
+    refreshViewerCounts().catch((error) => {
+      console.error(`Не удалось обновить счётчики зрителей: ${error.message}`);
+    });
+  }, 10000);
+
+  refreshViewerCounts().catch(() => {});
+}
+
+async function refreshViewerCounts() {
+  const [twitchViewers, vkViewers, youtubeViewers, rutubeViewers] = await Promise.all([
+    fetchTwitchViewerCount(parseTwitchChannel(currentChannels.twitch)).catch(() => chatStats.viewers.twitch || 0),
+    currentChannels.vk
+      ? fetchVkViewerCount(currentChannels.vk).catch(() => vkConnectionState.lastViewers || 0)
+      : Promise.resolve(0),
+    fetchYouTubeViewerCount(currentChannels.youtube).catch(() => 0),
+    fetchRutubeViewerCount(currentChannels.rutube).catch(() => 0),
+  ]);
+
+  chatStats.viewers.twitch = twitchViewers;
+  chatStats.viewers.vk = vkViewers;
+  chatStats.viewers.youtube = youtubeViewers;
+  chatStats.viewers.rutube = rutubeViewers;
+  vkConnectionState.lastViewers = vkViewers;
+  broadcastChatStatus();
+}
+
+async function fetchTwitchViewerCount(channel) {
+  if (!channel) {
+    return 0;
+  }
+
+  const query =
+    'query ChannelShell($login: String!) { user(login: $login) { stream { viewersCount type } } }';
+  const response = await fetch('https://gql.twitch.tv/gql', {
+    method: 'POST',
+    headers: {
+      'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      operationName: 'ChannelShell',
+      variables: { login: channel },
+      query,
+    }),
+  });
+  const payload = await response.json();
+
+  return Number(payload?.data?.user?.stream?.viewersCount || 0);
+}
+
+async function fetchYouTubeViewerCount(channelUrl) {
+  if (!channelUrl) {
+    return 0;
+  }
+
+  const value = String(channelUrl).trim();
+  const url = value.startsWith('http') ? value : `https://www.youtube.com/${value}`;
+  const liveUrl = url.includes('/live') || url.includes('/watch') ? url : `${url.replace(/\/$/, '')}/live`;
+  const response = await fetch(liveUrl);
+  const html = await response.text();
+
+  // ВАЖНО: нужны ТЕКУЩИЕ зрители эфира (concurrent), а НЕ суммарные просмотры видео.
+  // Поле "viewCount" в videoDetails — это накопленные просмотры за всё время (даёт
+  // нереалистично большую цифру), поэтому его здесь НЕ используем.
+  const concurrent =
+    html.match(/"concurrentViewers":"(\d+)"/) ||
+    html.match(/"originalViewCount":"(\d+)"/);
+  if (concurrent) {
+    return Number(concurrent[1]) || 0;
+  }
+
+  // Фолбэк: текст вида "1 234 смотрят" / "1,234 watching now" (только с меткой «смотрят/watching»).
+  const watching =
+    html.match(/"simpleText":"([\d\s., ]+)\s*(?:watching|смотр)/i) ||
+    html.match(/"text":"([\d\s., ]+)"\}[^}]*"text":"\s*(?:watching|смотр)/i);
+  if (watching) {
+    const n = Number(String(watching[1]).replace(/[^\d]/g, '') || 0);
+    if (n > 0) {
+      return n;
+    }
+  }
+
+  // Нет активного эфира — онлайн 0 (не показываем суммарные просмотры).
+  return 0;
+}
+
+async function pollVkChat() {
+  if (!currentChannels.vk) {
+    chatStats.viewers.vk = 0;
+    chatStats.platformStatus.vk = 'канал не задан';
+    broadcastChatStatus();
+    return;
+  }
+
+  let vkState;
+  try {
+    vkState = await fetchVkState(currentChannels.vk);
+    if (vkConnectionState.consecutiveFailures > 0) {
+      logInfo('VK Live снова подключён');
+    }
+    vkConnectionState.consecutiveFailures = 0;
+    vkConnectionState.lastError = '';
+    vkConnectionState.lastSuccessAt = Date.now();
+  } catch (error) {
+    vkConnectionState.consecutiveFailures += 1;
+    vkConnectionState.lastError = formatVkFetchError(error);
+    chatStats.viewers.vk = vkConnectionState.lastViewers || 0;
+    chatStats.platformStatus.vk = getVkPlatformStatus(vkConnectionState.lastChatAvailable);
+    broadcastChatStatus();
+
+    if (vkConnectionState.consecutiveFailures === 1 || vkConnectionState.consecutiveFailures % 5 === 0) {
+      console.error(`VK Live: ошибка подключения (${vkConnectionState.consecutiveFailures}): ${vkConnectionState.lastError}`);
+    }
+    return;
+  }
+
+  const { messages, viewers, chatAvailable } = vkState;
+  vkConnectionState.lastViewers = viewers;
+  vkConnectionState.lastChatAvailable = chatAvailable;
+  chatStats.viewers.vk = viewers;
+  chatStats.platformStatus.vk = getVkPlatformStatus(chatAvailable);
+
+  if (!vkChatBootstrapped) {
+    for (const message of messages) {
+      rememberVkMessageId(message.id);
+      const numericId = Number(String(message.id).replace(/^vk:/, ''));
+      if (Number.isFinite(numericId)) {
+        vkConnectionState.lastChatMessageId = Math.max(vkConnectionState.lastChatMessageId, numericId);
+      }
+    }
+
+    vkChatBootstrapped = true;
+    broadcastChatStatus();
+    return;
+  }
+
+  const sortedMessages = [...messages].sort((left, right) => {
+    const leftId = Number(String(left.id).replace(/^vk:/, '')) || 0;
+    const rightId = Number(String(right.id).replace(/^vk:/, '')) || 0;
+    return leftId - rightId;
+  });
+
+  for (const message of sortedMessages) {
+    if (chatStats.vkMessageIds.has(message.id)) {
+      continue;
+    }
+
+    rememberVkMessageId(message.id);
+    const numericId = Number(String(message.id).replace(/^vk:/, ''));
+    if (Number.isFinite(numericId)) {
+      vkConnectionState.lastChatMessageId = Math.max(vkConnectionState.lastChatMessageId, numericId);
+    }
+
+    if (message.subscriptionRenewalEvent && vkChatBootstrapped) {
+      enqueueSubscriptionRenewalAlert(message.subscriptionRenewalEvent);
+    } else if (message.subscriberEvent && vkChatBootstrapped) {
+      enqueueSubscriberAlert(message.subscriberEvent);
+    }
+
+    broadcastChatMessage({
+      platform: 'vk',
+      platformIcon: getPlatformIconUrl('vk'),
+      user: message.user,
+      text: message.text,
+      parts: message.parts,
+      badges: message.badges,
+      createdAt: message.createdAt,
+    });
+  }
+
+  vkChatBootstrapped = true;
+  broadcastChatStatus();
+}
+
+async function mapVkChatItems(chatData = []) {
+  const results = await Promise.all(
+    chatData
+      .filter((item) => item && !item.isDeleted)
+      .map(async (item) => {
+        try {
+          const subscriberEvent = parseVkSubscriberEvent(item);
+          const subscriptionRenewalEvent = parseVkSubscriptionRenewalEvent(item);
+
+          return {
+            id: `vk:${item.id}`,
+            user: item.author?.displayName || item.author?.nick || item.author?.name || 'Зритель',
+            text: extractVkMessageText(item.data),
+            parts: extractVkMessageParts(item.data),
+            badges: await buildVkBadges(item.author?.badges || [], item.author || {}),
+            createdAt: new Date(Number(item.createdAt || Date.now() / 1000) * 1000).toISOString(),
+            subscriberEvent,
+            subscriptionRenewalEvent,
+          };
+        } catch (error) {
+          console.error(`VK Live: не удалось разобрать сообщение ${item.id}: ${error.message}`);
+          return null;
+        }
+      }),
+  );
+
+  return results.filter(Boolean);
+}
+
+async function fetchVkState(channelUrl) {
+  const slug = parseVkChannelSlug(channelUrl);
+  if (!slug) {
+    throw new Error('VK канал не задан');
+  }
+
+  const streamPath = `/blog/${encodeURIComponent(slug)}/public_video_stream`;
+  const chatQuery = vkConnectionState.lastChatMessageId > 0 ? `?limit=30&from_id=${vkConnectionState.lastChatMessageId}` : '?limit=30';
+  const [streamResult, chatResult] = await Promise.allSettled([
+    fetchJsonWithRetry(`${VK_API_BASE}${streamPath}`),
+    fetchJsonWithRetry(`${VK_API_BASE}${streamPath}/chat${chatQuery}`),
+  ]);
+
+  if (streamResult.status === 'rejected') {
+    throw streamResult.reason;
+  }
+
+  const stream = unwrapVkStreamPayload(streamResult.value);
+  const viewers = extractVkViewerCount(stream);
+  const chatAvailable = stream?.hasChat !== false;
+
+  let chatData = [];
+  if (chatResult.status === 'fulfilled') {
+    chatData = Array.isArray(chatResult.value?.data) ? chatResult.value.data : [];
+    if (vkConnectionState.lastChatMessageId > 0) {
+      chatData = chatData.filter((item) => Number(item.id) > vkConnectionState.lastChatMessageId);
+    }
+  }
+
+  const messages = (await mapVkChatItems(chatData)).filter((item) => item.text || item.parts.length);
+
+  return {
+    viewers,
+    messages,
+    chatAvailable,
+  };
+}
+
+async function buildVkBadges(badges = [], author = {}) {
+  const roleBadges = [];
+
+  if (author.isOwner) roleBadges.push({ label: 'owner' });
+  if (author.isChatModerator || author.isChannelModerator) roleBadges.push({ label: 'moderator' });
+  if (author.isVerifiedStreamer) roleBadges.push({ label: 'verified' });
+
+  const imageBadges = await Promise.all(
+    badges.map(async (badge) => {
+      const url = badge.smallUrl || badge.mediumUrl || badge.largeUrl;
+      return {
+        label: badge.name || badge.achievement?.name || 'badge',
+        url: url ? await cacheRemoteAsset(url, 'badges') : '',
+      };
+    }),
+  );
+
+  return [...roleBadges, ...imageBadges].filter((badge) => badge.label || badge.url);
+}
+
+function extractVkMessageText(parts = []) {
+  return extractVkMessageParts(parts)
+    .map((part) => {
+      return part.text || part.alt || '';
+    })
+    .join('')
+    .trim();
+}
+
+function parseVkChatBotMessage(item = {}) {
+  const authorName = String(item.author?.displayName || item.author?.nick || item.author?.name || '').trim();
+  if (!/chatbot/i.test(authorName)) {
+    return null;
+  }
+
+  const parts = Array.isArray(item.data) ? item.data : [];
+  const mention = parts.find((part) => part?.type === 'mention');
+  const textParts = parts
+    .filter((part) => part?.type === 'text')
+    .map((part) => {
+      try {
+        const parsed = JSON.parse(part.content || '[]');
+        return Array.isArray(parsed) ? String(parsed[0] || '') : String(part.content || '');
+      } catch {
+        return String(part.content || '');
+      }
+    })
+    .join(' ')
+    .trim();
+
+  const username = String(mention?.displayName || mention?.nick || mention?.name || '').trim();
+  if (!username) {
+    return null;
+  }
+
+  return {
+    username,
+    textParts,
+    id: item.id,
+    createdAt: new Date(Number(item.createdAt || Date.now() / 1000) * 1000).toISOString(),
+  };
+}
+
+function parseVkSubscriptionRenewalEvent(item = {}) {
+  const base = parseVkChatBotMessage(item);
+  if (!base || !/продлил\s+подписку/i.test(base.textParts)) {
+    return null;
+  }
+
+  const tierMatch = base.textParts.match(/подписку\s+['«"]([^'»"]+)['»"]/i);
+  const monthsMatch = base.textParts.match(/подписан\s+уже\s+(\d+)\s+месяц/i);
+
+  return {
+    platform: 'vk',
+    username: base.username,
+    tier: tierMatch?.[1] || '',
+    months: monthsMatch ? Number(monthsMatch[1]) : 0,
+    message: base.textParts,
+    id: `vk:renewal:${base.id}`,
+    createdAt: base.createdAt,
+  };
+}
+
+function parseVkSubscriberEvent(item = {}) {
+  const base = parseVkChatBotMessage(item);
+  if (!base || !/отслеживает канал|подпис/i.test(base.textParts)) {
+    return null;
+  }
+
+  if (/продлил\s+подписку/i.test(base.textParts)) {
+    return null;
+  }
+
+  return {
+    platform: 'vk',
+    username: base.username,
+    message: base.textParts,
+    id: `vk:sub:${base.id}`,
+    createdAt: base.createdAt,
+  };
+}
+
+function extractVkMessageParts(parts = []) {
+  return parts
+    .map((part) => {
+      if (part?.type === 'mention') {
+        const mentionName = part.displayName || part.nick || part.name || '';
+        return mentionName ? { type: 'text', text: `${mentionName} ` } : null;
+      }
+
+      if (part.url) {
+        return { type: 'text', text: part.url };
+      }
+
+      if (part.imageUrl || part.smallUrl || part.mediumUrl || part.largeUrl) {
+        return {
+          type: 'image',
+          url: part.imageUrl || part.smallUrl || part.mediumUrl || part.largeUrl,
+          alt: part.name || part.content || 'emoji',
+        };
+      }
+
+      if (part.emojiUrl || part.emoji?.url) {
+        return {
+          type: 'image',
+          url: part.emojiUrl || part.emoji.url,
+          alt: part.emojiText || part.name || 'emoji',
+        };
+      }
+
+      try {
+        const parsed = JSON.parse(part.content || '[]');
+
+        if (Array.isArray(parsed)) {
+          return { type: 'text', text: parsed[0] || '' };
+        }
+
+        if (parsed?.text) {
+          return { type: 'text', text: parsed.text };
+        }
+
+        if (parsed?.emojiText) {
+          return { type: 'text', text: parsed.emojiText };
+        }
+      } catch {
+        return { type: 'text', text: part.content || '' };
+      }
+
+      return { type: 'text', text: part.content || '' };
+    })
+    .filter((part) => part && (part.text || part.url));
+}
+
+function normalizeDonation(payload = {}) {
+  return {
+    id: String(payload.id || payload.alertId || payload.createdAt || `donation-${Date.now()}`),
+    username: payload.username || 'Зритель',
+    amount: Number(payload.amount || 0),
+    currency: payload.currency || 'RUB',
+    message: payload.message || 'Без сообщения',
+    createdAt: payload.createdAt || new Date().toISOString(),
+    isTest: Boolean(payload.isTest),
+    showInChat: Boolean(payload.showInChat),
+  };
+}
+
+function purgeTestAlerts() {
+  const hadTestAlerts = alertQueue.some(
+    (item) => item.donation?.isTest || item.subscriber?.isTest || item.renewal?.isTest || item.raid?.isTest || item.firstMessage?.isTest,
+  );
+  const hadTestDonations = donationAlertsState.donations.some((donation) => donation.isTest);
+
+  if (hadTestAlerts) {
+    alertQueue = alertQueue.filter(
+      (item) => !item.donation?.isTest && !item.subscriber?.isTest && !item.renewal?.isTest && !item.raid?.isTest && !item.firstMessage?.isTest,
+    );
+    broadcastAlertQueue();
+  }
+
+  if (hadTestDonations) {
+    donationAlertsState = {
+      ...donationAlertsState,
+      donations: donationAlertsState.donations.filter((donation) => !donation.isTest),
+    };
+    broadcastDonationAlertsState();
+  }
+}
+
+function isInternalDemoRequest(request) {
+  return request.headers['x-tchat-internal'] === '1';
+}
+
+function normalizeGoal(payload = {}) {
+  const target = Math.max(Number(payload.target || 1), 1);
+  const current = Math.max(Number(payload.current || 0), 0);
+
+  return {
+    title: payload.title || 'Сбор',
+    current,
+    target,
+    currency: payload.currency || 'RUB',
+    percent: Math.min(Math.round((current / target) * 100), 100),
+    updatedAt: payload.updatedAt || new Date().toISOString(),
+  };
+}
+
+app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) {
+    return;
+  }
+
+  Menu.setApplicationMenu(null);
+  setupChatStorage();
+  setupDonationAlertsStorage();
+  await startLocalServer();
+  purgeTestAlerts();
+  broadcastGoalState();
+  createChatWindow();
+  if (donationAlertsToken) {
+    startDonationAlertsSync(donationAlertsToken);
+  }
+  await connectChatSources(currentChannels);
+  startChatPolling();
+  ensureCountdownTicking();
+  setupAutoUpdater();
+
+  // Глобальный хоткей полупрозрачного режима — работает и когда фокус в игре.
+  const ghostShortcutOk = globalShortcut.register('Control+Alt+G', toggleGhostMode);
+  if (!ghostShortcutOk) {
+    console.error('Не удалось зарегистрировать хоткей Ctrl+Alt+G (занят другим приложением).');
+  }
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createChatWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
+app.on('before-quit', async () => {
+  clearInterval(vkPollTimer);
+  clearInterval(viewerPollTimer);
+  clearInterval(donationAlertsTimer);
+  clearInterval(countdownTickTimer);
+  if (twitchClient) {
+    await twitchClient.disconnect().catch(() => {});
+  }
+  if (youtubeClient) {
+    youtubeClient.stop();
+  }
+  await stopLocalServer();
+});
+
+ipcMain.handle('app:check-updates', async () => {
+  if (!autoUpdater) {
+    return { ok: false, error: 'модуль обновления недоступен' };
+  }
+  if (!app.isPackaged) {
+    return { ok: false, error: 'проверка работает только в собранном приложении' };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const latest = result?.updateInfo?.version || '';
+    return {
+      ok: true,
+      current: app.getVersion(),
+      latest,
+      hasUpdate: Boolean(result?.isUpdateAvailable),
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle('app:get-server-status', () => serverStatus);
+ipcMain.handle('app:get-info', () => ({
+  version: app.getVersion(),
+  botConfig: {
+    key: botConfigKey,
+    url: `${serverStatus.url}/config/bot.json?key=${botConfigKey}`,
+  },
+}));
+
+ipcMain.handle('app:open-external', async (_event, url) => {
+  await shell.openExternal(url);
+});
+
+ipcMain.handle('app:open-chat-window', () => {
+  createChatWindow();
+});
+
+ipcMain.handle('app:open-backoffice', () => {
+  createWindow();
+});
+
+ipcMain.handle('chat:update-channels', async (_event, channels) => {
+  await connectChatSources({
+    twitch: parseTwitchChannel(channels?.twitch || currentChannels.twitch),
+    vk: channels?.vk || currentChannels.vk,
+    youtube: channels?.youtube || currentChannels.youtube,
+    rutube: channels?.rutube || currentChannels.rutube,
+  });
+});
+
+ipcMain.handle('chat:get-status', () => getChatStatusPayload());
+
+ipcMain.handle('chat:get-history', () => getRecentChatMessages());
+
+ipcMain.handle('chat:get-ui-settings', () => chatUiSettings);
+
+ipcMain.handle('chat:save-ui-settings', (_event, payload) => saveChatUiSettings(payload));
+
+ipcMain.handle('donationalerts:update', (_event, payload) => startDonationAlertsSync(payload?.token || ''));
+
+ipcMain.handle('donationalerts:get-state', () => getDonationAlertsState());
+
+ipcMain.handle('donationalerts:get-auth-url', (_event, payload) => getDonationAlertsAuthUrl(payload));
+
+ipcMain.handle('donationalerts:get-credentials', () => getDonationAlertsCredentials());
+
+ipcMain.handle('donationalerts:remove-donation', (_event, payload) => removeDonationAlert(payload?.id));
+
+ipcMain.handle('alerts:get-settings', () => alertSettings);
+
+ipcMain.handle('alerts:save-settings', (_event, payload) => saveAlertSettings(payload));
+
+ipcMain.handle('alerts:get-queue', () => getAlertQueuePayload());
+
+ipcMain.handle('alerts:pick-asset', (_event, payload) => pickAlertAsset(payload?.kind || 'image'));
+
+ipcMain.handle('music:get-queue', () => getMusicQueuePayload());
+
+ipcMain.handle('music:add-url', (_event, payload) => addManualMusicUrl(payload));
+
+ipcMain.handle('music:remove-item', (_event, payload) => removeMusicItem(payload?.id));
+
+ipcMain.handle('announce:get-settings', () => announceSettings);
+ipcMain.handle('announce:save-settings', (_event, payload) => saveAnnounceSettings(payload || {}));
+ipcMain.handle('announce:preview', async () => {
+  try {
+    return await announce.buildAnnouncement(announceSettings);
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+ipcMain.handle('announce:send', async (_event, prepared) => {
+  try {
+    return await announce.sendAnnouncement(announceSettings, prepared || {});
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle('goal:get-state', () => goalState);
+
+ipcMain.handle('goal:update', (_event, payload) => updateGoalState(payload));
+
+ipcMain.handle('widgets:get-state', () => getStreamWidgetsPayload());
+
+ipcMain.handle('widgets:create', (_event, payload) => createStreamWidget(payload));
+
+ipcMain.handle('widgets:update', (_event, payload) => updateStreamWidget(payload?.id, payload));
+
+ipcMain.handle('widgets:delete', (_event, payload) => deleteStreamWidget(payload?.id));
+
+ipcMain.handle('poll:start', (_event, payload) => startPoll(payload));
+
+ipcMain.handle('poll:finish', () => finishPoll());
+
+ipcMain.handle('poll:hide', () => hidePoll());
+
+ipcMain.handle('poll:show', () => showPoll());
+
+ipcMain.handle('poll:clear', () => clearPoll());
+
+ipcMain.handle('countdown:adjust', (_event, payload) => adjustCountdownWidget(payload?.id, payload?.deltaSeconds));
+
+ipcMain.handle('countdown:set', (_event, payload) => setCountdownWidgetTime(payload?.id, payload));
+
+ipcMain.handle('countdown:start', (_event, payload) => startCountdownWidget(payload?.id));
+
+ipcMain.handle('countdown:pause', (_event, payload) => pauseCountdownWidget(payload?.id));
+
+ipcMain.handle('countdown:resume', (_event, payload) => resumeCountdownWidget(payload?.id));
+
+ipcMain.handle('countdown:reset', (_event, payload) => resetCountdownWidget(payload?.id, payload?.seconds));
+
+ipcMain.handle('demo:send-chat-message', (_event, payload) => {
+  const message = normalizeChatMessage(payload);
+  broadcastChatMessage(message);
+});
+
+ipcMain.handle('demo:send-donation-alert', (_event, payload) => {
+  const item = enqueueDonationAlert({
+    id: `${payload?.isTest === false ? 'manual' : 'test'}-${Date.now()}`,
+    username: payload?.username || (payload?.isTest === false ? 'Зритель' : 'Тестовый донатер'),
+    amount: Number(payload?.amount || 666),
+    currency: payload?.currency || 'RUB',
+    message: payload?.message || (payload?.isTest === false ? 'Ручной донат' : 'Проверяем алерт из бэкоффиса'),
+    createdAt: new Date().toISOString(),
+    isTest: payload?.isTest !== false,
+    showInChat: true,
+  });
+  return item;
+});
+
+ipcMain.handle('demo:send-subscriber-alert', (_event, payload) => {
+  return enqueueSubscriberAlert({
+    id: `test-sub-${Date.now()}`,
+    platform: payload?.platform || 'demo',
+    username: payload?.username || 'Новый зритель',
+    message: payload?.message || 'подписался на канал',
+    createdAt: new Date().toISOString(),
+  });
+});
+
+ipcMain.handle('demo:send-subscription-renewal-alert', (_event, payload) => {
+  return enqueueSubscriptionRenewalAlert({
+    id: `test-renewal-${Date.now()}`,
+    platform: payload?.platform || 'demo',
+    username: payload?.username || 'Зритель',
+    tier: payload?.tier || 'Матрос',
+    months: Number(payload?.months || 2),
+    message: payload?.message || "продлил подписку 'Матрос'. Подписан уже 2 месяцев.",
+    createdAt: new Date().toISOString(),
+    isTest: Boolean(payload?.isTest),
+  });
+});
+
+ipcMain.handle('demo:send-raid-alert', (_event, payload) => {
+  return enqueueRaidAlert({
+    id: `test-raid-${Date.now()}`,
+    platform: payload?.platform || 'demo',
+    username: payload?.username || 'Рейдер',
+    viewers: Number(payload?.viewers || 25),
+    message: payload?.message || 'рейд на 25 зрителей',
+    createdAt: new Date().toISOString(),
+  });
+});
+
+ipcMain.handle('demo:update-goal', (_event, payload) => {
+  return updateGoalState(payload);
+});

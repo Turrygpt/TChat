@@ -1,0 +1,1316 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat - чат</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", Arial, sans-serif;
+        --chat-font-size: 20px;
+        --chat-gap: 4px;
+        --bg: #0b0e14;
+        --panel: #131824;
+        --border: #232b3d;
+        --text: #e8ecf4;
+        --muted: #8b94a7;
+        --accent: #8b5cf6;
+        --accent-2: #6366f1;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      *::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        border: 3px solid transparent;
+        border-radius: 999px;
+        background: #2a3348 content-box;
+      }
+
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .chat-app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+      }
+
+      .statusbar {
+        display: grid;
+        flex: 0 0 auto;
+        grid-template-columns: auto repeat(4, auto) minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, #141927, #10141e);
+        padding: 10px 12px;
+        font-size: 20px;
+      }
+
+      .counter,
+      .platform-counter {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 42px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgb(255 255 255 / 3%);
+        color: #cbd5df;
+        padding: 0 14px;
+        white-space: nowrap;
+        transition: border-color 140ms ease, background 140ms ease;
+      }
+
+      .platform-counter:hover {
+        border-color: #33405f;
+        background: rgb(255 255 255 / 6%);
+      }
+
+      .counter strong,
+      .platform-counter strong {
+        color: #ffffff;
+      }
+
+      .platform-counter {
+        color: #ffffff;
+        cursor: default;
+      }
+
+      .platform-counter__icon,
+      .message__platform {
+        display: inline-grid;
+        place-items: center;
+        border-radius: 6px;
+        color: #ffffff;
+        font-weight: 900;
+      }
+
+      .platform-counter__icon {
+        width: 1.45em;
+        height: 1.45em;
+        font-size: 0.82em;
+      }
+
+      .platform-counter__icon--twitch,
+      .message__platform--twitch {
+        background: #9146ff;
+      }
+
+      .platform-counter__icon--vk,
+      .message__platform--vk {
+        background: #2787f5;
+      }
+
+      .platform-counter__icon--youtube,
+      .message__platform--youtube {
+        background: #ff0033;
+      }
+
+      .platform-counter__icon--rutube,
+      .message__platform--rutube {
+        background: #00a1e7;
+      }
+
+      .message__platform--demo {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #ffffff;
+      }
+
+      .status-spacer {
+        min-width: 0;
+      }
+
+      .settings-button {
+        width: 42px;
+        min-height: 42px;
+        border: 0;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #ffffff;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 6px 16px rgb(99 102 241 / 30%);
+        transition: filter 140ms ease, transform 140ms ease;
+      }
+
+      .settings-button:hover {
+        filter: brightness(1.1);
+        transform: translateY(-1px);
+      }
+
+      .feed {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        gap: 0;
+        overflow-y: auto;
+        padding: 6px 8px;
+      }
+
+      .pinned-donations {
+        display: grid;
+        flex: 0 0 auto;
+        gap: 4px;
+        border-bottom: 1px solid rgb(251 191 36 / 14%);
+        background: #0d1017;
+        padding: 5px 8px;
+      }
+
+      .pinned-donations:empty {
+        display: none;
+      }
+
+      .empty {
+        margin: auto;
+        color: #7f8b96;
+        text-align: center;
+      }
+
+      .message {
+        padding: calc(var(--chat-gap) / 2) 6px;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        font-size: var(--chat-font-size);
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+        transition: background 3s ease;
+      }
+
+      .message--new {
+        background: rgb(139 92 246 / 12%);
+      }
+
+      .message--settled {
+        background: transparent;
+      }
+
+      .donation-line {
+        border: 1px solid rgb(251 191 36 / 30%);
+        background: linear-gradient(90deg, rgb(251 191 36 / 7%), rgb(251 191 36 / 2%));
+        color: #fff3df;
+      }
+
+      .donation-line--pinned {
+        padding: 4px 7px;
+      }
+
+      .donation-line__badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 1.2em;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #f59e0b, #fbbf24);
+        color: #140900;
+        font-size: 0.75em;
+        font-weight: 800;
+        line-height: 1;
+        margin-right: 0.4em;
+        padding: 0 0.38em;
+        vertical-align: 0.08em;
+      }
+
+      .donation-line__user {
+        color: #ffd166;
+        font-weight: 700;
+      }
+
+      .donation-line__amount {
+        color: #ff9f1c;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .subscriber-line {
+        border: 1px solid rgb(52 211 153 / 32%);
+        background: linear-gradient(90deg, rgb(52 211 153 / 7%), rgb(52 211 153 / 2%));
+        color: #e8fff3;
+      }
+
+      .subscriber-line--pinned {
+        padding: 4px 7px;
+      }
+
+      .subscriber-line__badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 1.2em;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #10b981, #34d399);
+        color: #06120b;
+        font-size: 0.75em;
+        font-weight: 800;
+        line-height: 1;
+        margin-right: 0.4em;
+        padding: 0 0.38em;
+        vertical-align: 0.08em;
+      }
+
+      .subscriber-line__user {
+        color: #b8ffd9;
+        font-weight: 700;
+      }
+
+      .subscriber-line__message {
+        color: #8ef0b8;
+        font-weight: 700;
+      }
+
+      .renewal-line {
+        border: 1px solid rgb(167 139 250 / 34%);
+        background: linear-gradient(90deg, rgb(167 139 250 / 8%), rgb(167 139 250 / 2%));
+        color: #f2e8ff;
+      }
+
+      .renewal-line--pinned {
+        padding: 4px 7px;
+      }
+
+      .renewal-line__badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 1.2em;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+        color: #ffffff;
+        font-size: 0.75em;
+        font-weight: 800;
+        line-height: 1;
+        margin-right: 0.4em;
+        padding: 0 0.38em;
+        vertical-align: 0.08em;
+      }
+
+      .renewal-line__user {
+        color: #d8b4ff;
+        font-weight: 700;
+      }
+
+      .renewal-line__message {
+        color: #e8d4ff;
+        font-weight: 700;
+      }
+
+      .music-line {
+        border: 1px solid rgb(34 211 238 / 30%);
+        background: linear-gradient(90deg, rgb(34 211 238 / 7%), rgb(34 211 238 / 2%));
+        color: #e8faff;
+      }
+
+      .music-line--pinned {
+        padding: 4px 7px;
+      }
+
+      .music-line__badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 1.2em;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #06b6d4, #22d3ee);
+        color: #06222b;
+        font-size: 0.75em;
+        font-weight: 800;
+        line-height: 1;
+        margin-right: 0.4em;
+        padding: 0 0.38em;
+        vertical-align: 0.08em;
+      }
+
+      .music-line__user {
+        color: #a5f3fc;
+        font-weight: 700;
+      }
+
+      .music-line__amount {
+        color: #67e8f9;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .music-line__title {
+        color: #e8faff;
+        font-weight: 700;
+      }
+
+      .music-line__status {
+        color: #9ad8e4;
+        font-weight: 700;
+      }
+
+      .message__prefix {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.18em;
+        margin-right: 0.35em;
+        vertical-align: -0.14em;
+      }
+
+      .message__platform {
+        width: 1.08em;
+        height: 1.08em;
+        min-width: 1.08em;
+        font-size: 0.78em;
+        line-height: 1;
+      }
+
+      .message__platform img,
+      .platform-counter__icon img {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .message__emote {
+        width: 1.35em;
+        height: 1.35em;
+        object-fit: contain;
+        vertical-align: -0.25em;
+      }
+
+      .message__user {
+        font-weight: 700;
+        cursor: context-menu;
+      }
+
+      .message__badges {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.18em;
+        margin: 0;
+        line-height: 1;
+      }
+
+      .message__badge {
+        display: inline-grid;
+        place-items: center;
+        width: 1.08em;
+        min-width: 1.08em;
+        height: 1.08em;
+        border-radius: 3px;
+        background: #303943;
+        color: #dfe7ee;
+        font-size: 0.78em;
+        font-weight: 800;
+        line-height: 1;
+        overflow: hidden;
+        padding: 0;
+      }
+
+      .message__badge img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: contain;
+      }
+
+      .context-menu {
+        position: fixed;
+        z-index: 50;
+        display: none;
+        min-width: 190px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #171d2c;
+        box-shadow: 0 18px 44px rgb(0 0 0 / 50%);
+        padding: 6px;
+      }
+
+      .context-menu--open {
+        display: grid;
+      }
+
+      .context-menu button {
+        min-height: 34px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        padding: 0 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .context-menu button:hover {
+        background: rgb(139 92 246 / 16%);
+      }
+
+      .context-menu button[hidden] {
+        display: none;
+      }
+
+      .context-menu__danger {
+        color: #ff9aa8;
+      }
+
+      .context-menu__danger:hover {
+        background: rgb(255 92 122 / 14%);
+      }
+
+      @media (max-width: 620px) {
+        .statusbar {
+          grid-template-columns: auto repeat(2, auto) minmax(0, 1fr) auto;
+        }
+
+        .counter--optional {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="chat-app">
+      <header class="statusbar">
+        <span class="counter">Общ: <strong id="viewersCounter">0</strong></span>
+        <button id="twitchCounter" class="platform-counter" type="button" title="Twitch: подключаем">
+          <span class="platform-counter__icon platform-counter__icon--twitch">T</span>
+          <strong id="twitchViewersCounter">0</strong>
+        </button>
+        <button id="vkCounter" class="platform-counter" type="button" title="VK: подключаем">
+          <span class="platform-counter__icon platform-counter__icon--vk">V</span>
+          <strong id="vkViewersCounter">0</strong>
+        </button>
+        <button id="youtubeCounter" class="platform-counter counter--optional" type="button" title="YouTube: ожидает подключения">
+          <span class="platform-counter__icon platform-counter__icon--youtube">Y</span>
+          <strong id="youtubeViewersCounter">0</strong>
+        </button>
+        <button id="rutubeCounter" class="platform-counter counter--optional" type="button" title="Rutube: ожидает подключения">
+          <span class="platform-counter__icon platform-counter__icon--rutube">R</span>
+          <strong id="rutubeViewersCounter">0</strong>
+        </button>
+        <span class="status-spacer"></span>
+        <button id="settingsButton" class="settings-button" type="button" title="Бэкоффис">⚙</button>
+      </header>
+
+      <section id="pinnedDonations" class="pinned-donations" aria-live="polite"></section>
+
+      <section id="feed" class="feed" aria-live="polite">
+        <p id="emptyState" class="empty">Подключаем чат...</p>
+      </section>
+
+      <div id="contextMenu" class="context-menu" role="menu">
+        <button id="hideSenderButton" type="button">Скрыть отправителя</button>
+        <button id="hideMessageButton" type="button">Скрыть сообщение</button>
+        <button id="unpinDonationButton" type="button" hidden>Открепить</button>
+        <button id="eraseDonationButton" class="context-menu__danger" type="button" hidden>Стереть</button>
+      </div>
+    </main>
+
+    <script>
+      const feed = document.querySelector('#feed');
+      const pinnedDonations = document.querySelector('#pinnedDonations');
+      const emptyState = document.querySelector('#emptyState');
+      const settingsButton = document.querySelector('#settingsButton');
+      const viewersCounter = document.querySelector('#viewersCounter');
+      const twitchCounter = document.querySelector('#twitchCounter');
+      const vkCounter = document.querySelector('#vkCounter');
+      const youtubeCounter = document.querySelector('#youtubeCounter');
+      const rutubeCounter = document.querySelector('#rutubeCounter');
+      const twitchViewersCounter = document.querySelector('#twitchViewersCounter');
+      const vkViewersCounter = document.querySelector('#vkViewersCounter');
+      const youtubeViewersCounter = document.querySelector('#youtubeViewersCounter');
+      const rutubeViewersCounter = document.querySelector('#rutubeViewersCounter');
+      const contextMenu = document.querySelector('#contextMenu');
+      const hideSenderButton = document.querySelector('#hideSenderButton');
+      const hideMessageButton = document.querySelector('#hideMessageButton');
+      const unpinDonationButton = document.querySelector('#unpinDonationButton');
+      const eraseDonationButton = document.querySelector('#eraseDonationButton');
+      const settingsKey = 'tchat.chatWindowSettings';
+      const filtersKey = 'tchat.chatFilters';
+      const defaultHiddenMessages = [
+        'Золото, розыгрыши, полезная инфа - все в нашем MAX https://max.ru/turry и ТГ https://t.me/turrylleksa',
+      ].map(normalizeFilterText);
+      const defaultSettings = {
+        fontSize: 20,
+        gap: 4,
+        direction: 'top-down',
+        twitch: 'turry_ru',
+        vk: 'https://live.vkvideo.ru/turry/',
+      };
+      let selectedMessage = null;
+      let selectedDonation = null;
+      let currentSettings = null;
+      let saveUiTimer = null;
+      const pinnedDonationIds = new Set();
+      const archivedDonationIds = new Set();
+      const handledAlertIds = new Set();
+      const pinnedDonationTimers = new Map();
+      let alertsBootstrapped = false;
+      const PINNED_DONATION_MS = 10000;
+
+      function insertFeedEntry(entry) {
+        const firstMessage = feed.querySelector('.message');
+        if (firstMessage) {
+          feed.insertBefore(entry, firstMessage);
+        } else {
+          feed.append(entry);
+        }
+      }
+
+      function readSettings() {
+        try {
+          return {
+            ...defaultSettings,
+            ...JSON.parse(localStorage.getItem(settingsKey)),
+          };
+        } catch {
+          return defaultSettings;
+        }
+      }
+
+      function saveSettings({ immediate = false } = {}) {
+        const payload = currentSettings || defaultSettings;
+        localStorage.setItem(settingsKey, JSON.stringify(payload));
+
+        clearTimeout(saveUiTimer);
+        const persistUiSettings = () => {
+          window.tchat.saveChatUiSettings({
+            fontSize: payload.fontSize,
+            gap: payload.gap,
+            direction: payload.direction,
+          });
+        };
+
+        if (immediate) {
+          persistUiSettings();
+          return;
+        }
+
+        saveUiTimer = setTimeout(persistUiSettings, 250);
+      }
+
+      function applySettings(settings) {
+        currentSettings = {
+          ...defaultSettings,
+          ...settings,
+        };
+        document.documentElement.style.setProperty('--chat-font-size', `${currentSettings.fontSize}px`);
+        document.documentElement.style.setProperty('--chat-gap', `${currentSettings.gap}px`);
+      }
+
+      function changeFontSize(delta) {
+        const settings = currentSettings || readSettings();
+        const nextSize = Math.min(64, Math.max(12, Number(settings.fontSize || defaultSettings.fontSize) + delta));
+        currentSettings = {
+          ...settings,
+          fontSize: nextSize,
+        };
+        applySettings(currentSettings);
+        saveSettings();
+      }
+
+      function readFilters() {
+        try {
+          const filters = JSON.parse(localStorage.getItem(filtersKey));
+          return {
+            senders: Array.isArray(filters?.senders) ? filters.senders : [],
+            messages: [...new Set([...defaultHiddenMessages, ...(Array.isArray(filters?.messages) ? filters.messages : [])])],
+          };
+        } catch {
+          return {
+            senders: [],
+            messages: defaultHiddenMessages,
+          };
+        }
+      }
+
+      function saveFilters(filters) {
+        localStorage.setItem(filtersKey, JSON.stringify(filters));
+      }
+
+      function normalizeFilterText(value = '') {
+        return String(value).replace(/\s+/g, ' ').trim().toLowerCase();
+      }
+
+      function isMessageHidden(message) {
+        const filters = readFilters();
+        const senderKey = `${String(message.platform || '').toLowerCase()}:${normalizeFilterText(message.user)}`;
+        const textKey = normalizeFilterText(message.text);
+        return filters.senders.includes(senderKey) || filters.messages.includes(textKey);
+      }
+
+      function applyFiltersToVisibleMessages() {
+        feed.querySelectorAll('.message').forEach((entry) => {
+          const message = JSON.parse(entry.dataset.message || 'null');
+          if (message && isMessageHidden(message)) {
+            entry.remove();
+          }
+        });
+        emptyState.hidden = Boolean(feed.querySelector('.message'));
+      }
+
+      function renderMessage(message) {
+        if (isMessageHidden(message)) {
+          return;
+        }
+
+        emptyState.hidden = true;
+
+        const entry = document.createElement('article');
+        entry.className = 'message message--new';
+        entry.dataset.message = JSON.stringify(message);
+        const platform = String(message.platform || 'demo').toLowerCase();
+        const platformIcon = getPlatformIcon(platform);
+        const nickColor = message.color || getNickColor(`${message.platform || 'demo'}:${message.user || 'Зритель'}`);
+        const badges = renderBadges(message.badges);
+
+        entry.innerHTML = `
+          <span class="message__prefix"><span class="message__platform message__platform--${escapeHtml(platform)}">${platformIcon}</span>${badges}</span><span class="message__user" style="color: ${nickColor}" title="Правый клик - фильтр">${escapeHtml(message.user)}</span>: <span class="message__text">${renderMessageParts(message)}</span>
+        `;
+        entry.querySelector('.message__user').addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          selectedMessage = message;
+          selectedDonation = null;
+          openContextMenu(event.clientX, event.clientY, 'message');
+        });
+
+        insertFeedEntry(entry);
+
+        window.setTimeout(() => {
+          entry.classList.add('message--settled');
+          entry.classList.remove('message--new');
+        }, 12000);
+
+        trimFeed();
+      }
+
+      function trimFeed() {
+        while (feed.querySelectorAll('.message').length > 30) {
+          feed.querySelector('.message:last-of-type')?.remove();
+        }
+      }
+
+      function renderMusicLine(item, mode = 'feed') {
+        const donation = item.donation || {};
+        const title = decodeHtml(item.title || 'Музыкальная заявка');
+        const username = donation.username || 'Зритель';
+        const amount = Number(donation.amount || 0);
+        const amountPart = amount > 0 ? `<span class="music-line__amount">${formatMoney(amount)} ${escapeHtml(donation.currency || 'RUB')}</span> ` : '';
+        const status = item.status === 'rejected'
+          ? `<span class="music-line__status"> — ${escapeHtml(item.reason || 'отклонено')}</span>`
+          : '';
+        const entry = document.createElement('article');
+        entry.className = mode === 'pinned' ? 'message music-line music-line--pinned' : 'message music-line message--settled';
+        entry.dataset.musicId = item.id || '';
+
+        entry.innerHTML = `
+          <span class="music-line__badge">ЗАКАЗ</span>
+          <span class="music-line__user">${escapeHtml(username)}</span>
+          ${amountPart}<span class="music-line__title">— ${escapeHtml(title)}</span>${status}
+        `;
+
+        return entry;
+      }
+
+      function showMusicRequestInChat(item) {
+        if (!item?.id || pinnedDonationIds.has(item.id) || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        pinnedDonationIds.add(item.id);
+        const entry = renderMusicLine(item, 'pinned');
+        pinnedDonations.prepend(entry);
+
+        const previousTimer = pinnedDonationTimers.get(item.id);
+        if (previousTimer) {
+          window.clearTimeout(previousTimer);
+        }
+
+        const timerId = window.setTimeout(() => {
+          pinnedDonationTimers.delete(item.id);
+          pinnedDonationIds.delete(item.id);
+          entry.remove();
+          archiveMusicToFeed(item);
+        }, PINNED_DONATION_MS);
+        pinnedDonationTimers.set(item.id, timerId);
+      }
+
+      function archiveMusicToFeed(item) {
+        if (!item?.id || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        archivedDonationIds.add(item.id);
+        emptyState.hidden = true;
+        const entry = renderMusicLine(item, 'feed');
+        insertFeedEntry(entry);
+        trimFeed();
+      }
+
+      function buildSubscriptionRenewalMessage(renewal = {}) {
+        const tier = String(renewal.tier || '').trim();
+        const months = Number(renewal.months || 0);
+        const tierPart = tier ? ` '${tier}'` : '';
+        const monthsPart = months > 0 ? ` Подписан уже ${months} ${months === 1 ? 'месяц' : months < 5 ? 'месяца' : 'месяцев'}.` : '';
+        return `продлил подписку${tierPart}.${monthsPart}`.trim();
+      }
+
+      function renderRenewalLine(item, mode = 'feed') {
+        const renewal = item.renewal || item;
+        const entry = document.createElement('article');
+        entry.className = mode === 'pinned' ? 'message renewal-line renewal-line--pinned' : 'message renewal-line message--settled';
+        entry.dataset.renewalId = item.id || renewal.id || '';
+
+        entry.innerHTML = `
+          <span class="renewal-line__badge">ПРОДЛЕНИЕ</span>
+          <span class="renewal-line__user">${escapeHtml(renewal.username || 'Зритель')}</span>
+          <span class="renewal-line__message">— ${escapeHtml(buildSubscriptionRenewalMessage(renewal))}</span>
+        `;
+
+        return entry;
+      }
+
+      function renderPinnedSubscriptionRenewal(item) {
+        if (item?.renewal?.isTest || !item?.id || item.played || pinnedDonationIds.has(item.id) || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        pinnedDonationIds.add(item.id);
+        const entry = renderRenewalLine(item, 'pinned');
+        pinnedDonations.prepend(entry);
+
+        window.setTimeout(() => {
+          pinnedDonationIds.delete(item.id);
+          entry.remove();
+          archiveRenewalToFeed(item);
+        }, 60000);
+      }
+
+      function archiveRenewalToFeed(item) {
+        if (!item?.id || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        archivedDonationIds.add(item.id);
+        emptyState.hidden = true;
+        const entry = renderRenewalLine(item, 'feed');
+        insertFeedEntry(entry);
+        trimFeed();
+      }
+
+      function renderSubscriberLine(item, mode = 'feed') {
+        const subscriber = item.subscriber || item;
+        const entry = document.createElement('article');
+        entry.className = mode === 'pinned' ? 'message subscriber-line subscriber-line--pinned' : 'message subscriber-line message--settled';
+        entry.dataset.subscriberId = item.id || subscriber.id || '';
+
+        entry.innerHTML = `
+          <span class="subscriber-line__badge">ПОДПИСЧИК</span>
+          <span class="subscriber-line__user">${escapeHtml(subscriber.username || 'Зритель')}</span>
+          <span class="subscriber-line__message">— добро пожаловать!</span>
+        `;
+
+        return entry;
+      }
+
+      function renderRaidLine(item, mode = 'feed') {
+        const raid = item.raid || item;
+        const entry = document.createElement('article');
+        entry.className = mode === 'pinned' ? 'message subscriber-line subscriber-line--pinned' : 'message subscriber-line message--settled';
+        entry.dataset.raidId = item.id || raid.id || '';
+        const viewers = Number(raid.viewers || 0);
+        const message = viewers > 0 ? `— рейд на ${formatMoney(viewers)} зрителей!` : '— рейд!';
+
+        entry.innerHTML = `
+          <span class="subscriber-line__badge">РЕЙД</span>
+          <span class="subscriber-line__user">${escapeHtml(raid.username || 'Зритель')}</span>
+          <span class="subscriber-line__message">${escapeHtml(message)}</span>
+        `;
+
+        return entry;
+      }
+
+      function shouldShowDonationInChat(item) {
+        const donation = item?.donation;
+        return Boolean(donation && (!donation.isTest || donation.showInChat));
+      }
+
+      function renderPinnedSubscriber(item) {
+        if (item?.subscriber?.isTest || !item?.id || item.played || pinnedDonationIds.has(item.id) || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        pinnedDonationIds.add(item.id);
+        const entry = renderSubscriberLine(item, 'pinned');
+        pinnedDonations.prepend(entry);
+
+        window.setTimeout(() => {
+          pinnedDonationIds.delete(item.id);
+          entry.remove();
+          archiveSubscriberToFeed(item);
+        }, 60000);
+      }
+
+      function archiveSubscriberToFeed(item) {
+        if (!item?.id || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        archivedDonationIds.add(item.id);
+        emptyState.hidden = true;
+        const entry = renderSubscriberLine(item, 'feed');
+        insertFeedEntry(entry);
+
+        trimFeed();
+      }
+
+      function renderPinnedRaid(item) {
+        if (item?.raid?.isTest || !item?.id || item.played || pinnedDonationIds.has(item.id) || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        pinnedDonationIds.add(item.id);
+        const entry = renderRaidLine(item, 'pinned');
+        pinnedDonations.prepend(entry);
+
+        window.setTimeout(() => {
+          pinnedDonationIds.delete(item.id);
+          entry.remove();
+          archiveRaidToFeed(item);
+        }, 60000);
+      }
+
+      function archiveRaidToFeed(item) {
+        if (!item?.id || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        archivedDonationIds.add(item.id);
+        emptyState.hidden = true;
+        const entry = renderRaidLine(item, 'feed');
+        insertFeedEntry(entry);
+
+        trimFeed();
+      }
+
+      function renderDonationLine(item, mode = 'feed') {
+        const donation = item.donation || item;
+        const entry = document.createElement('article');
+        entry.className = mode === 'pinned' ? 'message donation-line donation-line--pinned' : 'message donation-line message--settled';
+        entry.dataset.donationId = item.id || donation.id || '';
+        entry.dataset.donationMode = mode;
+        const amount = `${formatMoney(donation.amount)} ${escapeHtml(donation.currency || 'RUB')}`;
+        const message = donation.message ? `: <span class="message__text">${escapeHtml(donation.message)}</span>` : '';
+        const ruleTitle = item.rule?.title ? ` title="${escapeHtml(item.rule.title)}"` : '';
+        const testBadge = donation.isTest ? '<span class="donation-line__badge">ТЕСТ</span>' : '';
+
+        entry.innerHTML = `
+          <span class="donation-line__badge"${ruleTitle}>ДОНАТ</span>${testBadge}
+          <span class="donation-line__user">${escapeHtml(donation.username || 'Зритель')}</span>
+          <span class="donation-line__amount">${amount}</span>${message}
+        `;
+
+        entry.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          selectedMessage = null;
+          selectedDonation = {
+            id: item.id || donation.id || '',
+            item,
+            entry,
+            mode,
+          };
+          openContextMenu(event.clientX, event.clientY, 'donation');
+        });
+
+        return entry;
+      }
+
+      function showDonationInChat(item) {
+        if (!shouldShowDonationInChat(item) || !item?.id || pinnedDonationIds.has(item.id) || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        pinnedDonationIds.add(item.id);
+        const entry = renderDonationLine(item, 'pinned');
+        pinnedDonations.prepend(entry);
+
+        const previousTimer = pinnedDonationTimers.get(item.id);
+        if (previousTimer) {
+          window.clearTimeout(previousTimer);
+        }
+
+        const timerId = window.setTimeout(() => {
+          pinnedDonationTimers.delete(item.id);
+          pinnedDonationIds.delete(item.id);
+          entry.remove();
+          archiveDonationToFeed(item);
+        }, PINNED_DONATION_MS);
+        pinnedDonationTimers.set(item.id, timerId);
+      }
+
+      function archiveDonationToFeed(item) {
+        if (!item?.id || archivedDonationIds.has(item.id)) {
+          return;
+        }
+
+        archivedDonationIds.add(item.id);
+        emptyState.hidden = true;
+        const entry = renderDonationLine(item, 'feed');
+        insertFeedEntry(entry);
+
+        trimFeed();
+      }
+
+      function renderAlertQueue(payload) {
+        const queue = Array.isArray(payload?.queue) ? payload.queue : [];
+
+        if (!alertsBootstrapped) {
+          for (const item of queue) {
+            if (item?.id) {
+              handledAlertIds.add(item.id);
+            }
+          }
+          alertsBootstrapped = true;
+          return;
+        }
+
+        for (const item of queue.slice().reverse()) {
+          if (!item?.id || handledAlertIds.has(item.id)) {
+            continue;
+          }
+
+          if (item.played && item.kind !== 'donation') {
+            continue;
+          }
+
+          handledAlertIds.add(item.id);
+
+          if (item.kind === 'subscriber' && !item.subscriber?.isTest) {
+            renderPinnedSubscriber(item);
+            continue;
+          }
+
+          if (item.kind === 'subscriptionRenewal' && !item.renewal?.isTest) {
+            renderPinnedSubscriptionRenewal(item);
+            continue;
+          }
+
+          if (item.kind === 'raid' && !item.raid?.isTest) {
+            renderPinnedRaid(item);
+            continue;
+          }
+
+          if (item.kind === 'donation' && shouldShowDonationInChat(item)) {
+            showDonationInChat(item);
+          }
+        }
+      }
+
+      async function initAlertQueue() {
+        const payload = await window.tchat.getAlertQueue();
+        renderAlertQueue(payload);
+        window.tchat.onAlertQueue(renderAlertQueue);
+        window.tchat.onChatDonationAlert(showDonationInChat);
+        window.tchat.onChatMusicRequest(showMusicRequestInChat);
+      }
+
+      function renderHistory(messages = []) {
+        feed.querySelectorAll('.message').forEach((entry) => entry.remove());
+        if (!messages.length) {
+          emptyState.hidden = false;
+          return;
+        }
+
+        for (const message of messages.slice()) {
+          renderMessage(message);
+          const firstMessage = feed.querySelector('.message');
+          firstMessage?.classList.remove('message--new');
+          firstMessage?.classList.add('message--settled');
+        }
+      }
+
+      function openContextMenu(x, y, mode = 'message') {
+        const isDonation = mode === 'donation';
+        hideSenderButton.hidden = isDonation;
+        hideMessageButton.hidden = isDonation;
+        unpinDonationButton.hidden = !isDonation || selectedDonation?.mode !== 'pinned';
+        eraseDonationButton.hidden = !isDonation;
+        contextMenu.style.left = `${Math.min(x, window.innerWidth - 210)}px`;
+        contextMenu.style.top = `${Math.min(y, window.innerHeight - 90)}px`;
+        contextMenu.classList.add('context-menu--open');
+      }
+
+      function closeContextMenu() {
+        contextMenu.classList.remove('context-menu--open');
+        selectedDonation = null;
+      }
+
+      function hideSelectedSender() {
+        if (!selectedMessage) return;
+        const filters = readFilters();
+        const senderKey = `${String(selectedMessage.platform || '').toLowerCase()}:${normalizeFilterText(selectedMessage.user)}`;
+        if (!filters.senders.includes(senderKey)) {
+          filters.senders.push(senderKey);
+          saveFilters(filters);
+        }
+        closeContextMenu();
+        applyFiltersToVisibleMessages();
+      }
+
+      function hideSelectedMessage() {
+        if (!selectedMessage) return;
+        const filters = readFilters();
+        const textKey = normalizeFilterText(selectedMessage.text);
+        if (textKey && !filters.messages.includes(textKey)) {
+          filters.messages.push(textKey);
+          saveFilters(filters);
+        }
+        closeContextMenu();
+        applyFiltersToVisibleMessages();
+      }
+
+      function unpinSelectedDonation() {
+        if (!selectedDonation?.id || selectedDonation.mode !== 'pinned') {
+          closeContextMenu();
+          return;
+        }
+
+        const id = selectedDonation.id;
+        const timerId = pinnedDonationTimers.get(id);
+        if (timerId) {
+          window.clearTimeout(timerId);
+          pinnedDonationTimers.delete(id);
+        }
+
+        pinnedDonationIds.delete(id);
+        selectedDonation.entry.remove();
+        archiveDonationToFeed(selectedDonation.item);
+        closeContextMenu();
+      }
+
+      async function eraseSelectedDonation() {
+        if (!selectedDonation?.id) {
+          closeContextMenu();
+          return;
+        }
+
+        const id = selectedDonation.id;
+        const timerId = pinnedDonationTimers.get(id);
+        if (timerId) {
+          window.clearTimeout(timerId);
+          pinnedDonationTimers.delete(id);
+        }
+
+        pinnedDonationIds.delete(id);
+        archivedDonationIds.add(id);
+        handledAlertIds.add(id);
+        document.querySelectorAll(`[data-donation-id="${CSS.escape(id)}"]`).forEach((entry) => entry.remove());
+        if (!feed.querySelector('.message')) {
+          emptyState.hidden = false;
+        }
+
+        try {
+          if (window.tchat.removeDonationAlert) {
+            await window.tchat.removeDonationAlert({ id });
+          }
+        } finally {
+          closeContextMenu();
+        }
+      }
+
+      function renderStatus(status) {
+        viewersCounter.textContent = status.viewers?.total || 0;
+        twitchViewersCounter.textContent = status.viewers?.twitch || 0;
+        vkViewersCounter.textContent = status.viewers?.vk || 0;
+        youtubeViewersCounter.textContent = status.viewers?.youtube || 0;
+        rutubeViewersCounter.textContent = status.viewers?.rutube || 0;
+        twitchCounter.title = `Twitch: ${status.statuses.twitch}`;
+        vkCounter.title = `VK: ${status.statuses.vk}`;
+        youtubeCounter.title = `YouTube: ${status.statuses.youtube}`;
+        rutubeCounter.title = `Rutube: ${status.statuses.rutube}`;
+
+        if (!feed.querySelector('.message')) {
+          emptyState.hidden = false;
+          emptyState.textContent =
+            status.statuses.twitch === 'подключён'
+              ? 'Чаты подключены. Ждём новые сообщения.'
+              : `Twitch: ${status.statuses.twitch}`;
+        }
+      }
+
+      function renderMessageParts(message) {
+        const parts = Array.isArray(message.parts) && message.parts.length ? message.parts : [{ type: 'text', text: message.text || '' }];
+
+        return parts
+          .map((part) => {
+            if (part.type === 'image' && part.url) {
+              return `<img class="message__emote" src="${escapeHtml(part.url)}" alt="${escapeHtml(part.alt || '')}" title="${escapeHtml(part.alt || '')}" />`;
+            }
+
+            return escapeHtml(part.text || '');
+          })
+          .join('');
+      }
+
+      function renderBadges(badges = []) {
+        if (!Array.isArray(badges) || !badges.length) {
+          return '';
+        }
+
+        return `<span class="message__badges">${badges
+          .map((badge) => {
+            if (typeof badge === 'object' && badge.url) {
+              return `<span class="message__badge" title="${escapeHtml(badge.label || '')}"><img src="${escapeHtml(badge.url)}" alt="${escapeHtml(badge.label || '')}" /></span>`;
+            }
+
+            const label = typeof badge === 'object' ? badge.label : badge;
+            return `<span class="message__badge" title="${escapeHtml(label || '')}">${escapeHtml(String(label || '').slice(0, 1).toUpperCase())}</span>`;
+          })
+          .join('')}</span>`;
+      }
+
+      function getPlatformIcon(platform) {
+        const icons = { twitch: 'T', vk: 'V', youtube: 'Y', rutube: 'R', demo: 'D' };
+        return icons[platform] || platform.slice(0, 1).toUpperCase();
+      }
+
+      function getNickColor(name = '') {
+        const colors = [
+          '#ff7a90',
+          '#70f0a8',
+          '#82b7ff',
+          '#ffd166',
+          '#c792ea',
+          '#4dd8d8',
+          '#ff9f68',
+          '#b8f46a',
+          '#f78cff',
+          '#8ee3ff',
+          '#e06c75',
+          '#98c379',
+          '#61afef',
+          '#e5c07b',
+          '#c678dd',
+          '#56b6c2',
+          '#d19a66',
+          '#7ec8e3',
+          '#f4a261',
+          '#2a9d8f',
+          '#e76f51',
+          '#a8dadc',
+          '#457b9d',
+          '#fab283',
+        ];
+        let hash = 0;
+        for (const char of String(name)) {
+          hash = (hash * 33 + char.charCodeAt(0)) >>> 0;
+        }
+        return colors[hash % colors.length];
+      }
+
+      function formatMoney(value) {
+        return new Intl.NumberFormat('ru-RU', {
+          maximumFractionDigits: 2,
+        }).format(Number(value || 0));
+      }
+
+      function escapeHtml(value = '') {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function decodeHtml(value = '') {
+        const node = document.createElement('textarea');
+        node.innerHTML = String(value);
+        return node.value;
+      }
+
+      settingsButton.addEventListener('click', () => window.tchat.openBackoffice());
+      hideSenderButton.addEventListener('click', hideSelectedSender);
+      hideMessageButton.addEventListener('click', hideSelectedMessage);
+      unpinDonationButton.addEventListener('click', unpinSelectedDonation);
+      eraseDonationButton.addEventListener('click', eraseSelectedDonation);
+      window.addEventListener('click', (event) => {
+        if (!contextMenu.contains(event.target)) closeContextMenu();
+      });
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeContextMenu();
+        if (!event.ctrlKey) return;
+
+        if (event.key === '+' || event.key === '=' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          changeFontSize(1);
+          return;
+        }
+
+        if (event.key === '-' || event.key === '_' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          changeFontSize(-1);
+          return;
+        }
+
+        if (event.key === '0') {
+          event.preventDefault();
+          currentSettings = { ...(currentSettings || readSettings()), fontSize: defaultSettings.fontSize };
+          applySettings(currentSettings);
+          saveSettings({ immediate: true });
+        }
+      });
+
+      async function bootstrapChatApp() {
+        const localSettings = readSettings();
+        const uiSettings = await window.tchat.getChatUiSettings();
+        applySettings({
+          ...localSettings,
+          fontSize: uiSettings?.fontSize ?? localSettings.fontSize,
+          gap: uiSettings?.gap ?? localSettings.gap,
+          direction: uiSettings?.direction ?? localSettings.direction,
+        });
+        saveSettings({ immediate: true });
+        window.tchat.getChatHistory().then(renderHistory);
+        window.tchat.onChatHistory(renderHistory);
+        window.tchat.onChatMessage(renderMessage);
+        window.tchat.onChatStatus(renderStatus);
+        window.tchat.getChatStatus().then(renderStatus);
+        window.tchat.onChatUiSettings((settings) => {
+          const next = {
+            ...(currentSettings || readSettings()),
+            ...settings,
+          };
+
+          if (
+            currentSettings &&
+            next.fontSize === currentSettings.fontSize &&
+            next.gap === currentSettings.gap &&
+            next.direction === currentSettings.direction
+          ) {
+            return;
+          }
+
+          applySettings(next);
+          localStorage.setItem(settingsKey, JSON.stringify(currentSettings));
+        });
+        initAlertQueue();
+      }
+
+      bootstrapChatApp();
+    </script>
+  </body>
+</html>

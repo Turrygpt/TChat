@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat - музыкальная очередь</title>
+    <link rel="stylesheet" href="./widget.css" />
+  </head>
+  <body class="widget-page widget-page--music">
+    <section class="music-widget" hidden>
+      <div id="musicNowTitle" class="music-widget__title-strip" hidden></div>
+      <iframe id="musicPlayer" class="music-widget__player" title="Музыкальный плеер" allow="clipboard-write; autoplay; encrypted-media; fullscreen" allowfullscreen hidden></iframe>
+      <div id="musicQueueTitle" class="music-widget__queue-title" hidden>Очередь</div>
+      <ul id="musicQueue" class="music-widget__queue" hidden></ul>
+    </section>
+    <script src="https://vk.com/js/api/videoplayer.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./music.js"></script>
+  </body>
+</html>

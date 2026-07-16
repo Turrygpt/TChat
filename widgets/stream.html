@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Stream Overlay</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./widget.css?v=2" />
+  </head>
+  <body class="widget-page widget-page--stream">
+    <main class="stream-overlay">
+      <section id="streamAlert" class="stream-alert stream-alert--overlay" aria-live="polite">
+        <img id="streamAlertImage" class="stream-alert__image" alt="" />
+        <div class="stream-alert__body">
+          <span id="streamAlertTitle" class="stream-alert__title"></span>
+          <strong id="streamAlertUser" class="stream-alert__user"></strong>
+          <p id="streamAlertMessage" class="stream-alert__message"></p>
+        </div>
+        <audio id="streamAlertSound"></audio>
+      </section>
+
+      <section id="streamGoals" class="stream-goals" aria-live="polite"></section>
+      <section id="streamCountdowns" class="stream-countdowns" aria-live="polite"></section>
+      <section id="streamTexts" class="stream-texts" aria-live="polite"></section>
+      <section id="streamTasks" class="stream-tasks" aria-live="polite"></section>
+      <section id="streamEmbeddedWidgets" class="stream-embedded-widgets" aria-live="polite"></section>
+      <section id="streamPoll" class="stream-poll" aria-live="polite" hidden></section>
+    </main>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./stream.js?v=2"></script>
+  </body>
+</html>
