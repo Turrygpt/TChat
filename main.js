@@ -16,6 +16,9 @@ try {
   ({ autoUpdater } = require('electron-updater'));
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Дифференциальная докачка по blockmap на нашей раздаче собирает битый файл —
+  // качаем установщик целиком, это надёжно.
+  autoUpdater.disableDifferentialDownload = true;
 } catch (error) {
   console.error('[updater] модуль не загружен:', error && error.message);
 }
@@ -2200,13 +2203,44 @@ function stopLocalServer() {
 
 // Проверка обновлений: при старте и вручную из бэкофиса. Когда обновление
 // скачано — предлагаем перезапуститься; при отказе поставится при выходе.
+// Все события пишутся в userData/updater.log и отправляются в бэкофис.
+function appendUpdaterLog(payload) {
+  try {
+    const line = `${new Date().toISOString()} ${JSON.stringify(payload)}\n`;
+    fs.appendFileSync(path.join(app.getPath('userData'), 'updater.log'), line);
+  } catch {
+    /* лог не критичен */
+  }
+}
+
+function broadcastUpdaterStatus(payload) {
+  appendUpdaterLog(payload);
+  mainWindow?.webContents.send('updater:status', payload);
+}
+
 function setupAutoUpdater() {
   if (!autoUpdater || !app.isPackaged) {
     return;
   }
 
+  autoUpdater.on('checking-for-update', () => broadcastUpdaterStatus({ state: 'checking' }));
+  autoUpdater.on('update-available', (info) =>
+    broadcastUpdaterStatus({ state: 'available', version: info?.version || '' }),
+  );
+  autoUpdater.on('update-not-available', () =>
+    broadcastUpdaterStatus({ state: 'none', current: app.getVersion() }),
+  );
+  autoUpdater.on('download-progress', (progress) =>
+    broadcastUpdaterStatus({
+      state: 'downloading',
+      percent: Math.round(progress?.percent || 0),
+      speedKbps: Math.round((progress?.bytesPerSecond || 0) / 1024),
+    }),
+  );
+
   autoUpdater.on('update-downloaded', (info) => {
     const version = info?.version || 'новая версия';
+    broadcastUpdaterStatus({ state: 'downloaded', version });
     dialog
       .showMessageBox({
         type: 'info',
@@ -2219,14 +2253,16 @@ function setupAutoUpdater() {
       })
       .then(({ response }) => {
         if (response === 0) {
-          autoUpdater.quitAndInstall();
+          autoUpdater.quitAndInstall(false, true);
         }
       })
       .catch(() => {});
   });
 
   autoUpdater.on('error', (error) => {
-    console.error('[updater]', error?.message || error);
+    const message = error?.message || String(error);
+    console.error('[updater]', message);
+    broadcastUpdaterStatus({ state: 'error', message });
   });
 
   autoUpdater.checkForUpdates().catch(() => {});

@@ -5326,7 +5326,49 @@
       })();
 
       // === Проверка обновлений ===
+      // Кнопка запускает проверку; дальше текст ведут события апдейтера
+      // (updater:status): проценты скачивания, готовность, ошибки.
       const checkUpdatesButton = document.querySelector('#checkUpdatesButton');
+      const UPDATE_BUTTON_DEFAULT = 'Проверить обновления';
+
+      function resetUpdateButtonLater(delayMs) {
+        setTimeout(() => {
+          checkUpdatesButton.disabled = false;
+          checkUpdatesButton.textContent = UPDATE_BUTTON_DEFAULT;
+        }, delayMs);
+      }
+
+      if (checkUpdatesButton && window.tchat?.onUpdaterStatus) {
+        window.tchat.onUpdaterStatus((status) => {
+          switch (status?.state) {
+            case 'checking':
+              checkUpdatesButton.textContent = 'Проверяю...';
+              break;
+            case 'available':
+              checkUpdatesButton.disabled = true;
+              checkUpdatesButton.textContent = 'Скачиваю v' + status.version + '... 0%';
+              break;
+            case 'downloading':
+              checkUpdatesButton.disabled = true;
+              checkUpdatesButton.textContent =
+                'Скачиваю... ' + status.percent + '% (' + Math.round((status.speedKbps || 0) / 1024) + ' МБ/с)';
+              break;
+            case 'downloaded':
+              checkUpdatesButton.textContent = 'v' + status.version + ' готова к установке';
+              resetUpdateButtonLater(60000);
+              break;
+            case 'none':
+              checkUpdatesButton.textContent = 'Уже последняя (v' + status.current + ')';
+              resetUpdateButtonLater(6000);
+              break;
+            case 'error':
+              checkUpdatesButton.textContent = 'Ошибка обновления: ' + (status.message || '').slice(0, 120);
+              resetUpdateButtonLater(15000);
+              break;
+          }
+        });
+      }
+
       checkUpdatesButton?.addEventListener('click', async () => {
         if (!window.tchat?.checkUpdates) return;
         checkUpdatesButton.disabled = true;
@@ -5335,18 +5377,12 @@
           const result = await window.tchat.checkUpdates();
           if (!result?.ok) {
             checkUpdatesButton.textContent = result?.error || 'Ошибка проверки';
-          } else if (result.hasUpdate) {
-            checkUpdatesButton.textContent = 'Скачиваю ' + result.latest + '...';
-          } else {
-            checkUpdatesButton.textContent = 'Уже последняя (v' + result.current + ')';
+            resetUpdateButtonLater(8000);
           }
+          // при result.ok дальнейший текст ведут события updater:status
         } catch (error) {
           checkUpdatesButton.textContent = 'Ошибка: ' + error.message;
-        } finally {
-          setTimeout(() => {
-            checkUpdatesButton.disabled = false;
-            checkUpdatesButton.textContent = 'Проверить обновления';
-          }, 6000);
+          resetUpdateButtonLater(8000);
         }
       });
     </script>

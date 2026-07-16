@@ -54,6 +54,11 @@ contextBridge.exposeInMainWorld('tchat', {
   sendDemoSubscriberAlert: (payload) => ipcRenderer.invoke('demo:send-subscriber-alert', payload),
   sendDemoRaidAlert: (payload) => ipcRenderer.invoke('demo:send-raid-alert', payload),
   updateDemoGoal: (payload) => ipcRenderer.invoke('demo:update-goal', payload),
+  onUpdaterStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('updater:status', listener);
+    return () => ipcRenderer.removeListener('updater:status', listener);
+  },
   onChatMessage: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('chat:message', listener);
