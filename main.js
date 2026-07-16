@@ -4613,7 +4613,9 @@ ipcMain.handle('config:import', async () => {
   }
 
   try {
-    const raw = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+    // Убираем возможный BOM (файлы из PowerShell/Блокнота начинаются с ﻿).
+    const rawText = fs.readFileSync(filePaths[0], 'utf8').replace(/^﻿/, '');
+    const raw = JSON.parse(rawText);
     const applied = [];
 
     if (raw.announce && typeof raw.announce === 'object') {

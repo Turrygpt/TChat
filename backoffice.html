@@ -1584,10 +1584,19 @@
 
         .workspace {
           grid-template-columns: 1fr;
+          grid-template-rows: auto auto auto;
           grid-template-areas:
             "top"
             "widgets"
             "config";
+          /* В узком окне не фиксируем высоту вьюпорта: иначе строка виджетов
+             (minmax(0,1fr)) схлопывается в ноль и виджеты не видны без фуллскрина. */
+          height: auto;
+          min-height: 0;
+        }
+
+        .workspace-zone--widgets {
+          min-height: 420px;
         }
       }
     </style>
