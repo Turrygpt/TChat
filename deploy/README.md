@@ -31,6 +31,19 @@ TCHAT_DEPLOY_PASS='<пароль сервера>' bash deploy/deploy.sh
 bash deploy/deploy.sh
 ```
 
+## Публикация релиза приложения (download + автообновление)
+
+```powershell
+npm.cmd run dist
+npm.cmd install --no-save ssh2
+$env:TCHAT_DEPLOY_PASS='<пароль сервера>'; node deploy\upload-release.js
+```
+
+Скрипт зальёт установщик, portable и `latest.yml` в `/opt/tchat/releases/` и перезапустит сервис.
+Скачивание: `http://195.62.49.244/tchat/download/TChat-Setup-<версия>.exe`.
+Установленное приложение само проверяет `latest.yml` при запуске и по кнопке «Проверить обновления».
+Не забудьте поднять `version` в `package.json` перед сборкой — иначе приложения не увидят обновление.
+
 ## Управление сервисом (на сервере)
 
 ```bash
