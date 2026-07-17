@@ -4,6 +4,15 @@ contextBridge.exposeInMainWorld('tchat', {
   getServerStatus: () => ipcRenderer.invoke('app:get-server-status'),
   getAppInfo: () => ipcRenderer.invoke('app:get-info'),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  getRestreamState: () => ipcRenderer.invoke('restream:get-state'),
+  startRestream: () => ipcRenderer.invoke('restream:start'),
+  stopRestream: () => ipcRenderer.invoke('restream:stop'),
+  saveRestreamConfig: (payload) => ipcRenderer.invoke('restream:save-config', payload),
+  onRestreamStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('restream:status', listener);
+    return () => ipcRenderer.removeListener('restream:status', listener);
+  },
   exportConfig: () => ipcRenderer.invoke('config:export'),
   importConfig: () => ipcRenderer.invoke('config:import'),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),

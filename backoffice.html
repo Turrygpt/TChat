@@ -1789,24 +1789,40 @@
             </label>
           </article>
 
-          <article class="panel">
-            <h2>Рестрим-сервер</h2>
+          <article class="panel panel--wide">
+            <h2>Рестрим-сервер (локальный)</h2>
             <p class="muted">
-              Один вход в OBS — трансляция уходит на все площадки сразу. Приёмники, ключ потока и пароль публикации
-              настраиваются в панели рестрима.
+              OBS вещает один поток на этот компьютер, а TChat раздаёт его без перекодирования на все включённые
+              площадки (YouTube, Twitch, VK…). В OBS: Настройки → Трансляция → Сервис «Настраиваемый».
             </p>
-            <label class="field">
-              <span>Сервер для OBS (Сервис → «Настраиваемый»)</span>
-              <input type="text" readonly onclick="this.select()" value="rtmps://195.62.49.244.sslip.io:2935/live" />
-            </label>
-            <label class="field">
-              <span>Пользователь публикации</span>
-              <input type="text" readonly onclick="this.select()" value="turry" />
-            </label>
-            <div class="button-row">
-              <button class="button" type="button" data-open-url="https://195.62.49.244.sslip.io:3200">Открыть панель рестрима</button>
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+              <label class="field">
+                <span>Сервер для OBS</span>
+                <input id="restreamIngestUrl" type="text" readonly onclick="this.select()" />
+              </label>
+              <label class="field">
+                <span>Ключ потока (Stream Key)</span>
+                <input id="restreamStreamKey" type="text" placeholder="tchat" />
+              </label>
             </div>
-            <p class="muted">Ключ потока и пароль публикации, а также список площадок — в панели рестрима.</p>
+            <div class="button-row">
+              <button id="restreamToggleButton" class="button" type="button">Включить рестрим</button>
+              <button id="restreamSaveKeyButton" class="button button--ghost" type="button">Сохранить ключ</button>
+              <span id="restreamStatus" class="muted">—</span>
+            </div>
+
+            <h3 style="margin: 16px 0 6px; font-size: 15px;">Площадки-приёмники</h3>
+            <div id="restreamDestList" class="list"></div>
+            <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
+              <label class="field"><span>Название</span><input id="restreamNewName" type="text" placeholder="YouTube" /></label>
+              <label class="field"><span>RTMP-адрес</span><input id="restreamNewUrl" type="text" placeholder="rtmp://a.rtmp.youtube.com/live2" /></label>
+              <label class="field"><span>Ключ трансляции</span><input id="restreamNewKey" type="password" placeholder="xxxx-xxxx-xxxx" /></label>
+              <button id="restreamAddButton" class="button button--ghost" type="button">Добавить</button>
+            </div>
+            <p class="muted" style="margin-top: 6px;">
+              Адреса: YouTube — <code>rtmp://a.rtmp.youtube.com/live2</code>, Twitch — <code>rtmp://live.twitch.tv/app</code>,
+              VK Видео — <code>rtmp://ovsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
+            </p>
           </article>
 
           <article class="panel panel--wide">
@@ -5356,6 +5372,122 @@
         } catch {
           /* без версии живём */
         }
+      })();
+
+      // === Рестрим-сервер (локальный) ===
+      (() => {
+        if (!window.tchat?.getRestreamState) return;
+        const ingestUrlInput = document.querySelector('#restreamIngestUrl');
+        const streamKeyInput = document.querySelector('#restreamStreamKey');
+        const toggleButton = document.querySelector('#restreamToggleButton');
+        const saveKeyButton = document.querySelector('#restreamSaveKeyButton');
+        const statusEl = document.querySelector('#restreamStatus');
+        const destList = document.querySelector('#restreamDestList');
+        const newName = document.querySelector('#restreamNewName');
+        const newUrl = document.querySelector('#restreamNewUrl');
+        const newKey = document.querySelector('#restreamNewKey');
+        const addButton = document.querySelector('#restreamAddButton');
+
+        let state = null;
+        let keyFocused = false;
+        streamKeyInput?.addEventListener('focus', () => { keyFocused = true; });
+        streamKeyInput?.addEventListener('blur', () => { keyFocused = false; });
+
+        const STATUS_LABEL = {
+          idle: 'ожидает', connecting: 'подключение…', live: 'в эфире', reconnecting: 'переподключение…', error: 'ошибка',
+        };
+
+        function render(next) {
+          state = next;
+          if (!state) return;
+          if (ingestUrlInput) ingestUrlInput.value = state.ingestUrl || '';
+          if (streamKeyInput && !keyFocused) streamKeyInput.value = state.streamKey || '';
+          if (toggleButton) toggleButton.textContent = state.running ? 'Выключить рестрим' : 'Включить рестрим';
+          if (statusEl) {
+            if (!state.available) {
+              statusEl.textContent = 'Модуль недоступен в этой сборке.';
+            } else if (state.running) {
+              statusEl.textContent = state.live ? 'Сервер запущен · OBS вещает' : 'Сервер запущен · ждём OBS';
+            } else {
+              statusEl.textContent = 'Выключен.';
+            }
+          }
+          renderDestinations(state.destinations || []);
+        }
+
+        function renderDestinations(list) {
+          if (!destList) return;
+          if (!list.length) {
+            destList.innerHTML = '<p class="muted">Пока нет площадок. Добавьте ниже.</p>';
+            return;
+          }
+          destList.innerHTML = '';
+          for (const dest of list) {
+            const row = document.createElement('div');
+            row.className = 'list__row';
+            row.style.cssText = 'display:grid; grid-template-columns:auto 1fr auto auto; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border-soft);';
+            const badge = state.running && dest.enabled ? (STATUS_LABEL[dest.status] || dest.status) : 'выкл';
+            row.innerHTML =
+              '<input type="checkbox" ' + (dest.enabled ? 'checked' : '') + ' data-dest-toggle="' + dest.id + '" title="Включить/выключить" />' +
+              '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.url) + '</span></span>' +
+              '<span class="muted" style="font-size:12px;">' + escapeHtml(badge) + '</span>' +
+              '<button class="button button--ghost" type="button" data-dest-delete="' + dest.id + '">Удалить</button>';
+            destList.appendChild(row);
+          }
+        }
+
+        async function refresh() {
+          render(await window.tchat.getRestreamState());
+        }
+
+        toggleButton?.addEventListener('click', async () => {
+          toggleButton.disabled = true;
+          try {
+            const result = state?.running ? await window.tchat.stopRestream() : await window.tchat.startRestream();
+            if (result?.ok === false) statusEl.textContent = 'Ошибка: ' + result.error;
+            if (result?.state) render(result.state); else await refresh();
+          } finally {
+            toggleButton.disabled = false;
+          }
+        });
+
+        saveKeyButton?.addEventListener('click', async () => {
+          render(await window.tchat.saveRestreamConfig({ streamKey: streamKeyInput.value.trim() }));
+          statusEl.textContent = 'Ключ сохранён.';
+        });
+
+        addButton?.addEventListener('click', async () => {
+          const url = newUrl.value.trim();
+          if (!url) { newUrl.focus(); return; }
+          const destinations = (state?.destinations || []).map((d) => ({ id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled }));
+          destinations.push({ name: newName.value.trim() || 'Площадка', url, key: newKey.value.trim(), enabled: true });
+          render(await window.tchat.saveRestreamConfig({ destinations }));
+          newName.value = ''; newUrl.value = ''; newKey.value = '';
+        });
+
+        destList?.addEventListener('click', async (event) => {
+          const del = event.target.closest('[data-dest-delete]');
+          if (del) {
+            const destinations = (state?.destinations || [])
+              .filter((d) => d.id !== del.dataset.destDelete)
+              .map((d) => ({ id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled }));
+            render(await window.tchat.saveRestreamConfig({ destinations }));
+          }
+        });
+
+        destList?.addEventListener('change', async (event) => {
+          const toggle = event.target.closest('[data-dest-toggle]');
+          if (toggle) {
+            const destinations = (state?.destinations || []).map((d) => ({
+              id: d.id, name: d.name, url: d.url, key: d.key,
+              enabled: d.id === toggle.dataset.destToggle ? toggle.checked : d.enabled,
+            }));
+            render(await window.tchat.saveRestreamConfig({ destinations }));
+          }
+        });
+
+        window.tchat.onRestreamStatus(render);
+        refresh();
       })();
 
       // === Проверка обновлений ===

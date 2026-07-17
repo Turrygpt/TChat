@@ -9,6 +9,7 @@ const tmi = require('tmi.js');
 const { LiveChat } = require('youtube-chat');
 const { EdgeTTS } = require('node-edge-tts');
 const announce = require('./src/announce');
+const restream = require('./src/restream');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -4552,6 +4553,10 @@ app.whenReady().then(async () => {
   startChatPolling();
   ensureCountdownTicking();
   setupAutoUpdater();
+  restream.init({
+    storageDir: path.join(app.getPath('userData'), 'settings'),
+    onStatus: (state) => mainWindow?.webContents.send('restream:status', state),
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -4581,6 +4586,7 @@ app.on('before-quit', async () => {
   if (youtubeClient) {
     youtubeClient.stop();
   }
+  restream.shutdown();
   await stopLocalServer();
 });
 
@@ -4689,6 +4695,11 @@ ipcMain.handle('app:check-updates', async () => {
     return { ok: false, error: error?.message || String(error) };
   }
 });
+
+ipcMain.handle('restream:get-state', () => restream.getState());
+ipcMain.handle('restream:start', () => restream.start());
+ipcMain.handle('restream:stop', () => restream.stop());
+ipcMain.handle('restream:save-config', (_event, payload) => restream.saveConfig(payload || {}));
 
 ipcMain.handle('app:get-server-status', () => serverStatus);
 ipcMain.handle('app:get-info', () => ({
