@@ -95,6 +95,15 @@ const EDGE_TTS_DEFAULT_VOICE = 'ru-RU-SvetlanaNeural';
 const FIRST_MESSAGE_BELL_IMAGE =
   'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22%3E%3Crect width=%22128%22 height=%22128%22 rx=%2228%22 fill=%22%2313191f%22/%3E%3Cpath d=%22M64 112a14 14 0 0 0 13.6-10.7H50.4A14 14 0 0 0 64 112Z%22 fill=%22%23ffd166%22/%3E%3Cpath d=%22M104 91H24c7.5-7.2 11.3-17.2 11.3-30V51c0-17.2 10.7-31.8 25.8-36.1V9h5.8v5.9C82 19.2 92.7 33.8 92.7 51v10c0 12.8 3.8 22.8 11.3 30Z%22 fill=%22%23ffd166%22/%3E%3Cpath d=%22M91.2 24.8 99.8 16l6.2 6.1-8.6 8.8-6.2-6.1ZM22 22.1l6.2-6.1 8.6 8.8-6.2 6.1L22 22.1Z%22 fill=%22%23f77f00%22/%3E%3C/svg%3E';
 
+// Дефолтные картинки и звуки алертов — лежат в assets/alerts/defaults/ и входят
+// в сборку. Раздаются локальным сервером по /assets/... (работают из коробки).
+const DEFAULT_ALERT_ASSETS = {
+  donation: { image: '/assets/alerts/defaults/donation.svg', sound: '/assets/alerts/defaults/donation.wav' },
+  subscriber: { image: '/assets/alerts/defaults/subscriber.svg', sound: '/assets/alerts/defaults/subscriber.wav' },
+  raid: { image: '/assets/alerts/defaults/raid.svg', sound: '/assets/alerts/defaults/raid.wav' },
+  portal: { image: '/assets/alerts/defaults/portal.svg', sound: '/assets/alerts/defaults/portal.wav' },
+};
+
 let mainWindow = null;
 let chatWindow = null;
 let httpServer = null;
@@ -1465,8 +1474,8 @@ function createDefaultAlertSettings() {
         enabled: true,
         type: 'subscriber',
         title: 'Добро пожаловать!',
-        image: '',
-        sound: '',
+        image: DEFAULT_ALERT_ASSETS.subscriber.image,
+        sound: DEFAULT_ALERT_ASSETS.subscriber.sound,
         volume: 100,
       },
       subscriptionRenewal: {
@@ -1474,8 +1483,8 @@ function createDefaultAlertSettings() {
         enabled: true,
         type: 'subscriptionRenewal',
         title: 'Продление подписки',
-        image: '',
-        sound: '',
+        image: DEFAULT_ALERT_ASSETS.subscriber.image,
+        sound: DEFAULT_ALERT_ASSETS.subscriber.sound,
         volume: 100,
       },
       raid: {
@@ -1483,8 +1492,8 @@ function createDefaultAlertSettings() {
         enabled: true,
         type: 'raid',
         title: 'Рейд!',
-        image: '',
-        sound: '',
+        image: DEFAULT_ALERT_ASSETS.raid.image,
+        sound: DEFAULT_ALERT_ASSETS.raid.sound,
         volume: 100,
       },
       firstMessage: {
@@ -1501,8 +1510,8 @@ function createDefaultAlertSettings() {
         enabled: true,
         type: 'portal',
         title: 'Гость из портала!',
-        image: '',
-        sound: '',
+        image: DEFAULT_ALERT_ASSETS.portal.image,
+        sound: DEFAULT_ALERT_ASSETS.portal.sound,
         volume: 100,
       },
     },
@@ -1514,8 +1523,8 @@ function createDefaultAlertSettings() {
         title: 'Базовый донат',
         min: 100,
         max: 100000,
-        image: '',
-        sound: '',
+        image: DEFAULT_ALERT_ASSETS.donation.image,
+        sound: DEFAULT_ALERT_ASSETS.donation.sound,
         volume: 100,
       },
     ],

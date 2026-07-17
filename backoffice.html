@@ -1789,6 +1789,26 @@
             </label>
           </article>
 
+          <article class="panel">
+            <h2>Рестрим-сервер</h2>
+            <p class="muted">
+              Один вход в OBS — трансляция уходит на все площадки сразу. Приёмники, ключ потока и пароль публикации
+              настраиваются в панели рестрима.
+            </p>
+            <label class="field">
+              <span>Сервер для OBS (Сервис → «Настраиваемый»)</span>
+              <input type="text" readonly onclick="this.select()" value="rtmps://195.62.49.244.sslip.io:2935/live" />
+            </label>
+            <label class="field">
+              <span>Пользователь публикации</span>
+              <input type="text" readonly onclick="this.select()" value="turry" />
+            </label>
+            <div class="button-row">
+              <button class="button" type="button" data-open-url="https://195.62.49.244.sslip.io:3200">Открыть панель рестрима</button>
+            </div>
+            <p class="muted">Ключ потока и пароль публикации, а также список площадок — в панели рестрима.</p>
+          </article>
+
           <article class="panel panel--wide">
             <h2>Удалённая панель</h2>
             <p class="muted">С другого ПК в локальной сети откройте панель управления сбором, виджетами и голосованием.</p>
