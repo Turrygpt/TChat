@@ -59,6 +59,11 @@ contextBridge.exposeInMainWorld('tchat', {
     ipcRenderer.on('updater:status', listener);
     return () => ipcRenderer.removeListener('updater:status', listener);
   },
+  onGhostMode: (callback) => {
+    const listener = (_event, enabled) => callback(enabled);
+    ipcRenderer.on('ghost:state', listener);
+    return () => ipcRenderer.removeListener('ghost:state', listener);
+  },
   onChatMessage: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('chat:message', listener);

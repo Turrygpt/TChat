@@ -2284,9 +2284,16 @@ function applyGhostMode(targetWindow) {
   targetWindow.setIgnoreMouseEvents(ghostModeEnabled, { forward: true });
 }
 
+// Сообщаем окну чата о призрачном режиме, чтобы оно спрятало шапку
+// (оставив только счётчики и сообщения).
+function broadcastGhostMode() {
+  chatWindow?.webContents.send('ghost:state', ghostModeEnabled);
+}
+
 function toggleGhostMode() {
   ghostModeEnabled = !ghostModeEnabled;
   applyGhostMode(chatWindow);
+  broadcastGhostMode();
 }
 
 function createWindow() {
@@ -2348,6 +2355,7 @@ function createChatWindow() {
   chatWindow.webContents.once('did-finish-load', () => {
     chatWindow?.webContents.send('chat:history', getRecentChatMessages());
     broadcastChatStatus();
+    broadcastGhostMode();
   });
 
   chatWindow.on('closed', () => {

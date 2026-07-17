@@ -69,6 +69,20 @@
         font-size: 20px;
       }
 
+      /* Призрачный режим (Ctrl+Alt+G): прячем шапку окна — фон/границу бара и
+         кнопку настроек, оставляя только счётчики онлайна и ленту сообщений. */
+      body.ghost-mode .statusbar {
+        background: transparent;
+        border-bottom: none;
+        padding-top: 4px;
+        padding-bottom: 4px;
+      }
+
+      body.ghost-mode #settingsButton,
+      body.ghost-mode .status-spacer {
+        display: none;
+      }
+
       .counter,
       .platform-counter {
         display: inline-flex;
@@ -1289,6 +1303,11 @@
         window.tchat.onChatMessage(renderMessage);
         window.tchat.onChatStatus(renderStatus);
         window.tchat.getChatStatus().then(renderStatus);
+        if (window.tchat.onGhostMode) {
+          window.tchat.onGhostMode((enabled) => {
+            document.body.classList.toggle('ghost-mode', !!enabled);
+          });
+        }
         window.tchat.onChatUiSettings((settings) => {
           const next = {
             ...(currentSettings || readSettings()),
