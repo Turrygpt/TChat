@@ -1550,6 +1550,35 @@
         font-size: 13px;
       }
 
+      .update-clean {
+        margin-top: 18px;
+        border-top: 1px solid var(--border);
+        padding-top: 14px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .update-clean__option {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px;
+        align-items: start;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      .update-clean__option:has(input:checked) {
+        border-color: rgb(137 87 229 / 60%);
+        background: rgb(137 87 229 / 10%);
+      }
+
+      .update-clean__option input {
+        margin-top: 3px;
+      }
+
       .update-progress {
         margin-top: 16px;
       }
@@ -2411,6 +2440,37 @@
     </main>
     </div>
 
+    <!-- Быстрая настройка при первом запуске (и после чистой установки). -->
+    <div id="setupModal" class="update-modal" hidden>
+      <div class="update-modal__backdrop"></div>
+      <div class="update-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+        <div class="update-modal__badge">Первый запуск</div>
+        <h2 id="setupTitle">Быстрая настройка</h2>
+        <p class="muted">Укажите каналы — этого хватит, чтобы чат заработал. Остальное настраивается позже во вкладках.</p>
+
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+          <label class="field"><span>Twitch</span><input id="setupTwitch" type="text" placeholder="ник канала" /></label>
+          <label class="field"><span>VK Видео Live</span><input id="setupVk" type="url" placeholder="https://live.vkvideo.ru/ник" /></label>
+          <label class="field"><span>YouTube</span><input id="setupYoutube" type="url" placeholder="https://youtube.com/@ник" /></label>
+          <label class="field"><span>Rutube</span><input id="setupRutube" type="url" placeholder="ссылка на канал" /></label>
+        </div>
+
+        <div id="setupDone" class="update-clean" hidden>
+          <strong>Готово. Добавьте оверлей в OBS как Browser Source:</strong>
+          <div class="copy-row" style="margin-top: 6px;">
+            <code id="setupOverlayUrl">http://localhost:3000/widgets/stream.html</code>
+            <button class="button button--ghost" type="button" data-copy-target="setupOverlayUrl">Копировать</button>
+          </div>
+        </div>
+
+        <div class="update-modal__actions">
+          <button id="setupSaveButton" class="button" type="button">Сохранить и продолжить</button>
+          <button id="setupSkipButton" class="button button--ghost" type="button">Пропустить</button>
+        </div>
+        <p id="setupError" class="update-modal__error" hidden></p>
+      </div>
+    </div>
+
     <!-- Список изменений: открывается кликом по номеру версии в шапке. -->
     <div id="patchnotesModal" class="update-modal" hidden>
       <div class="update-modal__backdrop" data-patchnotes-close></div>
@@ -2435,6 +2495,21 @@
         <div id="updateProgressWrap" class="update-progress" hidden>
           <div class="update-progress__bar"><span id="updateProgressFill"></span></div>
           <p id="updateProgressText" class="muted">Скачиваю...</p>
+        </div>
+
+        <!-- Показывается только если есть что терять. -->
+        <div id="updateCleanBlock" class="update-clean" hidden>
+          <label class="update-clean__option">
+            <input type="radio" name="installMode" value="keep" checked />
+            <span><strong>Обычная установка</strong><br /><span class="muted">Все настройки и переписка останутся на месте.</span></span>
+          </label>
+          <label class="update-clean__option">
+            <input type="radio" name="installMode" value="clean" />
+            <span><strong>Чистая установка</strong><br /><span class="muted" id="updateCleanSummary">Стереть все данные и настроить заново.</span></span>
+          </label>
+          <p id="updateCleanConfirm" class="update-modal__warning" hidden>
+            Данные будут стёрты без возможности восстановления. После перезапуска TChat предложит быструю настройку.
+          </p>
         </div>
 
         <p id="updateModalWarning" class="update-modal__warning" hidden></p>
@@ -6139,16 +6214,57 @@
         }
       });
 
+      // --- выбор между обычной и чистой установкой ---
+      const updateCleanBlock = document.querySelector('#updateCleanBlock');
+      const updateCleanSummary = document.querySelector('#updateCleanSummary');
+      const updateCleanConfirm = document.querySelector('#updateCleanConfirm');
+
+      function selectedInstallMode() {
+        return document.querySelector('input[name="installMode"]:checked')?.value || 'keep';
+      }
+
+      function describeUserData(summary) {
+        const parts = [];
+        if (summary.tokens?.length) parts.push('токены (' + summary.tokens.join(', ') + ')');
+        if (summary.messages) parts.push(summary.messages.toLocaleString('ru-RU') + ' сообщений');
+        if (summary.addresses?.length) parts.push(summary.addresses.length + ' адресов каналов');
+        if (summary.rules) parts.push(summary.rules + ' правил алертов и стикеров');
+        return parts.length ? 'Будут стёрты: ' + parts.join(', ') + '.' : 'Стереть все данные и настроить заново.';
+      }
+
+      // Предложение чистой установки имеет смысл, только если данные вообще есть.
+      async function refreshCleanInstallOption() {
+        if (!updateCleanBlock || !window.tchat?.getDataSummary) return;
+        try {
+          const summary = await window.tchat.getDataSummary();
+          updateCleanBlock.hidden = !summary?.hasData;
+          if (summary?.hasData) {
+            updateCleanSummary.textContent = describeUserData(summary);
+          }
+        } catch {
+          updateCleanBlock.hidden = true;
+        }
+      }
+
+      updateCleanBlock?.addEventListener('change', () => {
+        const clean = selectedInstallMode() === 'clean';
+        updateCleanConfirm.hidden = !clean;
+        updateInstallButton.textContent = clean ? 'Стереть данные и установить' : 'Установить и перезапустить';
+      });
+
       updateInstallButton?.addEventListener('click', async () => {
+        const clean = selectedInstallMode() === 'clean' && !updateCleanBlock.hidden;
         updateInstallButton.disabled = true;
         updateInstallButton.textContent = 'Устанавливаю...';
         updateModalError.hidden = true;
-        const result = await window.tchat.installUpdate().catch((error) => ({ ok: false, error: error.message }));
+        const result = await window.tchat
+          .installUpdate({ clean })
+          .catch((error) => ({ ok: false, error: error.message }));
         if (!result?.ok) {
           updateModalError.textContent = result?.error || 'Не удалось запустить установку.';
           updateModalError.hidden = false;
           updateInstallButton.disabled = false;
-          updateInstallButton.textContent = 'Установить и перезапустить';
+          updateInstallButton.textContent = clean ? 'Стереть данные и установить' : 'Установить и перезапустить';
         }
       });
 
@@ -6222,7 +6338,10 @@
             showUpdateModal(status);
             updateProgressWrap.hidden = true;
             updateInstallButton.disabled = false;
-            updateInstallButton.textContent = 'Установить и перезапустить';
+            updateInstallButton.textContent =
+              selectedInstallMode() === 'clean' ? 'Стереть данные и установить' : 'Установить и перезапустить';
+            // Выбор появляется только на этом шаге: раньше он не нужен.
+            refreshCleanInstallOption();
             break;
 
           case 'none':
@@ -6252,6 +6371,102 @@
       if (checkUpdatesButton && window.tchat?.onUpdaterStatus) {
         window.tchat.onUpdaterStatus(renderUpdaterStatus);
       }
+
+      // --- быстрая настройка при первом запуске ---
+      // Показывается, когда мастер ещё не пройден: свежая установка или
+      // перезапуск после чистой установки.
+      (async () => {
+        const setupModal = document.querySelector('#setupModal');
+        if (!setupModal || !window.tchat?.getSetupState) return;
+
+        const setupInputs = {
+          twitch: document.querySelector('#setupTwitch'),
+          vk: document.querySelector('#setupVk'),
+          youtube: document.querySelector('#setupYoutube'),
+          rutube: document.querySelector('#setupRutube'),
+        };
+        const setupSaveButton = document.querySelector('#setupSaveButton');
+        const setupSkipButton = document.querySelector('#setupSkipButton');
+        const setupDone = document.querySelector('#setupDone');
+        const setupError = document.querySelector('#setupError');
+
+        function closeSetup() {
+          setupModal.hidden = true;
+          if (updateModal?.hidden !== false) {
+            document.body.classList.remove('is-modal-open');
+          }
+        }
+
+        async function finishSetup() {
+          try {
+            await window.tchat.completeSetup();
+          } catch {
+            /* флаг не критичен — мастер просто покажется ещё раз */
+          }
+        }
+
+        let state = null;
+        try {
+          state = await window.tchat.getSetupState();
+        } catch {
+          return;
+        }
+
+        if (state?.completed) return;
+
+        const saved = readSettings();
+        for (const [key, input] of Object.entries(setupInputs)) {
+          if (input) input.value = saved[key] || '';
+        }
+
+        const overlay = document.querySelector('#setupOverlayUrl');
+        if (overlay && widgetsState?.urls?.stream) overlay.textContent = widgetsState.urls.stream;
+
+        setupModal.hidden = false;
+        document.body.classList.add('is-modal-open');
+
+        setupSaveButton?.addEventListener('click', async () => {
+          setupError.hidden = true;
+          const next = {
+            ...readSettings(),
+            twitch: setupInputs.twitch.value.trim(),
+            vk: setupInputs.vk.value.trim(),
+            youtube: setupInputs.youtube.value.trim(),
+            rutube: setupInputs.rutube.value.trim(),
+          };
+
+          if (!next.twitch && !next.vk && !next.youtube && !next.rutube) {
+            setupError.textContent = 'Укажите хотя бы один канал или нажмите «Пропустить».';
+            setupError.hidden = false;
+            return;
+          }
+
+          try {
+            saveSettings(next);
+            await window.tchat.updateChatChannels(next);
+            // Продублируем в поля вкладки «Подключения», чтобы не расходились.
+            if (twitchInput) twitchInput.value = next.twitch;
+            if (vkInput) vkInput.value = next.vk;
+            if (youtubeInput) youtubeInput.value = next.youtube;
+            if (rutubeInput) rutubeInput.value = next.rutube;
+          } catch (error) {
+            setupError.textContent = 'Не удалось подключить каналы: ' + error.message;
+            setupError.hidden = false;
+            return;
+          }
+
+          await finishSetup();
+          setupDone.hidden = false;
+          setupSaveButton.textContent = 'Закрыть';
+          setupSaveButton.onclick = closeSetup;
+          setupSkipButton.hidden = true;
+        });
+
+        setupSkipButton?.addEventListener('click', async () => {
+          await finishSetup();
+          closeSetup();
+        });
+      })();
 
       // --- список изменений по клику на версию ---
       const patchnotesModal = document.querySelector('#patchnotesModal');

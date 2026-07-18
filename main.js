@@ -214,6 +214,153 @@ if (!hasSingleInstanceLock) {
   });
 }
 
+// --- чистая установка -------------------------------------------------------
+// Стереть данные на лету нельзя: файлы заняты работающим приложением. Поэтому
+// перед перезапуском кладём метку, а чистим на следующем старте — до того, как
+// хоть что-то прочитано. Метка лежит в userData, но вне удаляемых папок.
+const CLEAN_INSTALL_MARKER = 'clean-install.flag';
+
+function getCleanInstallMarkerPath() {
+  return path.join(app.getPath('userData'), CLEAN_INSTALL_MARKER);
+}
+
+function requestCleanInstall() {
+  try {
+    fs.writeFileSync(getCleanInstallMarkerPath(), new Date().toISOString());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+function isCleanInstallPending() {
+  try {
+    return fs.existsSync(getCleanInstallMarkerPath());
+  } catch {
+    return false;
+  }
+}
+
+// Вызывается самой первой, до setupChatStorage/setupDonationAlertsStorage.
+function applyPendingCleanInstall() {
+  if (!isCleanInstallPending()) {
+    return false;
+  }
+
+  const userData = app.getPath('userData');
+  // Токены, адреса каналов и правила лежат в settings/, переписка — в chat-history/.
+  for (const name of ['settings', 'chat-history']) {
+    try {
+      fs.rmSync(path.join(userData, name), { recursive: true, force: true });
+    } catch (error) {
+      console.error(`[clean-install] не удалось удалить ${name}: ${error.message}`);
+    }
+  }
+
+  try {
+    fs.rmSync(path.join(userData, 'updater.log'), { force: true });
+  } catch {
+    /* лог не критичен */
+  }
+
+  // Кеш смайлов и аватарок из чата — чистый кеш, скачается заново.
+  // Картинки алертов и стикеров рядом (assets/alerts, assets/stickers) не трогаем:
+  // там же лежат дефолтные звуки и картинки, идущие в комплекте.
+  try {
+    fs.rmSync(path.join(__dirname, 'assets', 'chat'), { recursive: true, force: true });
+  } catch (error) {
+    console.error(`[clean-install] кеш чата не удалился: ${error.message}`);
+  }
+
+  try {
+    fs.rmSync(getCleanInstallMarkerPath(), { force: true });
+  } catch (error) {
+    console.error(`[clean-install] метка не удалилась: ${error.message}`);
+  }
+
+  logInfo('Выполнена чистая установка: данные стёрты');
+  return true;
+}
+
+// Что именно потеряет пользователь при чистой установке — показываем до того,
+// как он согласится.
+function getUserDataSummary() {
+  const userData = app.getPath('userData');
+  const settingsDir = path.join(userData, 'settings');
+
+  const readJson = (name) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(settingsDir, name), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+
+  const donation = readJson('donationalerts.json') || {};
+  const announce = readJson('announce.json') || {};
+  const channels = readJson('channels.json') || {};
+
+  const tokens = [
+    donation.token && 'DonationAlerts',
+    (announce.telegramToken || announce.tgToken) && 'Telegram',
+    (announce.maxToken || announce.max?.token) && 'MAX',
+    (announce.aiKey || announce.anthropicKey) && 'ИИ',
+  ].filter(Boolean);
+
+  const addresses = ['twitch', 'vk', 'youtube', 'rutube'].filter((key) => String(channels[key] || '').trim());
+
+  let messages = 0;
+  try {
+    const raw = fs.readFileSync(path.join(userData, 'chat-history', 'chat.jsonl'), 'utf8');
+    messages = raw.split('\n').filter((line) => line.trim()).length;
+  } catch {
+    messages = 0;
+  }
+
+  let rules = 0;
+  try {
+    rules = (readJson('alert-rules.json')?.rules || []).length + (readJson('stickers.json')?.rules || []).length;
+  } catch {
+    rules = 0;
+  }
+
+  return {
+    hasData: Boolean(tokens.length || addresses.length || messages || rules),
+    tokens,
+    addresses,
+    messages,
+    rules,
+  };
+}
+
+// --- первый запуск ----------------------------------------------------------
+function getSetupStatePath() {
+  return path.join(app.getPath('userData'), 'settings', 'setup.json');
+}
+
+function getSetupState() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(getSetupStatePath(), 'utf8'));
+    return { completed: Boolean(saved.completed), completedAt: saved.completedAt || '' };
+  } catch {
+    // Настройка не пройдена. Но если каналы уже заданы — это апгрейд со старой
+    // версии, а не чистый первый запуск: мастером человека дёргать не надо.
+    const hasChannels = ['twitch', 'vk', 'youtube', 'rutube'].some((key) => String(currentChannels[key] || '').trim());
+    return { completed: hasChannels, completedAt: '' };
+  }
+}
+
+function saveSetupState(completed = true) {
+  try {
+    fs.mkdirSync(path.dirname(getSetupStatePath()), { recursive: true });
+    fs.writeFileSync(getSetupStatePath(), JSON.stringify({ completed, completedAt: new Date().toISOString() }, null, 2));
+  } catch (error) {
+    console.error(`Не удалось сохранить состояние мастера: ${error.message}`);
+  }
+
+  return getSetupState();
+}
+
 function setupChatStorage() {
   const storageDir = path.join(app.getPath('userData'), 'chat-history');
   fs.mkdirSync(storageDir, { recursive: true });
@@ -2464,9 +2611,16 @@ function readLocalPatchnotes() {
   }
 }
 
-function installDownloadedUpdate() {
+function installDownloadedUpdate({ clean = false } = {}) {
   if (!autoUpdater) {
     return { ok: false, error: 'модуль обновления недоступен' };
+  }
+
+  if (clean) {
+    const marked = requestCleanInstall();
+    if (!marked.ok) {
+      return { ok: false, error: `не удалось пометить чистую установку: ${marked.error}` };
+    }
   }
 
   try {
@@ -4851,6 +5005,8 @@ app.whenReady().then(async () => {
   }
 
   Menu.setApplicationMenu(null);
+  // Строго до чтения любых настроек: иначе сотрём то, что уже загружено в память.
+  applyPendingCleanInstall();
   setupChatStorage();
   setupDonationAlertsStorage();
   await startLocalServer();
@@ -5020,7 +5176,13 @@ ipcMain.handle('restream:start', () => restream.start());
 ipcMain.handle('restream:stop', () => restream.stop());
 ipcMain.handle('restream:save-config', (_event, payload) => restream.saveConfig(payload || {}));
 
-ipcMain.handle('app:install-update', () => installDownloadedUpdate());
+ipcMain.handle('app:install-update', (_event, payload) => installDownloadedUpdate({ clean: Boolean(payload?.clean) }));
+
+ipcMain.handle('app:get-data-summary', () => getUserDataSummary());
+
+ipcMain.handle('app:get-setup-state', () => getSetupState());
+
+ipcMain.handle('app:complete-setup', () => saveSetupState(true));
 
 ipcMain.handle('app:get-patchnotes', () => ({
   current: app.getVersion(),
