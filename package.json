@@ -1,6 +1,6 @@
 {
   "name": "tchat",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
   "main": "main.js",
   "scripts": {
@@ -9,7 +9,6 @@
     "server:check": "node scripts/check-server.js",
     "smoke:test": "node scripts/smoke-test.js",
     "dist": "electron-builder --win",
-    "dist:portable": "electron-builder --win portable",
     "pack": "electron-builder --dir"
   },
   "keywords": [],
@@ -62,12 +61,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "build/icon.ico"
@@ -79,10 +72,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TChat",
-      "artifactName": "TChat-Setup-${version}.exe"
-    },
-    "portable": {
-      "artifactName": "TChat-${version}-portable.exe"
+      "artifactName": "TChat-Setup-${version}.exe",
+      "include": "build/installer.nsh"
     },
     "publish": [
       {

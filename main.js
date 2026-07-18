@@ -252,8 +252,11 @@ function applyPendingCleanInstall() {
   }
 
   const userData = app.getPath('userData');
-  // Токены, адреса каналов и правила лежат в settings/, переписка — в chat-history/.
-  for (const name of ['settings', 'chat-history']) {
+  // settings/ — токены, адреса каналов и правила; chat-history/ — переписка.
+  // Local Storage / Session Storage — хранилище бэкоффиса: там лежат токен
+  // DonationAlerts, client id/secret и адреса каналов. Без них «чистая»
+  // установка оставляла бы токены на месте.
+  for (const name of ['settings', 'chat-history', 'Local Storage', 'Session Storage']) {
     try {
       fs.rmSync(path.join(userData, name), { recursive: true, force: true });
     } catch (error) {

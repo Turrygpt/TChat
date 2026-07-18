@@ -43,7 +43,6 @@ const uploads = [
   [path.join(dist, 'latest.yml'), `${REMOTE_DIR}/releases/latest.yml`],
   [path.join(dist, `TChat-Setup-${version}.exe`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe`],
   [path.join(dist, `TChat-Setup-${version}.exe.blockmap`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe.blockmap`],
-  [path.join(dist, `TChat-${version}-portable.exe`), `${REMOTE_DIR}/releases/TChat-${version}-portable.exe`],
   [path.join(projectDir, 'src', 'server', 'widgetServer.js'), `${REMOTE_DIR}/src/server/widgetServer.js`],
   [path.join(projectDir, 'package.json'), `${REMOTE_DIR}/package.json`],
   [path.join(projectDir, 'patchnotes.json'), `${REMOTE_DIR}/patchnotes.json`],

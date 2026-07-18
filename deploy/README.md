@@ -39,7 +39,7 @@ npm.cmd install --no-save ssh2
 $env:TCHAT_DEPLOY_PASS='<пароль сервера>'; node deploy\upload-release.js
 ```
 
-Скрипт зальёт установщик, portable и `latest.yml` в `/opt/tchat/releases/` и перезапустит сервис.
+Скрипт зальёт установщик, `latest.yml`, патчноуты и виджеты в `/opt/tchat/` и перезапустит сервис.
 Скачивание: `http://195.62.49.244/tchat/download/TChat-Setup-<версия>.exe`.
 Установленное приложение само проверяет `latest.yml` при запуске и по кнопке «Проверить обновления».
 Не забудьте поднять `version` в `package.json` перед сборкой — иначе приложения не увидят обновление.

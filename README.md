@@ -41,11 +41,12 @@ PORT=8080 npm run serve  # другой порт
 
   ```powershell
   npm.cmd install
-  npm.cmd run dist            # установщик NSIS + portable, папка dist/
-  npm.cmd run dist:portable   # только portable
+  npm.cmd run dist            # установщик NSIS, папка dist/
   ```
 
-  Результат в `dist/`: `TChat Setup 1.0.0.exe` и `TChat-1.0.0-portable.exe`.
+  Результат в `dist/`: `TChat-Setup-<версия>.exe`. Portable-сборка больше не выпускается.
+  Установщик умеет чистую установку: если находит данные прошлой версии, предлагает стереть
+  настройки и переписку (скрипт страницы — `build/installer.nsh`).
 
 - **Android (WebView-обёртка):** см. **[android/README.md](android/README.md)**.
 
