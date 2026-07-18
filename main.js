@@ -2296,6 +2296,10 @@ function createLocalServer() {
     });
   });
 
+  expressApp.get('/patchnotes.json', (_request, response) => {
+    response.json({ notes: readLocalPatchnotes() });
+  });
+
   expressApp.get('/stickers/state', (_request, response) => {
     response.json(getStickerStatePayload());
   });
@@ -2437,6 +2441,45 @@ function broadcastUpdaterStatus(payload) {
   mainWindow?.webContents.send('updater:status', payload);
 }
 
+// Прямая ссылка на установщик — запасной путь, если автообновление не дошло.
+// Адрес раздачи берём оттуда же, откуда его берёт electron-updater.
+function getInstallerDownloadUrl(version = '') {
+  const base = String(require('./package.json')?.build?.publish?.[0]?.url || '').trim();
+  if (!base || !version) {
+    return '';
+  }
+
+  return `${base.replace(/\/+$/, '')}/TChat-Setup-${version}.exe`;
+}
+
+// Патчноуты приложения: локальный файл — то, что есть в этой версии.
+function readLocalPatchnotes() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'patchnotes.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.notes) ? parsed.notes : [];
+  } catch (error) {
+    console.error(`[patchnotes] не удалось прочитать: ${error.message}`);
+    return [];
+  }
+}
+
+function installDownloadedUpdate() {
+  if (!autoUpdater) {
+    return { ok: false, error: 'модуль обновления недоступен' };
+  }
+
+  try {
+    // Рестрим держит ffmpeg — гасим его сами, чтобы установщик не воевал за файлы.
+    restream.shutdown();
+  } catch {
+    /* не критично */
+  }
+
+  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  return { ok: true };
+}
+
 function setupAutoUpdater() {
   if (!autoUpdater || !app.isPackaged) {
     return;
@@ -2444,7 +2487,11 @@ function setupAutoUpdater() {
 
   autoUpdater.on('checking-for-update', () => broadcastUpdaterStatus({ state: 'checking' }));
   autoUpdater.on('update-available', (info) =>
-    broadcastUpdaterStatus({ state: 'available', version: info?.version || '' }),
+    broadcastUpdaterStatus({
+      state: 'available',
+      version: info?.version || '',
+      downloadUrl: getInstallerDownloadUrl(info?.version || ''),
+    }),
   );
   autoUpdater.on('update-not-available', () =>
     broadcastUpdaterStatus({ state: 'none', current: app.getVersion() }),
@@ -2459,20 +2506,28 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-downloaded', (info) => {
     const version = info?.version || 'новая версия';
-    broadcastUpdaterStatus({ state: 'downloaded', version });
+    broadcastUpdaterStatus({ state: 'downloaded', version, downloadUrl: getInstallerDownloadUrl(info?.version || '') });
+
+    // Бэкоффис показывает своё окно обновления, которое нельзя закрыть мимо.
+    // Системный диалог нужен только если бэкоффиса на экране нет — иначе
+    // пользователь получил бы два запроса разом.
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      return;
+    }
+
     dialog
       .showMessageBox({
         type: 'info',
         title: 'Обновление TChat',
         message: `Скачано обновление ${version}. Установить сейчас?`,
-        detail: 'Приложение перезапустится. Если отложить — обновление установится при выходе.',
+        detail: 'Приложение перезапустится. Если идёт эфир — сначала завершите его.',
         buttons: ['Установить сейчас', 'Позже'],
         defaultId: 0,
         cancelId: 1,
       })
       .then(({ response }) => {
         if (response === 0) {
-          autoUpdater.quitAndInstall(false, true);
+          installDownloadedUpdate();
         }
       })
       .catch(() => {});
@@ -4964,6 +5019,15 @@ ipcMain.handle('restream:get-state', () => restream.getState());
 ipcMain.handle('restream:start', () => restream.start());
 ipcMain.handle('restream:stop', () => restream.stop());
 ipcMain.handle('restream:save-config', (_event, payload) => restream.saveConfig(payload || {}));
+
+ipcMain.handle('app:install-update', () => installDownloadedUpdate());
+
+ipcMain.handle('app:get-patchnotes', () => ({
+  current: app.getVersion(),
+  notes: readLocalPatchnotes(),
+  // Адрес раздачи: бэкоффис дотянется до заметок о версии, которой у нас ещё нет.
+  feedUrl: String(require('./package.json')?.build?.publish?.[0]?.url || '').replace(/\/+$/, ''),
+}));
 
 ipcMain.handle('app:get-server-status', () => serverStatus);
 ipcMain.handle('app:get-info', () => ({

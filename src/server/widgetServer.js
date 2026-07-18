@@ -1,3 +1,4 @@
+const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const express = require('express');
@@ -90,6 +91,20 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
     response.json({
       settings: { displaySeconds: 8 },
       queue: [],
+    });
+  });
+
+  app.get('/patchnotes.json', (_request, response) => {
+    fs.readFile(path.join(__dirname, '../../patchnotes.json'), 'utf8', (err, raw) => {
+      if (err) {
+        response.json({ notes: [] });
+        return;
+      }
+      try {
+        response.json(JSON.parse(raw));
+      } catch {
+        response.json({ notes: [] });
+      }
     });
   });
 

@@ -1473,6 +1473,143 @@
       }
 
       /* ---- Preview popup ---- */
+      /* Окно обязательного обновления. Поверх всего, включая превью. */
+      .update-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        display: grid;
+        place-items: center;
+        padding: 28px;
+      }
+
+      .update-modal[hidden] {
+        display: none;
+      }
+
+      .update-modal__backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgb(5 7 12 / 82%);
+        backdrop-filter: blur(6px);
+      }
+
+      .update-modal__dialog {
+        position: relative;
+        width: min(560px, 94vw);
+        max-height: 90vh;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: linear-gradient(180deg, var(--panel-2), #10141f);
+        box-shadow: 0 40px 120px rgb(0 0 0 / 60%);
+        padding: 24px;
+      }
+
+      .update-modal__dialog h2 {
+        margin: 10px 0 6px;
+        font-size: 22px;
+      }
+
+      .update-modal__badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgb(137 87 229 / 22%);
+        color: #c4b5fd;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .update-modal__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .update-modal__actions .button {
+        text-decoration: none;
+      }
+
+      .update-modal__warning {
+        margin: 14px 0 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgb(251 191 36 / 35%);
+        background: rgb(251 191 36 / 12%);
+        color: #fcd34d;
+        font-size: 13px;
+      }
+
+      .update-modal__error {
+        margin: 12px 0 0;
+        color: #f87171;
+        font-size: 13px;
+      }
+
+      .update-progress {
+        margin-top: 16px;
+      }
+
+      .update-progress__bar {
+        height: 8px;
+        border-radius: 999px;
+        background: rgb(255 255 255 / 8%);
+        overflow: hidden;
+      }
+
+      .update-progress__bar span {
+        display: block;
+        height: 100%;
+        width: 0%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #8957e5, #22d3ee);
+        transition: width 200ms ease;
+      }
+
+      .update-progress p {
+        margin: 6px 0 0;
+        font-size: 12px;
+      }
+
+      .update-notes {
+        margin-top: 16px;
+        border-top: 1px solid var(--border);
+        padding-top: 14px;
+        max-height: 320px;
+        overflow: auto;
+      }
+
+      .update-notes__entry + .update-notes__entry {
+        margin-top: 16px;
+      }
+
+      .update-notes__head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .update-notes__version {
+        font-weight: 700;
+        font-size: 15px;
+      }
+
+      .update-notes__list {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: #c8d0dc;
+      }
+
+      .update-notes__list li + li {
+        margin-top: 5px;
+      }
+
       .preview-modal {
         position: fixed;
         inset: 0;
@@ -1648,7 +1785,10 @@
     <main class="page">
       <header class="topbar">
         <div>
-          <h1>Панель управления <span id="appVersion" class="muted" style="font-size: 13px; font-weight: 400;"></span></h1>
+          <h1>Панель управления
+            <button id="appVersion" class="muted" type="button" title="Показать список изменений"
+              style="font-size: 13px; font-weight: 400; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px;"></button>
+          </h1>
           <p class="muted">Подключения, виджеты, алерты и музыка.</p>
         </div>
         <button id="checkUpdatesButton" class="button button--ghost" type="button">Проверить обновления</button>
@@ -2269,6 +2409,45 @@
         </section>
       </section>
     </main>
+    </div>
+
+    <!-- Список изменений: открывается кликом по номеру версии в шапке. -->
+    <div id="patchnotesModal" class="update-modal" hidden>
+      <div class="update-modal__backdrop" data-patchnotes-close></div>
+      <div class="update-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="patchnotesTitle">
+        <div class="update-modal__badge">Список изменений</div>
+        <h2 id="patchnotesTitle">Что нового в TChat</h2>
+        <div id="patchnotesBody" class="update-notes"></div>
+        <div class="update-modal__actions">
+          <button class="button button--ghost" type="button" data-patchnotes-close>Закрыть</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Обязательное обновление: окно нельзя закрыть, пока версия не установлена. -->
+    <div id="updateModal" class="update-modal" hidden>
+      <div class="update-modal__backdrop"></div>
+      <div class="update-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle">
+        <div class="update-modal__badge">Доступно обновление</div>
+        <h2 id="updateModalTitle">TChat <span id="updateModalVersion">—</span></h2>
+        <p id="updateModalSubtitle" class="muted">У вас <span id="updateModalCurrent">—</span>. Обновление обязательно.</p>
+
+        <div id="updateProgressWrap" class="update-progress" hidden>
+          <div class="update-progress__bar"><span id="updateProgressFill"></span></div>
+          <p id="updateProgressText" class="muted">Скачиваю...</p>
+        </div>
+
+        <p id="updateModalWarning" class="update-modal__warning" hidden></p>
+
+        <div class="update-modal__actions">
+          <button id="updateInstallButton" class="button" type="button" disabled>Скачиваю...</button>
+          <button id="updateNotesToggle" class="button button--ghost" type="button">Что нового</button>
+          <a id="updateManualLink" class="button button--ghost" href="#" target="_blank" rel="noreferrer" hidden>Скачать вручную</a>
+        </div>
+
+        <div id="updateNotes" class="update-notes" hidden></div>
+        <p id="updateModalError" class="update-modal__error" hidden></p>
+      </div>
     </div>
 
     <div id="previewModal" class="preview-modal" hidden>
@@ -5886,33 +6065,186 @@
         }, delayMs);
       }
 
+      // --- окно обязательного обновления ---
+      const updateModal = document.querySelector('#updateModal');
+      const updateModalVersion = document.querySelector('#updateModalVersion');
+      const updateModalCurrent = document.querySelector('#updateModalCurrent');
+      const updateInstallButton = document.querySelector('#updateInstallButton');
+      const updateNotesToggle = document.querySelector('#updateNotesToggle');
+      const updateNotes = document.querySelector('#updateNotes');
+      const updateManualLink = document.querySelector('#updateManualLink');
+      const updateProgressWrap = document.querySelector('#updateProgressWrap');
+      const updateProgressFill = document.querySelector('#updateProgressFill');
+      const updateProgressText = document.querySelector('#updateProgressText');
+      const updateModalWarning = document.querySelector('#updateModalWarning');
+      const updateModalError = document.querySelector('#updateModalError');
+
+      let patchnotesCache = null;
+      let updateNotesLoaded = false;
+
+      async function loadPatchnotes() {
+        if (patchnotesCache) return patchnotesCache;
+        const local = await window.tchat.getPatchnotes().catch(() => null);
+        let notes = local?.notes || [];
+
+        // Заметки о новой версии лежат на раздаче — локальный файл о ней ещё не знает.
+        if (local?.feedUrl) {
+          try {
+            const response = await fetch(local.feedUrl + '/patchnotes.json', { cache: 'no-store' });
+            const remote = await response.json();
+            if (Array.isArray(remote?.notes) && remote.notes.length) {
+              notes = remote.notes;
+            }
+          } catch {
+            /* без сети покажем локальные */
+          }
+        }
+
+        patchnotesCache = { current: local?.current || '', notes };
+        return patchnotesCache;
+      }
+
+      function renderPatchnotes(container, notes) {
+        if (!notes.length) {
+          container.innerHTML = '<p class="muted">Список изменений недоступен.</p>';
+          return;
+        }
+
+        container.innerHTML = notes
+          .map(
+            (note) =>
+              '<div class="update-notes__entry">' +
+              '<div class="update-notes__head"><span class="update-notes__version">v' +
+              escapeHtml(note.version) +
+              '</span><span class="muted" style="font-size:12px;">' +
+              escapeHtml(note.date || '') +
+              '</span></div>' +
+              (note.title ? '<div class="muted" style="font-size:13px;">' + escapeHtml(note.title) + '</div>' : '') +
+              '<ul class="update-notes__list">' +
+              (note.changes || []).map((line) => '<li>' + escapeHtml(line) + '</li>').join('') +
+              '</ul></div>',
+          )
+          .join('');
+      }
+
+      updateNotesToggle?.addEventListener('click', async () => {
+        const willShow = updateNotes.hidden;
+        updateNotes.hidden = !willShow;
+        updateNotesToggle.textContent = willShow ? 'Скрыть изменения' : 'Что нового';
+        if (willShow && !updateNotesLoaded) {
+          updateNotes.innerHTML = '<p class="muted">Загружаю...</p>';
+          const data = await loadPatchnotes();
+          renderPatchnotes(updateNotes, data.notes);
+          updateNotesLoaded = true;
+        }
+      });
+
+      updateInstallButton?.addEventListener('click', async () => {
+        updateInstallButton.disabled = true;
+        updateInstallButton.textContent = 'Устанавливаю...';
+        updateModalError.hidden = true;
+        const result = await window.tchat.installUpdate().catch((error) => ({ ok: false, error: error.message }));
+        if (!result?.ok) {
+          updateModalError.textContent = result?.error || 'Не удалось запустить установку.';
+          updateModalError.hidden = false;
+          updateInstallButton.disabled = false;
+          updateInstallButton.textContent = 'Установить и перезапустить';
+        }
+      });
+
+      // Установка перезапускает приложение, а вместе с ним обрывается рестрим.
+      // Предупреждаем, если эфир идёт прямо сейчас.
+      async function refreshUpdateWarning() {
+        if (!window.tchat?.getRestreamState) return;
+        try {
+          const state = await window.tchat.getRestreamState();
+          const live = state?.live;
+          updateModalWarning.hidden = !live;
+          if (live) {
+            updateModalWarning.textContent =
+              'Сейчас идёт эфир. Установка перезапустит TChat и оборвёт рестрим — лучше обновиться после стрима.';
+          }
+        } catch {
+          /* без предупреждения не страшно */
+        }
+      }
+
+      function showUpdateModal(status) {
+        if (!updateModal) return;
+        updateModal.hidden = false;
+        document.body.classList.add('is-modal-open');
+        updateModalVersion.textContent = 'v' + (status.version || '');
+        if (status.downloadUrl) {
+          updateManualLink.href = status.downloadUrl;
+          updateManualLink.hidden = false;
+        }
+        refreshUpdateWarning();
+      }
+
       function renderUpdaterStatus(status) {
-        if (!checkUpdatesButton || !status) return;
+        if (!status) return;
+
         switch (status.state) {
           case 'checking':
-            checkUpdatesButton.textContent = 'Проверяю...';
+            if (checkUpdatesButton) checkUpdatesButton.textContent = 'Проверяю...';
             break;
+
           case 'available':
-            checkUpdatesButton.disabled = true;
-            checkUpdatesButton.textContent = 'Скачиваю v' + status.version + '... 0%';
+            if (checkUpdatesButton) {
+              checkUpdatesButton.disabled = true;
+              checkUpdatesButton.textContent = 'Скачиваю v' + status.version + '...';
+            }
+            showUpdateModal(status);
+            updateProgressWrap.hidden = false;
+            updateProgressFill.style.width = '0%';
+            updateProgressText.textContent = 'Скачиваю обновление...';
+            updateInstallButton.disabled = true;
+            updateInstallButton.textContent = 'Скачиваю...';
             break;
+
           case 'downloading': {
-            checkUpdatesButton.disabled = true;
             const speedMb = ((status.speedKbps || 0) / 1024).toFixed(1);
-            checkUpdatesButton.textContent = 'Скачиваю... ' + status.percent + '% (' + speedMb + ' МБ/с)';
+            if (checkUpdatesButton) {
+              checkUpdatesButton.disabled = true;
+              checkUpdatesButton.textContent = 'Скачиваю... ' + status.percent + '%';
+            }
+            showUpdateModal(status);
+            updateProgressWrap.hidden = false;
+            updateProgressFill.style.width = (status.percent || 0) + '%';
+            updateProgressText.textContent = 'Скачиваю... ' + (status.percent || 0) + '% (' + speedMb + ' МБ/с)';
+            updateInstallButton.disabled = true;
+            updateInstallButton.textContent = 'Скачиваю... ' + (status.percent || 0) + '%';
             break;
           }
+
           case 'downloaded':
-            checkUpdatesButton.textContent = 'v' + status.version + ' готова к установке';
-            resetUpdateButtonLater(60000);
+            if (checkUpdatesButton) checkUpdatesButton.textContent = 'v' + status.version + ' готова к установке';
+            showUpdateModal(status);
+            updateProgressWrap.hidden = true;
+            updateInstallButton.disabled = false;
+            updateInstallButton.textContent = 'Установить и перезапустить';
             break;
+
           case 'none':
-            checkUpdatesButton.textContent = 'Уже последняя (v' + status.current + ')';
-            resetUpdateButtonLater(6000);
+            if (checkUpdatesButton) {
+              checkUpdatesButton.textContent = 'Уже последняя (v' + status.current + ')';
+              resetUpdateButtonLater(6000);
+            }
             break;
+
           case 'error':
-            checkUpdatesButton.textContent = 'Ошибка обновления: ' + (status.message || '').slice(0, 120);
-            resetUpdateButtonLater(15000);
+            if (checkUpdatesButton) {
+              checkUpdatesButton.textContent = 'Ошибка обновления: ' + (status.message || '').slice(0, 120);
+              resetUpdateButtonLater(15000);
+            }
+            // Автообновление сломалось — окно оставляем, но даём поставить руками.
+            if (!updateModal.hidden) {
+              updateModalError.textContent = 'Автообновление не удалось: ' + (status.message || '');
+              updateModalError.hidden = false;
+              updateProgressWrap.hidden = true;
+              updateInstallButton.disabled = true;
+              updateInstallButton.textContent = 'Скачайте установщик вручную';
+            }
             break;
         }
       }
@@ -5920,6 +6252,36 @@
       if (checkUpdatesButton && window.tchat?.onUpdaterStatus) {
         window.tchat.onUpdaterStatus(renderUpdaterStatus);
       }
+
+      // --- список изменений по клику на версию ---
+      const patchnotesModal = document.querySelector('#patchnotesModal');
+      const patchnotesBody = document.querySelector('#patchnotesBody');
+
+      document.querySelector('#appVersion')?.addEventListener('click', async () => {
+        patchnotesModal.hidden = false;
+        document.body.classList.add('is-modal-open');
+        patchnotesBody.innerHTML = '<p class="muted">Загружаю...</p>';
+        const data = await loadPatchnotes();
+        renderPatchnotes(patchnotesBody, data.notes);
+      });
+
+      patchnotesModal?.addEventListener('click', (event) => {
+        if (event.target.closest('[data-patchnotes-close]')) {
+          patchnotesModal.hidden = true;
+          if (updateModal?.hidden !== false) {
+            document.body.classList.remove('is-modal-open');
+          }
+        }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && patchnotesModal && !patchnotesModal.hidden) {
+          patchnotesModal.hidden = true;
+          if (updateModal?.hidden !== false) {
+            document.body.classList.remove('is-modal-open');
+          }
+        }
+      });
 
       checkUpdatesButton?.addEventListener('click', async () => {
         if (!window.tchat?.checkUpdates) return;

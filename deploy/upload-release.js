@@ -46,6 +46,10 @@ const uploads = [
   [path.join(dist, `TChat-${version}-portable.exe`), `${REMOTE_DIR}/releases/TChat-${version}-portable.exe`],
   [path.join(projectDir, 'src', 'server', 'widgetServer.js'), `${REMOTE_DIR}/src/server/widgetServer.js`],
   [path.join(projectDir, 'package.json'), `${REMOTE_DIR}/package.json`],
+  [path.join(projectDir, 'patchnotes.json'), `${REMOTE_DIR}/patchnotes.json`],
+  // Рядом с latest.yml: установленное приложение читает заметки о версии,
+  // которой у него ещё нет, с той же раздачи, откуда качает обновление.
+  [path.join(projectDir, 'patchnotes.json'), `${REMOTE_DIR}/releases/patchnotes.json`],
   ...widgetUploads,
 ];
 

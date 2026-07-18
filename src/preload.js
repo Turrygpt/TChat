@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('tchat', {
   getServerStatus: () => ipcRenderer.invoke('app:get-server-status'),
   getAppInfo: () => ipcRenderer.invoke('app:get-info'),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  installUpdate: () => ipcRenderer.invoke('app:install-update'),
+  getPatchnotes: () => ipcRenderer.invoke('app:get-patchnotes'),
   getRestreamState: () => ipcRenderer.invoke('restream:get-state'),
   startRestream: () => ipcRenderer.invoke('restream:start'),
   stopRestream: () => ipcRenderer.invoke('restream:stop'),
