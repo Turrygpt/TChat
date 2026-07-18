@@ -30,7 +30,8 @@ const playerInstanceId = `music-${Date.now()}-${Math.random().toString(16).slice
 let canPlayAudio = false;
 let leaderHeartbeatTimer = null;
 let startingTrackId = '';
-let youtubeSoundEnabled = false;
+let youtubeSoundConfirmed = false; // плеер сам подтвердил, что звук включён
+let youtubeSoundRetryTimers = [];
 
 function readStartedTracks() {
   try {
@@ -242,8 +243,9 @@ function startPlayback(item) {
   startingTrackId = item.id;
   vkSoundEnabled = false;
   rutubeSoundEnabled = false;
-  youtubeSoundEnabled = false;
+  youtubeSoundConfirmed = false;
   clearRutubeSoundRetries();
+  clearYouTubeSoundRetries();
 
   currentId = item.id;
   playbackStartedAt = Date.now();
@@ -260,6 +262,12 @@ function startPlayback(item) {
   musicPlayer.dataset.embedUrl = embedUrl;
   musicPlayer.onload = () => {
     startingTrackId = '';
+    // Для ютуба цепляемся к плееру сразу, не дожидаясь общей задержки в 900 мс:
+    // чем раньше пойдут ответы infoDelivery, тем раньше снимем мут.
+    if (isYouTubeItem(item)) {
+      registerYouTubePlayerEvents();
+      scheduleYouTubeSoundRetries();
+    }
     finalizePlayback(item);
   };
 
@@ -314,7 +322,7 @@ function finalizePlayback(item) {
 
     if (isYouTubeItem(item)) {
       registerYouTubePlayerEvents();
-      enableYouTubeSound();
+      scheduleYouTubeSoundRetries();
       scheduleYouTubeProgressPolling();
     }
 
@@ -439,14 +447,37 @@ function initVkVideoPlayer(item) {
   });
 }
 
+// Автозапуск в браузере разрешён только для немого видео, поэтому в URL стоит
+// mute=1, а звук включается командой уже после старта. Плеер принимает команды
+// не сразу и молча роняет всё, что пришло до инициализации iframe API — из-за
+// одной попытки звук появлялся с задержкой в несколько секунд. Поэтому шлём
+// серию попыток и прекращаем, только когда плеер сам отчитается, что не в муте.
 function enableYouTubeSound() {
-  if (youtubeSoundEnabled) {
-    return;
-  }
-
-  youtubeSoundEnabled = true;
   sendYouTubeCommand('unMute');
   sendYouTubeCommand('setVolume', [MUSIC_VOLUME_PERCENT]);
+}
+
+function clearYouTubeSoundRetries() {
+  youtubeSoundRetryTimers.forEach((timerId) => window.clearTimeout(timerId));
+  youtubeSoundRetryTimers = [];
+}
+
+function scheduleYouTubeSoundRetries() {
+  clearYouTubeSoundRetries();
+
+  for (const delay of [0, 150, 400, 900, 1800, 3000, 5000]) {
+    youtubeSoundRetryTimers.push(
+      window.setTimeout(() => {
+        if (!currentId || youtubeSoundConfirmed) {
+          return;
+        }
+
+        enableYouTubeSound();
+        // Просим плеер отчитаться о громкости — по ответу поймём, снялся ли мут.
+        sendYouTubeCommand('getVolume');
+      }, delay),
+    );
+  }
 }
 
 function registerYouTubePlayerEvents() {
@@ -527,6 +558,26 @@ function handlePlayerMessage(event) {
     }
   }
 
+  if (isYouTubeItem({ embedUrl: musicPlayer.src })) {
+    // onReady и переход в PLAYING (1) — самые ранние моменты, когда плеер
+    // гарантированно принимает команды.
+    if (data.event === 'onReady' || (data.event === 'onStateChange' && Number(data.info) === 1)) {
+      enableYouTubeSound();
+    }
+
+    const info = data.info;
+    if (info && typeof info === 'object' && (info.muted !== undefined || info.volume !== undefined)) {
+      const volume = Number(info.volume);
+      if (info.muted === false && volume > 0) {
+        youtubeSoundConfirmed = true;
+        clearYouTubeSoundRetries();
+      } else if (info.muted === true || volume === 0) {
+        youtubeSoundConfirmed = false;
+        enableYouTubeSound();
+      }
+    }
+  }
+
   if (isRutubeItem({ embedUrl: musicPlayer.src })) {
     if (data.type === 'player:ready' || data.type === 'player:init') {
       startRutubePlayback();
@@ -567,8 +618,9 @@ function stopPlayback(continueQueue) {
   startingTrackId = '';
   vkSoundEnabled = false;
   rutubeSoundEnabled = false;
-  youtubeSoundEnabled = false;
+  youtubeSoundConfirmed = false;
   clearRutubeSoundRetries();
+  clearYouTubeSoundRetries();
   playbackStartedAt = 0;
   lastKnownDuration = 0;
   currentId = '';

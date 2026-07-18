@@ -2242,6 +2242,12 @@
             <p id="restreamStatsHint" class="muted" style="margin-top: 6px; font-size: 12px;"></p>
 
             <h3 style="margin: 16px 0 6px; font-size: 15px;">Площадки-приёмники</h3>
+            <p class="muted" style="margin: 0 0 8px; font-size: 12px;">
+              Поток раздаётся без перекодирования, поэтому битрейт у всех площадок в эфире одинаковый —
+              различаются статус, объём отправленного и ошибки. Площадка, отвалившаяся посреди эфира,
+              сама не вернётся: её счётчик замирает на моменте обрыва, а для переподключения нужно
+              выключить и включить рестрим.
+            </p>
             <div id="restreamDestList" class="list"></div>
             <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
               <label class="field"><span>Название</span><input id="restreamNewName" type="text" placeholder="YouTube" /></label>
@@ -5739,11 +5745,13 @@
           if (!statsEl) return;
           const s = next.stats || {};
           const dash = '—';
+          const resolution = s.width && s.height ? s.width + '×' + s.height : dash;
           const tiles = [
             ['Битрейт', next.live ? (s.bitrateKbps || 0) + ' kbps' : dash],
             ['Аптайм', next.live ? formatDuration(s.uptimeSec) : dash],
-            ['FPS', next.live ? (s.fps || 0) : dash],
+            ['FPS', next.live && s.fps ? s.fps : dash],
             ['Отправлено', next.live ? formatBytes(s.sentBytes) : dash],
+            ['Разрешение', next.live ? resolution : dash],
             ['Пик битрейта', s.peakBitrateKbps ? s.peakBitrateKbps + ' kbps' : dash],
             ['Средний битрейт', s.avgBitrateKbps ? s.avgBitrateKbps + ' kbps' : dash],
             ['Обрывы OBS', s.disconnects || 0],
@@ -5755,6 +5763,12 @@
 
           if (!statsHint) return;
           const notes = [];
+          if (next.live && (s.videoCodec || s.audioCodec)) {
+            const codecs = [s.videoCodec, s.audioCodec && s.audioCodec + (s.audioKbps ? ' ' + s.audioKbps + ' kbps' : '')]
+              .filter(Boolean)
+              .join(' + ');
+            notes.push('кодеки: ' + codecs);
+          }
           if (next.live && s.speed && Math.abs(s.speed - 1) > 0.05) {
             notes.push('скорость ' + s.speed.toFixed(2) + 'x — поток отстаёт от реального времени');
           }
@@ -5779,10 +5793,25 @@
             row.className = 'list__row';
             row.style.cssText = 'display:grid; grid-template-columns:auto 1fr auto auto; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border-soft);';
             const badge = state.running && dest.enabled ? (STATUS_LABEL[dest.status] || dest.status) : 'выкл';
+            const badgeColor = dest.status === 'error' ? '#f87171' : dest.status === 'live' ? '#4ade80' : '';
+
+            // Вторая строка под площадкой: что именно на неё уходит прямо сейчас.
+            let detail = '';
+            if (dest.status === 'live') {
+              detail = (dest.bitrateKbps || 0) + ' kbps · отправлено ' + formatBytes(dest.sentBytes) +
+                (dest.liveSince ? ' · в эфире с ' + formatClock(dest.liveSince) : '');
+            } else if (dest.status === 'error') {
+              detail = 'обрыв в ' + formatClock(dest.failedAt) + (dest.error ? ' · ' + dest.error : '') +
+                ' · отправлено до обрыва ' + formatBytes(dest.sentBytes) +
+                ' · вернуть в эфир: переключите рестрим';
+            }
+
             row.innerHTML =
               '<input type="checkbox" ' + (dest.enabled ? 'checked' : '') + ' data-dest-toggle="' + dest.id + '" title="Включить/выключить" />' +
-              '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.url) + '</span></span>' +
-              '<span class="muted" style="font-size:12px;">' + escapeHtml(badge) + '</span>' +
+              '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.url) + '</span>' +
+              (detail ? '<br><span class="muted" style="font-size:12px;">' + escapeHtml(detail) + '</span>' : '') +
+              '</span>' +
+              '<span style="font-size:12px;' + (badgeColor ? 'color:' + badgeColor + ';' : '') + '">' + escapeHtml(badge) + '</span>' +
               '<button class="button button--ghost" type="button" data-dest-delete="' + dest.id + '">Удалить</button>';
             destList.appendChild(row);
           }

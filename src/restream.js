@@ -22,13 +22,16 @@ try {
 const DEFAULT_INGEST_PORT = 1935;
 const DEFAULT_STREAM_KEY = 'tchat';
 const RESPAWN_DELAY = 1200;
+// Куда сбрасывать «счётный» выход: он нужен только ради статистики (см. buildArgs).
+const NULL_SINK = process.platform === 'win32' ? 'NUL' : '/dev/null';
 
 let configFile = '';
 let config = createDefaultConfig();
 let proc = null; // текущий ffmpeg-listen
 let running = false; // слушатель активен
 let live = false; // OBS подключён, кадры идут
-let destStatus = new Map(); // id -> 'idle'|'live'|'error'
+// id -> { status: 'idle'|'live'|'error', error, liveSince, failedAt, sentBytes }
+let destStats = new Map();
 let bitrateKbps = 0; // текущий сквозной битрейт (из stats ffmpeg)
 let respawnTimer = null;
 let statusListener = () => {};
@@ -36,7 +39,12 @@ let statusListener = () => {};
 // Статистика текущей сессии (пока OBS подключён) + счётчики за время работы сервера.
 let sessionStartedAt = 0;
 let uptimeSec = 0; // из time= — точнее часов, считает реально принятый поток
-let fps = 0;
+let fps = 0; // из баннера входа: при -c copy ffmpeg не печатает fps= в прогрессе
+let videoWidth = 0;
+let videoHeight = 0;
+let videoCodec = '';
+let audioCodec = '';
+let audioKbps = 0;
 let sentBytes = 0;
 let speed = 0; // 1.0x = поток уходит в реальном времени
 let droppedFrames = 0;
@@ -52,6 +60,11 @@ function resetSessionStats() {
   sessionStartedAt = 0;
   uptimeSec = 0;
   fps = 0;
+  videoWidth = 0;
+  videoHeight = 0;
+  videoCodec = '';
+  audioCodec = '';
+  audioKbps = 0;
   sentBytes = 0;
   speed = 0;
   droppedFrames = 0;
@@ -139,6 +152,11 @@ function getState() {
       uptimeSec: live ? uptimeSec : 0,
       startedAt: live ? sessionStartedAt : 0,
       fps: live ? fps : 0,
+      width: live ? videoWidth : 0,
+      height: live ? videoHeight : 0,
+      videoCodec: live ? videoCodec : '',
+      audioCodec: live ? audioCodec : '',
+      audioKbps: live ? audioKbps : 0,
       speed: live ? speed : 0,
       sentBytes: live ? sentBytes : 0,
       bitrateKbps: live ? bitrateKbps : 0,
@@ -147,16 +165,27 @@ function getState() {
       droppedFrames,
       disconnects,
       lastDisconnectAt,
-      destErrors: [...destStatus.values()].filter((s) => s === 'error').length,
+      destErrors: [...destStats.values()].filter((s) => s.status === 'error').length,
     },
-    destinations: config.destinations.map((d) => ({
-      id: d.id,
-      name: d.name,
-      url: d.url,
-      key: d.key,
-      enabled: d.enabled,
-      status: !d.enabled ? 'idle' : live ? destStatus.get(d.id) || 'live' : 'idle',
-    })),
+    destinations: config.destinations.map((d) => {
+      const stat = destStats.get(d.id);
+      const status = !d.enabled ? 'idle' : !live ? 'idle' : stat?.status || 'live';
+      return {
+        id: d.id,
+        name: d.name,
+        url: d.url,
+        key: d.key,
+        enabled: d.enabled,
+        status,
+        // Поток на площадки идёт один и тот же (-c copy), поэтому битрейт у всех
+        // живых одинаковый; отличаются статус, ошибка и момент обрыва.
+        bitrateKbps: status === 'live' ? bitrateKbps : 0,
+        sentBytes: d.enabled && stat ? stat.sentBytes : 0,
+        liveSince: status === 'live' ? stat?.liveSince || 0 : 0,
+        failedAt: stat?.failedAt || 0,
+        error: stat?.error || '',
+      };
+    }),
   };
 }
 
@@ -171,29 +200,40 @@ function emitStatus() {
 // --- ingest + tee -----------------------------------------------------------
 
 // Строит аргументы ffmpeg: слушаем OBS на локальном RTMP и копируем в tee.
+//
+// Важно про статистику: муксер tee вообще не считает размер и битрейт — он
+// печатает "size=N/A ... bitrate=N/A", и никакой -progress этого не меняет.
+// А статистику ffmpeg отдаёт по выходу №0. Поэтому первым идёт «счётный» выход
+// в null-устройство (тот же -c copy, тот же поток), и уже по нему мы получаем
+// настоящие байты и битрейт; tee идёт вторым и раздаёт на площадки как раньше.
+// Проверено на ffmpeg 6.1.1: с tee первым — N/A, со счётчиком первым — реальные
+// 4384 kbits/s и 5242880 байт, при этом доставка в слейвы не меняется.
 function buildArgs() {
   const listenUrl = `rtmp://0.0.0.0:${config.ingestPort}/live/${config.streamKey}`;
   const args = [
-    '-loglevel', 'level+warning',
-    '-stats', // принудительно печатать строку прогресса (frame=/bitrate=) в stderr
+    // info нужен ради баннера входного потока: при -c copy ffmpeg не печатает
+    // fps= в строке прогресса, и разрешение/fps берутся только оттуда.
+    '-loglevel', 'level+info',
+    '-stats', // принудительно печатать строку прогресса (size=/bitrate=) в stderr
     '-listen', '1',
     '-f', 'flv',
     '-i', listenUrl,
+    // Выход №0 — только для счётчиков, никуда не пишет.
     '-c', 'copy',
     '-map', '0',
+    '-f', 'flv', NULL_SINK,
   ];
 
   const dests = enabledDestinations();
   if (dests.length === 0) {
-    // Площадок нет — принимаем OBS и отбрасываем, чтобы можно было проверить связь.
-    args.push('-f', 'null', '-');
+    // Площадок нет — счётного выхода достаточно, чтобы принять OBS и проверить связь.
     return { args, dests };
   }
 
   const slaves = dests
     .map((d) => `[f=flv:onfail=ignore]${targetUrl(d)}`)
     .join('|');
-  args.push('-f', 'tee', slaves);
+  args.push('-c', 'copy', '-map', '0', '-f', 'tee', slaves);
   return { args, dests };
 }
 
@@ -204,21 +244,20 @@ function spawnListener() {
 
   const { args, dests } = buildArgs();
   const orderedIds = dests.map((d) => d.id);
-  destStatus = new Map(orderedIds.map((id) => [id, 'live']));
+  destStats = new Map(
+    orderedIds.map((id) => [id, { status: 'live', error: '', liveSince: 0, failedAt: 0, sentBytes: 0 }]),
+  );
 
   const child = spawn(ffmpegPath, args, { windowsHide: true });
   proc = child;
 
-  let tail = '';
   const onLog = (chunk) => {
     const text = chunk.toString();
-    tail = (tail + text).slice(-4000);
     let statsChanged = false; // мелочь из stats — отдаём не чаще раза в секунду
     let important = false; // смена состояния — отдаём сразу
 
-    // Строка прогресса ffmpeg при -c copy:
-    // "frame=N fps=X q=-1.0 size=NkB time=HH:MM:SS.ms bitrate=N kbits/s speed=Nx".
-    // bitrate часто = N/A для copy, поэтому берём число только если оно есть.
+    // Строка прогресса выхода-счётчика:
+    // "size=    5120kB time=00:00:09.56 bitrate=4384.6kbits/s speed=1.17x".
     const brMatch = text.match(/bitrate=\s*([\d.]+)\s*kbits\/s/i);
     if (brMatch) {
       bitrateKbps = Math.round(Number(brMatch[1]));
@@ -229,12 +268,8 @@ function spawnListener() {
       bitrateSamples += 1;
       statsChanged = true;
     }
-    const fpsMatch = text.match(/fps=\s*([\d.]+)/i);
-    if (fpsMatch) {
-      fps = Math.round(Number(fpsMatch[1]));
-      statsChanged = true;
-    }
-    const sizeMatch = text.match(/size=\s*(\d+)\s*kB/i);
+    // ffmpeg 6 пишет kB, семёрка — KiB; в обоих случаях это кибибайты.
+    const sizeMatch = text.match(/size=\s*(\d+)\s*(?:KiB|kB)/i);
     if (sizeMatch) {
       sentBytes = Number(sizeMatch[1]) * 1024;
       statsChanged = true;
@@ -256,19 +291,90 @@ function spawnListener() {
       uptimeSec = Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + Number(timeMatch[3]);
       statsChanged = true;
     }
+
+    // Баннер входа — единственное место, где видно fps и разрешение при -c copy:
+    // "Stream #0:0: Video: h264 (...), yuv420p, 1280x720 [SAR 1:1], 4000 kb/s, 30 fps, ...".
+    if (!fps || !videoWidth) {
+      const videoLine = text.match(/Stream #\d+:\d+[^\n]*?Video:[^\n]*/i);
+      if (videoLine) {
+        const line = videoLine[0];
+        const size = line.match(/\s(\d{2,5})x(\d{2,5})[\s,[]/);
+        const rate = line.match(/([\d.]+)\s*fps/i);
+        const codec = line.match(/Video:\s*([\w]+)/i);
+        if (size) {
+          videoWidth = Number(size[1]);
+          videoHeight = Number(size[2]);
+          statsChanged = true;
+        }
+        if (rate) {
+          fps = Math.round(Number(rate[1]));
+          statsChanged = true;
+        }
+        if (codec) {
+          videoCodec = codec[1];
+        }
+      }
+    }
+    if (!audioCodec) {
+      const audioLine = text.match(/Stream #\d+:\d+[^\n]*?Audio:[^\n]*/i);
+      if (audioLine) {
+        const codec = audioLine[0].match(/Audio:\s*([\w]+)/i);
+        const kbps = audioLine[0].match(/([\d.]+)\s*kb\/s/i);
+        if (codec) {
+          audioCodec = codec[1];
+          statsChanged = true;
+        }
+        if (kbps) {
+          audioKbps = Math.round(Number(kbps[1]));
+        }
+      }
+    }
+
     // Появилась строка прогресса (time=) — значит OBS подключился и поток идёт.
     if (!live && timeMatch) {
       live = true;
       sessionStartedAt = Date.now();
+      for (const stat of destStats.values()) {
+        if (stat.status === 'live' && !stat.liveSince) {
+          stat.liveSince = sessionStartedAt;
+        }
+      }
       important = true;
     }
-    // Ошибка конкретного приёмника в tee: "Slave muxer #N failed".
-    const failMatch = tail.match(/Slave muxer #(\d+)/i);
-    if (failMatch) {
-      const idx = Number(failMatch[1]);
-      const id = orderedIds[idx];
-      if (id && destStatus.get(id) !== 'error') {
-        destStatus.set(id, 'error');
+
+    // Байты считаем по каждой живой площадке: пока слейв жив, tee отдаёт ему
+    // ровно тот же поток, а у отвалившегося счётчик замирает на моменте обрыва.
+    if (sizeMatch) {
+      for (const stat of destStats.values()) {
+        if (stat.status === 'live') {
+          stat.sentBytes = sentBytes;
+        }
+      }
+    }
+
+    // Ошибка приёмника в tee:
+    // "Slave muxer #1 failed: <причина>, continuing with 2/3 slaves."
+    // Ищем все вхождения в новом куске: упасть может сразу несколько площадок.
+    for (const match of text.matchAll(/Slave muxer #(\d+) failed:\s*([^,\n]*)/gi)) {
+      const stat = destStats.get(orderedIds[Number(match[1])]);
+      if (stat && stat.status !== 'error') {
+        stat.status = 'error';
+        stat.error = String(match[2] || '').trim() || 'ошибка передачи';
+        stat.failedAt = Date.now();
+        important = true;
+      }
+    }
+    // Площадка, которую не удалось открыть вообще: тут видно URL и причину.
+    for (const match of text.matchAll(/Slave '([^']*)':\s*error opening:\s*([^\n]*)/gi)) {
+      const idx = orderedIds.findIndex((id) => {
+        const dest = dests.find((d) => d.id === id);
+        return dest && match[1].includes(targetUrl(dest));
+      });
+      const stat = idx >= 0 ? destStats.get(orderedIds[idx]) : null;
+      if (stat && stat.status !== 'error') {
+        stat.status = 'error';
+        stat.error = String(match[2] || '').trim() || 'не удалось подключиться';
+        stat.failedAt = Date.now();
         important = true;
       }
     }
