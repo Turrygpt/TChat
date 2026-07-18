@@ -1,36 +1,35 @@
 'use strict';
 
 // Локальный рестрим-сервер TChat.
-// OBS публикует один поток на локальный RTMP-сервер (127.0.0.1), а модуль
-// ретранслирует его без перекодирования (-c copy) на все включённые площадки
-// (YouTube, Twitch, VK, ...). Так убирается лишний крюк через VPS и лаг.
+// OBS публикует один RTMP-поток на этот компьютер, ffmpeg принимает его
+// (режим -listen) и раздаёт без перекодирования (-c copy) на все включённые
+// площадки через муксер tee. Так убирается крюк через VPS и лаг.
 //
-// Ингест: node-media-server (чистый JS). Ретрансляция: ffmpeg (ffmpeg-static).
+// Раньше ингест держал node-media-server, но его RTMP-раздача в v4 «морит»
+// ретранслятор (получалось ~40 кбит/с, 0 fps). ffmpeg -listen отдаёт весь поток.
 
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-let NodeMediaServer = null;
 let ffmpegPath = '';
 try {
-  NodeMediaServer = require('node-media-server');
   ffmpegPath = require('ffmpeg-static');
 } catch (error) {
-  console.error('[restream] зависимости не загружены:', error && error.message);
+  console.error('[restream] ffmpeg не загружен:', error && error.message);
 }
 
 const DEFAULT_INGEST_PORT = 1935;
 const DEFAULT_STREAM_KEY = 'tchat';
-const RELAY_RESTART_DELAY = 2500;
-const RELAY_LIVE_AFTER = 4000;
+const RESPAWN_DELAY = 1200;
 
 let configFile = '';
 let config = createDefaultConfig();
-let nms = null;
-let running = false; // ингест-сервер слушает порт
-let live = false; // OBS сейчас публикует наш ключ
-const relays = new Map(); // destId -> { proc, status, liveTimer }
+let proc = null; // текущий ffmpeg-listen
+let running = false; // слушатель активен
+let live = false; // OBS подключён, кадры идут
+let destStatus = new Map(); // id -> 'idle'|'live'|'error'
+let respawnTimer = null;
 let statusListener = () => {};
 
 function createDefaultConfig() {
@@ -88,8 +87,8 @@ function ingestBase() {
   return `rtmp://127.0.0.1:${config.ingestPort}/live`;
 }
 
-function localSourceUrl() {
-  return `${ingestBase()}/${config.streamKey}`;
+function enabledDestinations() {
+  return config.destinations.filter((d) => d.enabled && d.url);
 }
 
 function targetUrl(dest) {
@@ -99,7 +98,7 @@ function targetUrl(dest) {
 
 function getState() {
   return {
-    available: Boolean(NodeMediaServer && ffmpegPath),
+    available: Boolean(ffmpegPath),
     running,
     live,
     enabled: config.enabled,
@@ -112,7 +111,7 @@ function getState() {
       url: d.url,
       key: d.key,
       enabled: d.enabled,
-      status: relays.get(d.id)?.status || 'idle',
+      status: !d.enabled ? 'idle' : live ? destStatus.get(d.id) || 'live' : 'idle',
     })),
   };
 }
@@ -125,155 +124,124 @@ function emitStatus() {
   }
 }
 
-// --- ретрансляция одной площадки -------------------------------------------
+// --- ingest + tee -----------------------------------------------------------
 
-function startRelay(dest) {
-  if (!ffmpegPath || relays.has(dest.id)) {
-    return;
-  }
-
+// Строит аргументы ffmpeg: слушаем OBS на локальном RTMP и копируем в tee.
+function buildArgs() {
+  const listenUrl = `rtmp://0.0.0.0:${config.ingestPort}/live/${config.streamKey}`;
   const args = [
-    '-loglevel', 'error',
-    '-rw_timeout', '15000000',
-    '-i', localSourceUrl(),
-    '-c', 'copy',
+    '-loglevel', 'level+warning',
+    '-listen', '1',
     '-f', 'flv',
-    '-flvflags', 'no_duration_filesize',
-    targetUrl(dest),
+    '-i', listenUrl,
+    '-c', 'copy',
+    '-map', '0',
   ];
 
-  const proc = spawn(ffmpegPath, args, { windowsHide: true });
-  const entry = { proc, status: 'connecting', liveTimer: null };
-  relays.set(dest.id, entry);
+  const dests = enabledDestinations();
+  if (dests.length === 0) {
+    // Площадок нет — принимаем OBS и отбрасываем, чтобы можно было проверить связь.
+    args.push('-f', 'null', '-');
+    return { args, dests };
+  }
 
-  entry.liveTimer = setTimeout(() => {
-    if (relays.get(dest.id) === entry) {
-      entry.status = 'live';
+  const slaves = dests
+    .map((d) => `[f=flv:onfail=ignore]${targetUrl(d)}`)
+    .join('|');
+  args.push('-f', 'tee', slaves);
+  return { args, dests };
+}
+
+function spawnListener() {
+  if (!ffmpegPath || proc) {
+    return;
+  }
+
+  const { args, dests } = buildArgs();
+  const orderedIds = dests.map((d) => d.id);
+  destStatus = new Map(orderedIds.map((id) => [id, 'live']));
+
+  const child = spawn(ffmpegPath, args, { windowsHide: true });
+  proc = child;
+
+  let tail = '';
+  const onLog = (chunk) => {
+    tail = (tail + chunk.toString()).slice(-4000);
+    // Пошли кадры — значит OBS подключился и поток идёт.
+    if (/frame=\s*\d+/.test(tail) && !live) {
+      live = true;
       emitStatus();
     }
-  }, RELAY_LIVE_AFTER);
-
-  let stderr = '';
-  proc.stderr.on('data', (chunk) => {
-    stderr = (stderr + chunk.toString()).slice(-2000);
-  });
-
-  proc.on('exit', () => {
-    clearTimeout(entry.liveTimer);
-    relays.delete(dest.id);
-    if (stderr.trim()) {
-      console.error(`[restream] «${dest.name}» ffmpeg: ${stderr.trim().split('\n').pop()}`);
+    // Ошибка конкретного приёмника в tee: "Slave muxer #N failed".
+    const failMatch = tail.match(/Slave muxer #(\d+)/i);
+    if (failMatch) {
+      const idx = Number(failMatch[1]);
+      const id = orderedIds[idx];
+      if (id && destStatus.get(id) !== 'error') {
+        destStatus.set(id, 'error');
+        emitStatus();
+      }
     }
-    // Пока OBS вещает и площадка включена — переподключаемся.
-    const stillWanted = live && config.destinations.some((d) => d.id === dest.id && d.enabled);
-    if (stillWanted) {
-      setTimeout(() => {
-        if (live && config.destinations.some((d) => d.id === dest.id && d.enabled)) {
-          startRelay(dest);
-        }
-      }, RELAY_RESTART_DELAY);
-    }
-    emitStatus();
-  });
+  };
+  child.stderr.on('data', onLog);
+  child.stdout.on('data', onLog);
 
-  emitStatus();
-}
-
-function stopRelay(id) {
-  const entry = relays.get(id);
-  if (!entry) {
-    return;
-  }
-  clearTimeout(entry.liveTimer);
-  relays.delete(id);
-  try {
-    entry.proc.kill('SIGKILL');
-  } catch {
-    /* уже мертв */
-  }
-}
-
-function startRelays() {
-  if (!config.enabled) {
-    return;
-  }
-  for (const dest of config.destinations) {
-    if (dest.enabled) {
-      startRelay(dest);
-    }
-  }
-}
-
-function stopRelays() {
-  for (const id of [...relays.keys()]) {
-    stopRelay(id);
-  }
-}
-
-// Перезапуск ретрансляции под текущий список площадок (после правок в UI).
-function resyncRelays() {
-  if (!live || !config.enabled) {
-    stopRelays();
-    emitStatus();
-    return;
-  }
-  const wanted = new Set(config.destinations.filter((d) => d.enabled).map((d) => d.id));
-  for (const id of [...relays.keys()]) {
-    if (!wanted.has(id)) {
-      stopRelay(id);
-    }
-  }
-  for (const dest of config.destinations) {
-    if (dest.enabled && !relays.has(dest.id)) {
-      startRelay(dest);
-    }
-  }
-  emitStatus();
-}
-
-// --- ингест-сервер ----------------------------------------------------------
-
-function createServer() {
-  nms = new NodeMediaServer({ bind: '127.0.0.1', rtmp: { port: config.ingestPort } });
-
-  nms.on('postPublish', (session) => {
-    if (session.streamName !== config.streamKey) {
-      return;
-    }
-    live = true;
-    startRelays();
-    emitStatus();
-  });
-
-  nms.on('donePublish', (session) => {
-    if (session.streamName !== config.streamKey) {
-      return;
+  child.on('exit', () => {
+    if (proc === child) {
+      proc = null;
     }
     live = false;
-    stopRelays();
     emitStatus();
+    // OBS отключился (или сбой) — снова встаём на приём, пока рестрим включён.
+    if (config.enabled) {
+      clearTimeout(respawnTimer);
+      respawnTimer = setTimeout(() => {
+        if (config.enabled && !proc) {
+          spawnListener();
+        }
+      }, RESPAWN_DELAY);
+    }
   });
 
-  nms.run();
+  child.on('error', (error) => {
+    console.error('[restream] ffmpeg error:', error?.message || error);
+  });
+
+  emitStatus();
 }
 
-function closeServer() {
-  stopRelays();
+function killListener() {
+  clearTimeout(respawnTimer);
+  respawnTimer = null;
   live = false;
-  if (nms) {
+  if (proc) {
+    const child = proc;
+    proc = null;
     try {
-      nms.rtmpServer?.tcpServer?.close();
+      child.kill('SIGKILL');
     } catch {
-      /* уже закрыт */
+      /* уже мёртв */
     }
-    try {
-      nms.httpServer?.httpServer?.close?.();
-    } catch {
-      /* http не запускался */
-    }
-    nms = null;
   }
-  running = false;
+}
+
+// Перезапуск слушателя, чтобы применить новый список площадок/ключ/порт.
+// Не спавним новый процесс сразу (порт ещё занят) — убиваем текущий, а его
+// exit-обработчик поднимет новый слушатель с новым конфигом. OBS переподключится.
+function restartListener() {
+  if (!running) {
+    return;
+  }
+  if (proc) {
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* уже мёртв — exit-обработчик поднимет заново */
+    }
+  } else {
+    clearTimeout(respawnTimer);
+    spawnListener();
+  }
 }
 
 // --- публичный API ----------------------------------------------------------
@@ -291,19 +259,13 @@ function init({ storageDir, onStatus } = {}) {
 }
 
 function start() {
-  if (!NodeMediaServer || !ffmpegPath) {
-    return { ok: false, error: 'модуль рестрима недоступен (нет ffmpeg/node-media-server)' };
+  if (!ffmpegPath) {
+    return { ok: false, error: 'ffmpeg недоступен в этой сборке' };
   }
   config.enabled = true;
   if (!running) {
-    try {
-      createServer();
-      running = true;
-    } catch (error) {
-      running = false;
-      save();
-      return { ok: false, error: error?.message || String(error) };
-    }
+    running = true;
+    spawnListener();
   }
   save();
   emitStatus();
@@ -312,14 +274,14 @@ function start() {
 
 function stop() {
   config.enabled = false;
-  closeServer();
+  running = false;
+  killListener();
   save();
   emitStatus();
   return { ok: true, state: getState() };
 }
 
 function saveConfig(next = {}) {
-  const wasRunning = running;
   if (next.streamKey !== undefined) {
     config.streamKey = String(next.streamKey || '').trim() || DEFAULT_STREAM_KEY;
   }
@@ -330,21 +292,15 @@ function saveConfig(next = {}) {
     config.destinations = normalizeDestinations(next.destinations);
   }
   save();
-
-  // Смена порта/ключа требует перезапуска ингеста; список площадок — только ресинк.
-  const needsRestart =
-    wasRunning && (next.ingestPort !== undefined || next.streamKey !== undefined);
-  if (needsRestart) {
-    closeServer();
-    start();
-  } else {
-    resyncRelays();
-  }
+  restartListener();
+  emitStatus();
   return getState();
 }
 
 function shutdown() {
-  closeServer();
+  config.enabled = false;
+  running = false;
+  killListener();
 }
 
 module.exports = { init, start, stop, saveConfig, getState, shutdown };
