@@ -33,6 +33,34 @@ let bitrateKbps = 0; // текущий сквозной битрейт (из sta
 let respawnTimer = null;
 let statusListener = () => {};
 
+// Статистика текущей сессии (пока OBS подключён) + счётчики за время работы сервера.
+let sessionStartedAt = 0;
+let uptimeSec = 0; // из time= — точнее часов, считает реально принятый поток
+let fps = 0;
+let sentBytes = 0;
+let speed = 0; // 1.0x = поток уходит в реальном времени
+let droppedFrames = 0;
+let peakBitrateKbps = 0;
+let bitrateSum = 0;
+let bitrateSamples = 0;
+let disconnects = 0; // сколько раз OBS отваливался с момента включения
+let lastDisconnectAt = 0;
+let lastStatsEmit = 0; // троттлинг: ffmpeg сыплет stats дважды в секунду
+
+// Обнуляет показатели сессии. Счётчик обрывов живёт дольше — его сбрасывает start().
+function resetSessionStats() {
+  sessionStartedAt = 0;
+  uptimeSec = 0;
+  fps = 0;
+  sentBytes = 0;
+  speed = 0;
+  droppedFrames = 0;
+  peakBitrateKbps = 0;
+  bitrateSum = 0;
+  bitrateSamples = 0;
+  bitrateKbps = 0;
+}
+
 function createDefaultConfig() {
   return {
     enabled: false,
@@ -107,6 +135,20 @@ function getState() {
     ingestUrl: ingestBase(),
     streamKey: config.streamKey,
     bitrateKbps: live ? bitrateKbps : 0,
+    stats: {
+      uptimeSec: live ? uptimeSec : 0,
+      startedAt: live ? sessionStartedAt : 0,
+      fps: live ? fps : 0,
+      speed: live ? speed : 0,
+      sentBytes: live ? sentBytes : 0,
+      bitrateKbps: live ? bitrateKbps : 0,
+      peakBitrateKbps,
+      avgBitrateKbps: bitrateSamples ? Math.round(bitrateSum / bitrateSamples) : 0,
+      droppedFrames,
+      disconnects,
+      lastDisconnectAt,
+      destErrors: [...destStatus.values()].filter((s) => s === 'error').length,
+    },
     destinations: config.destinations.map((d) => ({
       id: d.id,
       name: d.name,
@@ -171,19 +213,54 @@ function spawnListener() {
   const onLog = (chunk) => {
     const text = chunk.toString();
     tail = (tail + text).slice(-4000);
-    let changed = false;
+    let statsChanged = false; // мелочь из stats — отдаём не чаще раза в секунду
+    let important = false; // смена состояния — отдаём сразу
 
-    // Строка прогресса ffmpeg при -c copy: "size=... time=HH:MM:SS bitrate=... speed=".
+    // Строка прогресса ffmpeg при -c copy:
+    // "frame=N fps=X q=-1.0 size=NkB time=HH:MM:SS.ms bitrate=N kbits/s speed=Nx".
     // bitrate часто = N/A для copy, поэтому берём число только если оно есть.
     const brMatch = text.match(/bitrate=\s*([\d.]+)\s*kbits\/s/i);
     if (brMatch) {
       bitrateKbps = Math.round(Number(brMatch[1]));
-      changed = true;
+      if (bitrateKbps > peakBitrateKbps) {
+        peakBitrateKbps = bitrateKbps;
+      }
+      bitrateSum += bitrateKbps;
+      bitrateSamples += 1;
+      statsChanged = true;
+    }
+    const fpsMatch = text.match(/fps=\s*([\d.]+)/i);
+    if (fpsMatch) {
+      fps = Math.round(Number(fpsMatch[1]));
+      statsChanged = true;
+    }
+    const sizeMatch = text.match(/size=\s*(\d+)\s*kB/i);
+    if (sizeMatch) {
+      sentBytes = Number(sizeMatch[1]) * 1024;
+      statsChanged = true;
+    }
+    const speedMatch = text.match(/speed=\s*([\d.]+)x/i);
+    if (speedMatch) {
+      speed = Number(speedMatch[1]);
+      statsChanged = true;
+    }
+    // drop= появляется только когда кадры реально теряются.
+    const dropMatch = text.match(/drop=\s*(\d+)/i);
+    if (dropMatch) {
+      droppedFrames = Number(dropMatch[1]);
+      statsChanged = true;
+    }
+    // time= — сколько потока принято; надёжнее стенных часов при паузах.
+    const timeMatch = text.match(/time=\s*(\d+):(\d\d):(\d\d)/);
+    if (timeMatch) {
+      uptimeSec = Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + Number(timeMatch[3]);
+      statsChanged = true;
     }
     // Появилась строка прогресса (time=) — значит OBS подключился и поток идёт.
-    if (!live && /time=\s*\d\d:\d\d:\d\d/.test(text)) {
+    if (!live && timeMatch) {
       live = true;
-      changed = true;
+      sessionStartedAt = Date.now();
+      important = true;
     }
     // Ошибка конкретного приёмника в tee: "Slave muxer #N failed".
     const failMatch = tail.match(/Slave muxer #(\d+)/i);
@@ -192,10 +269,13 @@ function spawnListener() {
       const id = orderedIds[idx];
       if (id && destStatus.get(id) !== 'error') {
         destStatus.set(id, 'error');
-        changed = true;
+        important = true;
       }
     }
-    if (changed) {
+
+    const now = Date.now();
+    if (important || (statsChanged && now - lastStatsEmit >= 1000)) {
+      lastStatsEmit = now;
       emitStatus();
     }
   };
@@ -206,8 +286,14 @@ function spawnListener() {
     if (proc === child) {
       proc = null;
     }
+    // Считаем обрывом только падение живого потока, а не перезапуск слушателя,
+    // который OBS ещё ни разу не занял.
+    if (live) {
+      disconnects += 1;
+      lastDisconnectAt = Date.now();
+    }
     live = false;
-    bitrateKbps = 0;
+    resetSessionStats();
     emitStatus();
     // OBS отключился (или сбой) — снова встаём на приём, пока рестрим включён.
     if (config.enabled) {
@@ -250,6 +336,8 @@ function restartListener() {
     return;
   }
   if (proc) {
+    // Свой перезапуск обрывом не считаем — поток рвём мы, а не сеть.
+    live = false;
     try {
       proc.kill('SIGKILL');
     } catch {
@@ -282,6 +370,9 @@ function start() {
   config.enabled = true;
   if (!running) {
     running = true;
+    disconnects = 0;
+    lastDisconnectAt = 0;
+    resetSessionStats();
     spawnListener();
   }
   save();

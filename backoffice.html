@@ -2181,6 +2181,10 @@
               <span id="restreamStatus" class="muted">—</span>
             </div>
 
+            <h3 style="margin: 16px 0 6px; font-size: 15px;">Статистика эфира</h3>
+            <div id="restreamStats" class="status-grid"></div>
+            <p id="restreamStatsHint" class="muted" style="margin-top: 6px; font-size: 12px;"></p>
+
             <h3 style="margin: 16px 0 6px; font-size: 15px;">Площадки-приёмники</h3>
             <div id="restreamDestList" class="list"></div>
             <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
@@ -5394,6 +5398,8 @@
         const toggleButton = document.querySelector('#restreamToggleButton');
         const saveKeyButton = document.querySelector('#restreamSaveKeyButton');
         const statusEl = document.querySelector('#restreamStatus');
+        const statsEl = document.querySelector('#restreamStats');
+        const statsHint = document.querySelector('#restreamStatsHint');
         const destList = document.querySelector('#restreamDestList');
         const newName = document.querySelector('#restreamNewName');
         const newUrl = document.querySelector('#restreamNewUrl');
@@ -5429,7 +5435,63 @@
               statusEl.textContent = 'Выключен.';
             }
           }
+          renderStats(state);
           renderDestinations(state.destinations || []);
+        }
+
+        function formatDuration(sec) {
+          const s = Math.max(0, Math.floor(sec || 0));
+          const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+          const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+          const ss = String(s % 60).padStart(2, '0');
+          return hh + ':' + mm + ':' + ss;
+        }
+
+        function formatBytes(bytes) {
+          const b = Number(bytes) || 0;
+          if (b >= 1024 * 1024 * 1024) return (b / 1024 / 1024 / 1024).toFixed(2) + ' ГБ';
+          if (b >= 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' МБ';
+          if (b >= 1024) return Math.round(b / 1024) + ' КБ';
+          return b + ' Б';
+        }
+
+        function formatClock(ts) {
+          if (!ts) return '—';
+          return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        // Плитки статистики. Пока OBS не подключён — прочерки, чтобы не было
+        // иллюзии живых цифр от прошлой сессии.
+        function renderStats(next) {
+          if (!statsEl) return;
+          const s = next.stats || {};
+          const dash = '—';
+          const tiles = [
+            ['Битрейт', next.live ? (s.bitrateKbps || 0) + ' kbps' : dash],
+            ['Аптайм', next.live ? formatDuration(s.uptimeSec) : dash],
+            ['FPS', next.live ? (s.fps || 0) : dash],
+            ['Отправлено', next.live ? formatBytes(s.sentBytes) : dash],
+            ['Пик битрейта', s.peakBitrateKbps ? s.peakBitrateKbps + ' kbps' : dash],
+            ['Средний битрейт', s.avgBitrateKbps ? s.avgBitrateKbps + ' kbps' : dash],
+            ['Обрывы OBS', s.disconnects || 0],
+            ['Ошибки площадок', s.destErrors || 0],
+          ];
+          statsEl.innerHTML = tiles
+            .map(([label, value]) => '<div class="stat">' + escapeHtml(label) + '<strong>' + escapeHtml(String(value)) + '</strong></div>')
+            .join('');
+
+          if (!statsHint) return;
+          const notes = [];
+          if (next.live && s.speed && Math.abs(s.speed - 1) > 0.05) {
+            notes.push('скорость ' + s.speed.toFixed(2) + 'x — поток отстаёт от реального времени');
+          }
+          if (s.droppedFrames) {
+            notes.push('потеряно кадров: ' + s.droppedFrames);
+          }
+          if (s.lastDisconnectAt) {
+            notes.push('последний обрыв в ' + formatClock(s.lastDisconnectAt));
+          }
+          statsHint.textContent = notes.join(' · ');
         }
 
         function renderDestinations(list) {
