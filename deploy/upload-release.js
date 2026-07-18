@@ -28,6 +28,17 @@ if (!password) {
   process.exit(1);
 }
 
+// Виджеты обязаны ехать вместе с widgetServer.js: сервер отдаёт их список в
+// /health и раздаёт из /widgets. Если залить только сервер, он будет обещать
+// виджет, которого на диске нет, и по ссылке прилетит "Cannot GET".
+const widgetsDir = path.join(projectDir, 'widgets');
+const widgetUploads = fs.existsSync(widgetsDir)
+  ? fs
+      .readdirSync(widgetsDir)
+      .filter((name) => fs.statSync(path.join(widgetsDir, name)).isFile())
+      .map((name) => [path.join(widgetsDir, name), `${REMOTE_DIR}/widgets/${name}`])
+  : [];
+
 const uploads = [
   [path.join(dist, 'latest.yml'), `${REMOTE_DIR}/releases/latest.yml`],
   [path.join(dist, `TChat-Setup-${version}.exe`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe`],
@@ -35,6 +46,7 @@ const uploads = [
   [path.join(dist, `TChat-${version}-portable.exe`), `${REMOTE_DIR}/releases/TChat-${version}-portable.exe`],
   [path.join(projectDir, 'src', 'server', 'widgetServer.js'), `${REMOTE_DIR}/src/server/widgetServer.js`],
   [path.join(projectDir, 'package.json'), `${REMOTE_DIR}/package.json`],
+  ...widgetUploads,
 ];
 
 for (const [local] of uploads) {
@@ -65,7 +77,7 @@ function exec(command) {
 conn
   .on('ready', async () => {
     try {
-      await exec(`mkdir -p ${REMOTE_DIR}/releases`);
+      await exec(`mkdir -p ${REMOTE_DIR}/releases ${REMOTE_DIR}/widgets`);
       const sftp = await new Promise((resolve, reject) => conn.sftp((e, s) => (e ? reject(e) : resolve(s))));
       for (const [local, remote] of uploads) {
         await new Promise((resolve, reject) =>

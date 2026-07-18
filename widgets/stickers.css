@@ -1,17 +1,20 @@
-/* Стикеры: полноэкранный слой для OBS Browser Source. */
+/* Стикеры: полноэкранный слой для OBS Browser Source.
+   Файл подключается и к отдельной странице stickers.html, и к общему оверлею
+   stream.html поверх widget.css — поэтому ничего глобального тут нет, все
+   правила висят на .sticker-layer и его потомках. */
 
-*,
-*::before,
-*::after {
+.sticker-layer,
+.sticker-layer *,
+.sticker-layer *::before,
+.sticker-layer *::after {
   box-sizing: border-box;
 }
 
-body {
+/* Своя страница стикеров: прозрачный фон без полос прокрутки. */
+.widget-page--stickers {
   margin: 0;
   overflow: hidden;
   background: transparent;
-  font-family: "Exo 2", "Segoe UI", system-ui, sans-serif;
-  color: #fff;
 }
 
 .sticker-layer {
@@ -19,6 +22,11 @@ body {
   inset: 0;
   pointer-events: none;
   overflow: hidden;
+  /* Выше панелей виджетов (12), но ниже алертов (20), чтобы стикеры не
+     перекрывали донат-алерт. */
+  z-index: 15;
+  font-family: "Exo 2", "Segoe UI", system-ui, sans-serif;
+  color: #fff;
 }
 
 .sticker {

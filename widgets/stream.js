@@ -13,6 +13,10 @@ const alertUser = document.querySelector('#streamAlertUser');
 const alertMessage = document.querySelector('#streamAlertMessage');
 const alertSound = document.querySelector('#streamAlertSound');
 
+// Стикеры живут в этом же оверлее: переиспользуем общий сокет и модуль
+// stickers.js, чтобы не держать в OBS отдельный источник.
+window.TChatStickers?.mount({ socket, layer: document.querySelector('#stickerLayer') });
+
 const alertQueue = [];
 const queuedAlertIds = new Set();
 let isAlertPlaying = false;
