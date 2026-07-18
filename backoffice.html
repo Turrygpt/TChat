@@ -1630,6 +1630,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
             <span>Рассылка</span>
           </button>
+          <button class="tab" type="button" data-tab="restream">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1a10 10 0 0 1 0-14.2M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M16.2 7.8a6 6 0 0 1 0 8.4"/><circle cx="12" cy="12" r="2"/></svg>
+            <span>Рестрим</span>
+          </button>
         </nav>
 
         <div class="sidebar__footer">
@@ -1787,46 +1791,6 @@
               <span>Конфиг для бота — все ключи одним файлом (не публикуй ссылку)</span>
               <input id="announceBotConfigUrl" type="text" readonly onclick="this.select()" />
             </label>
-          </article>
-
-          <article class="panel panel--wide">
-            <h2>Рестрим-сервер (локальный)</h2>
-            <p class="muted">
-              OBS вещает один поток на этот компьютер, а TChat раздаёт его без перекодирования на все включённые
-              площадки (YouTube, Twitch, VK…). В OBS: Настройки → Трансляция → Сервис «Настраиваемый».
-            </p>
-            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
-              <label class="field">
-                <span>Сервер для OBS</span>
-                <input id="restreamIngestUrl" type="text" readonly onclick="this.select()" />
-              </label>
-              <label class="field">
-                <span>Ключ потока (Stream Key)</span>
-                <input id="restreamStreamKey" type="text" placeholder="tchat" />
-              </label>
-            </div>
-            <div class="button-row">
-              <button id="restreamToggleButton" class="button" type="button">Включить рестрим</button>
-              <button id="restreamSaveKeyButton" class="button button--ghost" type="button">Сохранить ключ</button>
-              <span id="restreamStatus" class="muted">—</span>
-            </div>
-
-            <h3 style="margin: 16px 0 6px; font-size: 15px;">Площадки-приёмники</h3>
-            <div id="restreamDestList" class="list"></div>
-            <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
-              <label class="field"><span>Название</span><input id="restreamNewName" type="text" placeholder="YouTube" /></label>
-              <label class="field"><span>RTMP-адрес</span><input id="restreamNewUrl" type="text" placeholder="rtmp://a.rtmp.youtube.com/live2" /></label>
-              <label class="field"><span>Ключ трансляции</span><input id="restreamNewKey" type="password" placeholder="xxxx-xxxx-xxxx" /></label>
-              <button id="restreamAddButton" class="button button--ghost" type="button">Добавить</button>
-            </div>
-            <p class="muted" style="margin-top: 6px;">
-              Адреса: YouTube — <code>rtmp://a.rtmp.youtube.com/live2</code>, Twitch — <code>rtmp://live.twitch.tv/app</code>,
-              VK Видео — <code>rtmp://vsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
-              <br /><b>Важно, настройки OBS (Настройки → Вывод, режим «Расширенный»):</b>
-              управление битрейтом <b>CBR</b>, битрейт <b>4000–6000 kbps</b>, <b>интервал ключевого кадра = 2 с</b>.
-              Поток идёт без перекодирования — что задано в OBS, то и уходит на площадки. При VBR/CQP на статичной
-              сцене битрейт падает до ~50 kbps, и площадка пишет «технические проблемы».
-            </p>
           </article>
 
           <article class="panel panel--wide">
@@ -2189,6 +2153,50 @@
                 <button id="announceCancelButton" class="button button--ghost" type="button">Отмена</button>
               </div>
             </div>
+          </article>
+        </section>
+      </section>
+
+      <section id="restreamSection" class="section">
+        <section class="grid">
+          <article class="panel panel--wide">
+            <h2>Рестрим-сервер (локальный)</h2>
+            <p class="muted">
+              OBS вещает один поток на этот компьютер, а TChat раздаёт его без перекодирования на все включённые
+              площадки (YouTube, Twitch, VK…). В OBS: Настройки → Трансляция → Сервис «Настраиваемый».
+            </p>
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+              <label class="field">
+                <span>Сервер для OBS</span>
+                <input id="restreamIngestUrl" type="text" readonly onclick="this.select()" />
+              </label>
+              <label class="field">
+                <span>Ключ потока (Stream Key)</span>
+                <input id="restreamStreamKey" type="text" placeholder="tchat" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="restreamToggleButton" class="button" type="button">Включить рестрим</button>
+              <button id="restreamSaveKeyButton" class="button button--ghost" type="button">Сохранить ключ</button>
+              <span id="restreamStatus" class="muted">—</span>
+            </div>
+
+            <h3 style="margin: 16px 0 6px; font-size: 15px;">Площадки-приёмники</h3>
+            <div id="restreamDestList" class="list"></div>
+            <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
+              <label class="field"><span>Название</span><input id="restreamNewName" type="text" placeholder="YouTube" /></label>
+              <label class="field"><span>RTMP-адрес</span><input id="restreamNewUrl" type="text" placeholder="rtmp://a.rtmp.youtube.com/live2" /></label>
+              <label class="field"><span>Ключ трансляции</span><input id="restreamNewKey" type="password" placeholder="xxxx-xxxx-xxxx" /></label>
+              <button id="restreamAddButton" class="button button--ghost" type="button">Добавить</button>
+            </div>
+            <p class="muted" style="margin-top: 6px;">
+              Адреса: YouTube — <code>rtmp://a.rtmp.youtube.com/live2</code>, Twitch — <code>rtmp://live.twitch.tv/app</code>,
+              VK Видео — <code>rtmp://vsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
+              <br /><b>Важно, настройки OBS (Настройки → Вывод, режим «Расширенный»):</b>
+              управление битрейтом <b>CBR</b>, битрейт <b>4000–6000 kbps</b>, <b>интервал ключевого кадра = 2 с</b>.
+              Поток идёт без перекодирования — что задано в OBS, то и уходит на площадки. При VBR/CQP на статичной
+              сцене битрейт падает до ~50 kbps, и площадка пишет «технические проблемы».
+            </p>
           </article>
         </section>
       </section>
