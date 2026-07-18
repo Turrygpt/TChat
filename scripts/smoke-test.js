@@ -424,10 +424,14 @@ check('demo music enqueue', async () => {
 
 check('music does not reject unknown view counts', () => {
   const body = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
-  if (!body.includes('const isAllowed = !hasVerifiedViews || Number(metadata.views) >= musicItem.minViews')) {
-    throw new Error('unknown music view counts are still rejected');
+  // Суть проверки: если просмотры не подтвердились, заявка всё равно проходит.
+  // Сверяемся не с точной строкой целиком — перед условием могут появляться
+  // новые флаги вроде skipViewsCheck, и тест не должен от этого падать.
+  const allowLine = body.match(/const isAllowed = [^\n;]+/);
+  if (!allowLine || !allowLine[0].includes('!hasVerifiedViews ||')) {
+    throw new Error(`unknown music view counts are still rejected: ${allowLine?.[0] || 'условие не найдено'}`);
   }
-  if (!body.includes('return null;')) {
+  if (!/viewsVerified:/.test(body)) {
     throw new Error('missing unknown view count marker');
   }
 });
