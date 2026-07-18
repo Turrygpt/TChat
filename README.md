@@ -66,6 +66,7 @@ PORT=8080 npm run serve  # другой порт
 
 - Health: `/health`
 - Alerts: `/widgets/alerts.html`
+- Stickers: `/widgets/stickers.html`
 - Chat: `/widgets/chat.html`
 - Goal: `/widgets/goal.html`
 - Music: `/widgets/music.html`
@@ -77,6 +78,7 @@ PORT=8080 npm run serve  # другой порт
 - Чаты: Twitch, VK Video Live, YouTube, Rutube, demo.
 - DonationAlerts OAuth/sync, тестовые донаты, правила алертов.
 - OBS-алерты для донатов и подписчиков (картинки, **MP4** и GIF).
+- Стикеры за награды VK Play Live: зритель активирует награду — на оверлей прилетает стикер (картинка, GIF, WebM/MP4) с анимацией появления и исчезновения.
 - Edge TTS для текста донатов.
 - Музыкальные заявки из YouTube, Rutube и VK.
 - Виджеты цели, чата, музыки, алертов и удалённой панели.

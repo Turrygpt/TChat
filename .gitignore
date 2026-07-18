@@ -15,6 +15,9 @@ data/
 # Кеш озвучки
 assets/tts/
 
+# Стикеры, выбранные пользователем (рантайм, у каждого свои)
+assets/stickers/
+
 # Android build artifacts
 android/.gradle/
 android/build/

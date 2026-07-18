@@ -130,6 +130,7 @@ let donationAlertsClientSecret = '';
 let donationAlertsBootstrapped = false;
 let donationAlertsSettingsFile = '';
 let alertSettingsFile = '';
+let stickerSettingsFile = '';
 let windowStateFile = '';
 let chatUiSettingsFile = '';
 let goalStateFile = '';
@@ -141,6 +142,7 @@ let botConfigKey = '';
 let windowState = createDefaultWindowState();
 let chatUiSettings = createDefaultChatUiSettings();
 let alertSettings = createDefaultAlertSettings();
+let stickerSettings = createDefaultStickerSettings();
 let goalState = createDefaultGoalState();
 let streamWidgets = [];
 let activePoll = null;
@@ -224,6 +226,7 @@ function setupDonationAlertsStorage() {
   fs.mkdirSync(storageDir, { recursive: true });
   donationAlertsSettingsFile = path.join(storageDir, 'donationalerts.json');
   alertSettingsFile = path.join(storageDir, 'alert-rules.json');
+  stickerSettingsFile = path.join(storageDir, 'stickers.json');
   windowStateFile = path.join(storageDir, 'window-state.json');
   chatUiSettingsFile = path.join(storageDir, 'chat-ui.json');
   goalStateFile = path.join(storageDir, 'goal-state.json');
@@ -233,6 +236,7 @@ function setupDonationAlertsStorage() {
   channelsFile = path.join(storageDir, 'channels.json');
   loadDonationAlertsToken();
   loadAlertSettings();
+  loadStickerSettings();
   loadWindowState();
   loadChatUiSettings();
   loadGoalState();
@@ -1078,6 +1082,7 @@ function getStreamWidgetsPayload() {
     urls: {
       stream: `http://localhost:${SERVER_PORT}/widgets/stream.html`,
       alerts: `http://localhost:${SERVER_PORT}/widgets/alerts.html`,
+      stickers: `http://localhost:${SERVER_PORT}/widgets/stickers.html`,
       chat: `http://localhost:${SERVER_PORT}/widgets/chat.html`,
       goal: `http://localhost:${SERVER_PORT}/widgets/goal.html`,
       music: `http://localhost:${SERVER_PORT}/widgets/music.html`,
@@ -1592,6 +1597,196 @@ async function pickAlertAsset(kind = 'image') {
   };
 }
 
+// ── Стикеры ───────────────────────────────────────────────────────────────
+// Зритель активирует награду во VK Play Live -> TChat кидает стикер на
+// OBS-оверлей widgets/stickers.html на несколько секунд.
+
+const STICKER_ANIMATIONS = ['random', 'pop', 'drop', 'slide', 'spin', 'fly', 'glitch', 'zoom'];
+const STICKER_POSITIONS = [
+  'random',
+  'top-left',
+  'top',
+  'top-right',
+  'left',
+  'center',
+  'right',
+  'bottom-left',
+  'bottom',
+  'bottom-right',
+];
+
+// Последние награды из чата — чтобы в бэкоффисе было видно точные названия.
+let rewardLog = [];
+
+function createDefaultStickerSettings() {
+  return {
+    displaySeconds: 8,
+    maxOnScreen: 6,
+    showUser: true,
+    rules: [],
+  };
+}
+
+function normalizeStickerRule(rule = {}, index = 0) {
+  return {
+    id: String(rule.id || `sticker-${Date.now()}-${index}`),
+    enabled: rule.enabled !== false,
+    reward: String(rule.reward || '').trim(),
+    image: String(rule.image || '').trim(),
+    seconds: Math.max(Number(rule.seconds || 0), 0),
+    size: Math.min(Math.max(Number(rule.size || 240), 60), 1200),
+    position: STICKER_POSITIONS.includes(rule.position) ? rule.position : 'random',
+    animation: STICKER_ANIMATIONS.includes(rule.animation) ? rule.animation : 'random',
+    loop: rule.loop !== false,
+  };
+}
+
+function normalizeStickerSettings(settings = {}) {
+  const defaults = createDefaultStickerSettings();
+  const rules = Array.isArray(settings.rules) ? settings.rules : defaults.rules;
+
+  return {
+    displaySeconds: Math.max(Number(settings.displaySeconds || defaults.displaySeconds), 1),
+    maxOnScreen: Math.min(Math.max(Number(settings.maxOnScreen || defaults.maxOnScreen), 1), 30),
+    showUser: settings.showUser !== false,
+    rules: rules.map(normalizeStickerRule),
+  };
+}
+
+function loadStickerSettings() {
+  if (!stickerSettingsFile || !fs.existsSync(stickerSettingsFile)) {
+    saveStickerSettings(stickerSettings);
+    return;
+  }
+
+  try {
+    stickerSettings = normalizeStickerSettings(JSON.parse(fs.readFileSync(stickerSettingsFile, 'utf8')));
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки стикеров: ${error.message}`);
+  }
+}
+
+function saveStickerSettings(settings) {
+  stickerSettings = normalizeStickerSettings(settings);
+
+  if (stickerSettingsFile) {
+    try {
+      fs.writeFileSync(stickerSettingsFile, JSON.stringify(stickerSettings, null, 2));
+    } catch (error) {
+      console.error(`Не удалось сохранить настройки стикеров: ${error.message}`);
+    }
+  }
+
+  socketServer?.emit('stickers:settings', stickerSettings);
+  return stickerSettings;
+}
+
+async function pickStickerAsset() {
+  const result = await dialog.showOpenDialog(mainWindow || chatWindow || undefined, {
+    title: 'Выберите картинку стикера',
+    properties: ['openFile'],
+    filters: [{ name: 'Стикеры', extensions: ['png', 'gif', 'webp', 'apng', 'jpg', 'jpeg', 'svg', 'webm', 'mp4'] }],
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return { canceled: true, url: '' };
+  }
+
+  const sourcePath = result.filePaths[0];
+  const extension = path.extname(sourcePath).toLowerCase() || '.png';
+  const safeName = `sticker-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`;
+  const relativePath = path.join('stickers', safeName);
+  const targetPath = path.join(__dirname, 'assets', relativePath);
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+
+  return {
+    canceled: false,
+    url: getAssetPublicUrl(relativePath),
+    name: path.basename(sourcePath),
+  };
+}
+
+// Пустое поле «награда» = правило ловит любую награду (запасной стикер).
+function findStickerRule(rewardName = '') {
+  const needle = String(rewardName || '').trim().toLowerCase();
+  const enabled = stickerSettings.rules.filter((rule) => rule.enabled && rule.image);
+  const exact = enabled.find((rule) => rule.reward && rule.reward.toLowerCase() === needle);
+  if (exact) {
+    return exact;
+  }
+
+  const partial = needle ? enabled.find((rule) => rule.reward && needle.includes(rule.reward.toLowerCase())) : null;
+  return partial || enabled.find((rule) => !rule.reward) || null;
+}
+
+function showSticker(payload = {}) {
+  const item = {
+    id: String(payload.id || `sticker:${Date.now()}:${Math.random().toString(16).slice(2)}`),
+    url: String(payload.url || '').trim(),
+    seconds: Math.max(Number(payload.seconds || stickerSettings.displaySeconds), 1),
+    size: Math.min(Math.max(Number(payload.size || 240), 60), 1200),
+    position: STICKER_POSITIONS.includes(payload.position) ? payload.position : 'random',
+    animation: STICKER_ANIMATIONS.includes(payload.animation) ? payload.animation : 'random',
+    loop: payload.loop !== false,
+    username: String(payload.username || '').trim(),
+    reward: String(payload.reward || '').trim(),
+  };
+
+  if (!item.url) {
+    return null;
+  }
+
+  socketServer?.emit('sticker:show', item);
+  return item;
+}
+
+function rememberReward(event = {}) {
+  rewardLog.unshift({
+    username: String(event.username || 'Зритель'),
+    reward: String(event.reward || ''),
+    matched: Boolean(event.matched),
+    createdAt: event.createdAt || new Date().toISOString(),
+  });
+  rewardLog = rewardLog.slice(0, 20);
+  broadcastStickerState();
+}
+
+function broadcastStickerState() {
+  mainWindow?.webContents?.send('stickers:state', getStickerStatePayload());
+}
+
+function getStickerStatePayload() {
+  return {
+    settings: stickerSettings,
+    rewards: rewardLog,
+  };
+}
+
+function enqueueStickerFromReward(event = {}) {
+  const rule = findStickerRule(event.reward);
+
+  rememberReward({ ...event, matched: Boolean(rule) });
+
+  if (!rule) {
+    logInfo(`Награда «${event.reward || '?'}» от ${event.username || 'зрителя'}: правило стикера не найдено`);
+    return null;
+  }
+
+  return showSticker({
+    id: event.id,
+    url: rule.image,
+    seconds: rule.seconds || stickerSettings.displaySeconds,
+    size: rule.size,
+    position: rule.position,
+    animation: rule.animation,
+    loop: rule.loop,
+    username: event.username,
+    reward: event.reward,
+  });
+}
+
 function normalizeAlertSettings(settings = {}) {
   const defaults = createDefaultAlertSettings();
   const rules = Array.isArray(settings.rules) ? settings.rules : defaults.rules;
@@ -1888,6 +2083,7 @@ function createLocalServer() {
       widgets: {
         stream: '/widgets/stream.html',
         alerts: '/widgets/alerts.html',
+        stickers: '/widgets/stickers.html',
         chat: '/widgets/chat.html',
         goal: '/widgets/goal.html',
         music: '/widgets/music.html',
@@ -2100,6 +2296,15 @@ function createLocalServer() {
     });
   });
 
+  expressApp.get('/stickers/state', (_request, response) => {
+    response.json(getStickerStatePayload());
+  });
+
+  expressApp.post('/demo/sticker', (request, response) => {
+    const item = showSticker(request.body || {});
+    response.json({ ok: Boolean(item), item });
+  });
+
   expressApp.get('/music/state', (_request, response) => {
     response.json(getMusicQueuePayload());
   });
@@ -2134,6 +2339,7 @@ function createLocalServer() {
     socket.emit('chat:ui-settings', chatUiSettings);
     socket.emit('chat:status', getChatStatusPayload());
     socket.emit('widgets:state', getStreamWidgetsPayload());
+    socket.emit('stickers:settings', stickerSettings);
 
     socket.on('disconnect', () => {
       // Не логируем отключение: в Electron/OBS console.log может выбросить EPIPE и уронить приложение.
@@ -4232,6 +4438,10 @@ async function pollVkChat() {
       vkConnectionState.lastChatMessageId = Math.max(vkConnectionState.lastChatMessageId, numericId);
     }
 
+    if (message.rewardEvent && vkChatBootstrapped) {
+      enqueueStickerFromReward(message.rewardEvent);
+    }
+
     if (message.subscriptionRenewalEvent && vkChatBootstrapped) {
       enqueueSubscriptionRenewalAlert(message.subscriptionRenewalEvent);
     } else if (message.subscriberEvent && vkChatBootstrapped) {
@@ -4261,6 +4471,7 @@ async function mapVkChatItems(chatData = []) {
         try {
           const subscriberEvent = parseVkSubscriberEvent(item);
           const subscriptionRenewalEvent = parseVkSubscriptionRenewalEvent(item);
+          const rewardEvent = parseVkRewardEvent(item);
 
           return {
             id: `vk:${item.id}`,
@@ -4271,6 +4482,7 @@ async function mapVkChatItems(chatData = []) {
             createdAt: new Date(Number(item.createdAt || Date.now() / 1000) * 1000).toISOString(),
             subscriberEvent,
             subscriptionRenewalEvent,
+            rewardEvent,
           };
         } catch (error) {
           console.error(`VK Live: не удалось разобрать сообщение ${item.id}: ${error.message}`);
@@ -4311,7 +4523,7 @@ async function fetchVkState(channelUrl) {
     }
   }
 
-  const messages = (await mapVkChatItems(chatData)).filter((item) => item.text || item.parts.length);
+  const messages = (await mapVkChatItems(chatData)).filter((item) => item.text || item.parts.length || item.rewardEvent);
 
   return {
     viewers,
@@ -4399,6 +4611,58 @@ function parseVkSubscriptionRenewalEvent(item = {}) {
     months: monthsMatch ? Number(monthsMatch[1]) : 0,
     message: base.textParts,
     id: `vk:renewal:${base.id}`,
+    createdAt: base.createdAt,
+  };
+}
+
+// Награды VK Play Live приходят либо отдельным полем в элементе чата, либо
+// сообщением чат-бота вида «@ник активировал награду «Название»».
+function parseVkStructuredReward(item = {}) {
+  const reward = item.reward || item.rewardInfo || null;
+  if (!reward || typeof reward !== 'object') {
+    return null;
+  }
+
+  const name = String(reward.name || reward.title || reward.rewardName || '').trim();
+  if (!name) {
+    return null;
+  }
+
+  return {
+    platform: 'vk',
+    username: String(item.author?.displayName || item.author?.nick || item.author?.name || 'Зритель').trim(),
+    reward: name,
+    price: Number(reward.price || reward.cost || 0),
+    message: String(reward.message || '').trim(),
+    id: `vk:reward:${item.id}`,
+    createdAt: new Date(Number(item.createdAt || Date.now() / 1000) * 1000).toISOString(),
+  };
+}
+
+function parseVkRewardEvent(item = {}) {
+  const structured = parseVkStructuredReward(item);
+  if (structured) {
+    return structured;
+  }
+
+  const base = parseVkChatBotMessage(item);
+  if (!base || !/наград/i.test(base.textParts)) {
+    return null;
+  }
+
+  const quoted = base.textParts.match(/[«"'"]([^»"'"]+)[»"'"]/);
+  const rewardName = String(quoted?.[1] || '').trim();
+  if (!rewardName) {
+    return null;
+  }
+
+  return {
+    platform: 'vk',
+    username: base.username,
+    reward: rewardName,
+    price: 0,
+    message: base.textParts,
+    id: `vk:reward:${base.id}`,
     createdAt: base.createdAt,
   };
 }
@@ -4758,6 +5022,19 @@ ipcMain.handle('alerts:save-settings', (_event, payload) => saveAlertSettings(pa
 ipcMain.handle('alerts:get-queue', () => getAlertQueuePayload());
 
 ipcMain.handle('alerts:pick-asset', (_event, payload) => pickAlertAsset(payload?.kind || 'image'));
+
+ipcMain.handle('stickers:get-state', () => getStickerStatePayload());
+
+ipcMain.handle('stickers:save-settings', (_event, payload) => saveStickerSettings(payload));
+
+ipcMain.handle('stickers:pick-asset', () => pickStickerAsset());
+
+ipcMain.handle('stickers:test', (_event, payload) => showSticker(payload || {}));
+
+ipcMain.handle('stickers:clear', () => {
+  socketServer?.emit('sticker:clear');
+  return { ok: true };
+});
 
 ipcMain.handle('music:get-queue', () => getMusicQueuePayload());
 

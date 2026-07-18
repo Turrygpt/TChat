@@ -1622,6 +1622,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
             <span>Алерты</span>
           </button>
+          <button class="tab" type="button" data-tab="stickers">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 0-9 9c1 0 2-.2 2-.2L21 14s.2-1 .2-2Z"/><path d="M14 21v-5a2 2 0 0 1 2-2h5"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="9" r="1"/></svg>
+            <span>Стикеры</span>
+          </button>
           <button class="tab" type="button" data-tab="music">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
             <span>Музыка</span>
@@ -2093,6 +2097,58 @@
           <article class="panel">
             <h2>Очередь алертов</h2>
             <ul id="alertQueueList" class="list queue-list"></ul>
+          </article>
+        </section>
+      </section>
+
+      <section id="stickersSection" class="section">
+        <section class="grid">
+          <article class="panel">
+            <h2>Виджет для OBS</h2>
+            <div class="widget-link">
+              <strong>Слой стикеров</strong>
+              <code id="stickersWidgetUrl">http://localhost:3000/widgets/stickers.html</code>
+              <button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/stickers.html">Открыть</button>
+            </div>
+            <p class="muted">
+              Добавьте ссылку в OBS как Browser Source во весь экран сцены. Зритель активирует награду во
+              VK Play Live — стикер прилетает на оверлей и через пару секунд улетает.
+            </p>
+            <label class="field">
+              <span>Длительность показа по умолчанию, секунд</span>
+              <input id="stickerDisplaySecondsInput" type="number" min="1" max="120" value="8" />
+            </label>
+            <label class="field">
+              <span>Максимум стикеров на экране</span>
+              <input id="stickerMaxOnScreenInput" type="number" min="1" max="30" value="6" />
+            </label>
+            <label class="rule-toggle">
+              <input id="stickerShowUserInput" type="checkbox" checked />
+              подписывать ником зрителя
+            </label>
+            <div class="button-row">
+              <button id="saveStickersButton" class="button" type="button">Сохранить стикеры</button>
+              <button id="clearStickersButton" class="button button--ghost" type="button">Убрать с экрана</button>
+            </div>
+            <p id="stickersState" class="muted">Настройки не сохранялись.</p>
+          </article>
+
+          <article class="panel">
+            <h2>Последние награды</h2>
+            <p class="muted">Что прилетело из чата VK Play Live. Скопируйте название в правило, чтобы привязать стикер.</p>
+            <ul id="stickerRewardsList" class="list queue-list"></ul>
+          </article>
+
+          <article class="panel panel--wide">
+            <h2>Правила стикеров</h2>
+            <div class="button-row">
+              <button id="addStickerRuleButton" class="button button--ghost" type="button">Добавить стикер</button>
+            </div>
+            <div id="stickerRulesList" class="rule-list"></div>
+            <p class="muted">
+              Награда сопоставляется по названию без учёта регистра. Пустое поле «Награда» — запасное правило:
+              срабатывает на любую награду, для которой нет своего стикера.
+            </p>
           </article>
         </section>
       </section>
@@ -5084,6 +5140,223 @@
           closePreviewModal();
         }
       });
+
+      // === Стикеры: награды VK Play Live -> OBS-оверлей ===
+      const stickerRulesList = document.querySelector('#stickerRulesList');
+      const stickerRewardsList = document.querySelector('#stickerRewardsList');
+      const stickerDisplaySecondsInput = document.querySelector('#stickerDisplaySecondsInput');
+      const stickerMaxOnScreenInput = document.querySelector('#stickerMaxOnScreenInput');
+      const stickerShowUserInput = document.querySelector('#stickerShowUserInput');
+      const stickersState = document.querySelector('#stickersState');
+
+      const STICKER_ANIMATION_LABELS = {
+        random: 'Случайная',
+        pop: 'Хлопок',
+        drop: 'Падение',
+        slide: 'Влёт сбоку',
+        spin: 'Закрутка',
+        fly: 'Взлёт снизу',
+        glitch: 'Глитч',
+        zoom: 'Наезд',
+      };
+
+      const STICKER_POSITION_LABELS = {
+        random: 'Случайно',
+        'top-left': 'Сверху слева',
+        top: 'Сверху',
+        'top-right': 'Сверху справа',
+        left: 'Слева',
+        center: 'По центру',
+        right: 'Справа',
+        'bottom-left': 'Снизу слева',
+        bottom: 'Снизу',
+        'bottom-right': 'Снизу справа',
+      };
+
+      function isStickerVideo(url) {
+        const clean = String(url || '').split('?')[0].toLowerCase();
+        return clean.endsWith('.mp4') || clean.endsWith('.webm');
+      }
+
+      function renderStickerRule(rule) {
+        const image = rule.image || '';
+        const showPreview = image && !isStickerVideo(image);
+        return `
+          <article class="rule-card" data-sticker-id="${escapeHtml(rule.id)}">
+            <div class="rule-grid">
+              <label class="wide">Награда во VK Play Live
+                <input data-sticker-field="reward" type="text" placeholder="пусто = любая награда" value="${escapeHtml(rule.reward || '')}" />
+              </label>
+              <div class="asset-field wide">
+                <label>Картинка / анимация
+                  <span class="asset-row">
+                    <input data-sticker-field="image" type="text" value="${escapeHtml(image)}" />
+                    <button class="mini-button" type="button" data-pick-sticker>Обзор</button>
+                  </span>
+                </label>
+                <img class="rule-preview" alt="Просмотр стикера" src="${escapeHtml(image)}" ${showPreview ? '' : 'hidden'} />
+              </div>
+              <label>Секунд (0 — общее)
+                <input data-sticker-field="seconds" type="number" min="0" max="120" value="${escapeHtml(rule.seconds ?? 0)}" />
+              </label>
+              <label>Размер, px
+                <input data-sticker-field="size" type="number" min="60" max="1200" value="${escapeHtml(rule.size ?? 240)}" />
+              </label>
+              <label>Позиция
+                <select data-sticker-field="position">
+                  ${Object.entries(STICKER_POSITION_LABELS)
+                    .map(([value, label]) => `<option value="${value}" ${rule.position === value ? 'selected' : ''}>${label}</option>`)
+                    .join('')}
+                </select>
+              </label>
+              <label>Анимация
+                <select data-sticker-field="animation">
+                  ${Object.entries(STICKER_ANIMATION_LABELS)
+                    .map(([value, label]) => `<option value="${value}" ${rule.animation === value ? 'selected' : ''}>${label}</option>`)
+                    .join('')}
+                </select>
+              </label>
+              <div class="wide">
+                <label class="rule-toggle">
+                  <input data-sticker-field="enabled" type="checkbox" ${rule.enabled !== false ? 'checked' : ''} />
+                  включён
+                </label>
+                <label class="rule-toggle">
+                  <input data-sticker-field="loop" type="checkbox" ${rule.loop !== false ? 'checked' : ''} />
+                  зациклить видео
+                </label>
+              </div>
+              <div class="wide button-row">
+                <button class="mini-button" type="button" data-test-sticker>Тест</button>
+                <button class="button button--danger" type="button" data-remove-sticker>Удалить</button>
+              </div>
+            </div>
+          </article>
+        `;
+      }
+
+      function renderStickerState(state) {
+        const settings = state?.settings || {};
+        stickerDisplaySecondsInput.value = settings.displaySeconds ?? 8;
+        stickerMaxOnScreenInput.value = settings.maxOnScreen ?? 6;
+        stickerShowUserInput.checked = settings.showUser !== false;
+        stickerRulesList.innerHTML = (settings.rules || []).map(renderStickerRule).join('');
+        renderStickerRewards(state?.rewards || []);
+      }
+
+      function renderStickerRewards(rewards) {
+        if (!rewards.length) {
+          stickerRewardsList.innerHTML = '<li class="muted">Наград ещё не было.</li>';
+          return;
+        }
+
+        stickerRewardsList.innerHTML = rewards
+          .map((item) => {
+            const time = new Date(item.createdAt).toLocaleTimeString('ru-RU');
+            const badge = item.matched ? 'стикер показан' : 'нет правила';
+            return `
+              <li>
+                <strong>${escapeHtml(item.reward || 'без названия')}</strong>
+                <span class="muted">${escapeHtml(item.username)} · ${escapeHtml(time)} · ${badge}</span>
+              </li>
+            `;
+          })
+          .join('');
+      }
+
+      function readStickerCard(card) {
+        const value = (field) => card.querySelector(`[data-sticker-field="${field}"]`);
+        return {
+          id: card.dataset.stickerId,
+          enabled: value('enabled').checked,
+          reward: value('reward').value.trim(),
+          image: value('image').value.trim(),
+          seconds: Number(value('seconds').value || 0),
+          size: Number(value('size').value || 240),
+          position: value('position').value,
+          animation: value('animation').value,
+          loop: value('loop').checked,
+        };
+      }
+
+      function collectStickerSettings() {
+        return {
+          displaySeconds: Number(stickerDisplaySecondsInput.value || 8),
+          maxOnScreen: Number(stickerMaxOnScreenInput.value || 6),
+          showUser: stickerShowUserInput.checked,
+          rules: [...stickerRulesList.querySelectorAll('[data-sticker-id]')].map(readStickerCard),
+        };
+      }
+
+      async function saveStickerSettings() {
+        const state = await window.tchat.saveStickerSettings(collectStickerSettings());
+        stickersState.textContent = `Сохранено: правил — ${state?.rules?.length ?? 0}.`;
+      }
+
+      function addStickerRule() {
+        const rule = {
+          id: `sticker-${Date.now()}`,
+          enabled: true,
+          reward: '',
+          image: '',
+          seconds: 0,
+          size: 240,
+          position: 'random',
+          animation: 'random',
+          loop: true,
+        };
+        stickerRulesList.insertAdjacentHTML('beforeend', renderStickerRule(rule));
+      }
+
+      stickerRulesList.addEventListener('click', async (event) => {
+        const card = event.target.closest('[data-sticker-id]');
+        if (!card) return;
+
+        if (event.target.closest('[data-remove-sticker]')) {
+          card.remove();
+          return;
+        }
+
+        if (event.target.closest('[data-pick-sticker]')) {
+          const asset = await window.tchat.pickStickerAsset();
+          if (asset?.canceled || !asset?.url) return;
+          card.querySelector('[data-sticker-field="image"]').value = asset.url;
+          const preview = card.querySelector('.rule-preview');
+          preview.src = asset.url;
+          preview.hidden = isStickerVideo(asset.url);
+          return;
+        }
+
+        if (event.target.closest('[data-test-sticker]')) {
+          const rule = readStickerCard(card);
+          if (!rule.image) {
+            stickersState.textContent = 'Сначала выберите картинку стикера.';
+            return;
+          }
+
+          await window.tchat.testSticker({
+            url: rule.image,
+            seconds: rule.seconds || Number(stickerDisplaySecondsInput.value || 8),
+            size: rule.size,
+            position: rule.position,
+            animation: rule.animation,
+            loop: rule.loop,
+            username: 'Тестовый зритель',
+            reward: rule.reward,
+          });
+          stickersState.textContent = 'Тестовый стикер отправлен в виджет.';
+        }
+      });
+
+      document.querySelector('#addStickerRuleButton').addEventListener('click', addStickerRule);
+      document.querySelector('#saveStickersButton').addEventListener('click', saveStickerSettings);
+      document.querySelector('#clearStickersButton').addEventListener('click', async () => {
+        await window.tchat.clearStickers();
+        stickersState.textContent = 'Экран очищен.';
+      });
+
+      window.tchat.onStickerState(renderStickerState);
+      window.tchat.getStickerState().then(renderStickerState);
 
       // === Обход YouTube (VLESS) — настройка из бэкофиса ===
       const vlessLinkInput = document.querySelector('#vlessLinkInput');

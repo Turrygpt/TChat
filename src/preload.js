@@ -34,6 +34,16 @@ contextBridge.exposeInMainWorld('tchat', {
   saveAlertSettings: (payload) => ipcRenderer.invoke('alerts:save-settings', payload),
   getAlertQueue: () => ipcRenderer.invoke('alerts:get-queue'),
   pickAlertAsset: (payload) => ipcRenderer.invoke('alerts:pick-asset', payload),
+  getStickerState: () => ipcRenderer.invoke('stickers:get-state'),
+  saveStickerSettings: (payload) => ipcRenderer.invoke('stickers:save-settings', payload),
+  pickStickerAsset: () => ipcRenderer.invoke('stickers:pick-asset'),
+  testSticker: (payload) => ipcRenderer.invoke('stickers:test', payload),
+  clearStickers: () => ipcRenderer.invoke('stickers:clear'),
+  onStickerState: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('stickers:state', listener);
+    return () => ipcRenderer.removeListener('stickers:state', listener);
+  },
   getAnnounceSettings: () => ipcRenderer.invoke('announce:get-settings'),
   saveAnnounceSettings: (payload) => ipcRenderer.invoke('announce:save-settings', payload),
   previewAnnounce: () => ipcRenderer.invoke('announce:preview'),

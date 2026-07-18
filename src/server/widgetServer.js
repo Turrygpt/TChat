@@ -45,6 +45,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         countdown: '/widgets/countdown.html',
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
+        stickers: '/widgets/stickers.html',
       },
     });
   });
@@ -80,6 +81,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         countdown: `http://localhost:${port}/widgets/countdown.html`,
         texts: `http://localhost:${port}/widgets/texts.html`,
         tasks: `http://localhost:${port}/widgets/tasks.html`,
+        stickers: `http://localhost:${port}/widgets/stickers.html`,
       },
     });
   });
@@ -89,6 +91,29 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
       settings: { displaySeconds: 8 },
       queue: [],
     });
+  });
+
+  app.get('/stickers/state', (_request, response) => {
+    response.json({
+      settings: { displaySeconds: 8, maxOnScreen: 6, showUser: true, rules: [] },
+      rewards: [],
+    });
+  });
+
+  app.post('/demo/sticker', (request, response) => {
+    const item = {
+      id: `sticker:${Date.now()}`,
+      url: String(request.body?.url || '').trim(),
+      seconds: Number(request.body?.seconds || 8),
+      size: Number(request.body?.size || 240),
+      position: String(request.body?.position || 'random'),
+      animation: String(request.body?.animation || 'random'),
+      loop: request.body?.loop !== false,
+      username: String(request.body?.username || ''),
+      reward: String(request.body?.reward || ''),
+    };
+    io.emit('sticker:show', item);
+    response.json({ ok: Boolean(item.url), item });
   });
 
   app.post('/demo/chat', (request, response) => {
