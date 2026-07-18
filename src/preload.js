@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('tchat', {
   getPatchnotes: () => ipcRenderer.invoke('app:get-patchnotes'),
   getDataSummary: () => ipcRenderer.invoke('app:get-data-summary'),
   getSetupState: () => ipcRenderer.invoke('app:get-setup-state'),
+  getOauthInfo: () => ipcRenderer.invoke('app:get-oauth-info'),
   completeSetup: () => ipcRenderer.invoke('app:complete-setup'),
   getRestreamState: () => ipcRenderer.invoke('restream:get-state'),
   startRestream: () => ipcRenderer.invoke('restream:start'),

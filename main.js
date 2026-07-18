@@ -91,6 +91,10 @@ const DONATION_ALERTS_REDIRECT_PATH = '/oauth/donationalerts';
 // TCHAT_PUBLIC_URL, e.g. http://195.62.49.244:3100 — desktop keeps localhost.
 const PUBLIC_BASE_URL = (process.env.TCHAT_PUBLIC_URL || `http://localhost:${SERVER_PORT}`).replace(/\/+$/, '');
 const DONATION_ALERTS_REDIRECT_URI = `${PUBLIC_BASE_URL}${DONATION_ALERTS_REDIRECT_PATH}`;
+// Права запрашиваем минимальные — только чтение списка донатов.
+const DONATION_ALERTS_SCOPE = 'oauth-donation-index';
+// Здесь пользователь регистрирует своё приложение и получает Client ID/secret.
+const DONATION_ALERTS_APPS_URL = 'https://www.donationalerts.com/application/clients';
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const EDGE_TTS_DEFAULT_VOICE = 'ru-RU-SvetlanaNeural';
 const FIRST_MESSAGE_BELL_IMAGE =
@@ -3861,7 +3865,7 @@ function getDonationAlertsAuthUrl(credentials = {}) {
     client_id: donationAlertsClientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: 'oauth-donation-index',
+    scope: DONATION_ALERTS_SCOPE,
   });
 
   return `https://www.donationalerts.com/oauth/authorize?${params.toString()}`;
@@ -5181,6 +5185,16 @@ ipcMain.handle('app:install-update', (_event, payload) => installDownloadedUpdat
 ipcMain.handle('app:get-data-summary', () => getUserDataSummary());
 
 ipcMain.handle('app:get-setup-state', () => getSetupState());
+
+// Адрес возврата берём из того же места, откуда его берёт сам OAuth-запрос,
+// чтобы инструкция в мастере не разошлась с тем, что реально уходит в DA.
+ipcMain.handle('app:get-oauth-info', () => ({
+  donationAlerts: {
+    redirectUri: DONATION_ALERTS_REDIRECT_URI,
+    scope: DONATION_ALERTS_SCOPE,
+    registerUrl: DONATION_ALERTS_APPS_URL,
+  },
+}));
 
 ipcMain.handle('app:complete-setup', () => saveSetupState(true));
 

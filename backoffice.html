@@ -1579,6 +1579,40 @@
         margin-top: 3px;
       }
 
+      .setup-da {
+        margin-top: 16px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+
+      .setup-da > summary {
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 14px;
+      }
+
+      .setup-da__steps {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #c8d0dc;
+      }
+
+      .setup-da__steps li + li {
+        margin-top: 7px;
+      }
+
+      .setup-da code {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgb(255 255 255 / 6%);
+        font-size: 12px;
+        word-break: break-all;
+      }
+
       .update-progress {
         margin-top: 16px;
       }
@@ -2454,6 +2488,44 @@
           <label class="field"><span>YouTube</span><input id="setupYoutube" type="url" placeholder="https://youtube.com/@ник" /></label>
           <label class="field"><span>Rutube</span><input id="setupRutube" type="url" placeholder="ссылка на канал" /></label>
         </div>
+
+        <details id="setupDonationBlock" class="setup-da">
+          <summary>Донаты через DonationAlerts — по желанию</summary>
+          <p class="muted" style="margin: 10px 0 8px;">
+            Чтобы TChat читал донаты и озвучивал их, нужно зарегистрировать своё приложение в DonationAlerts
+            и вставить сюда его данные. Это делается один раз и занимает пару минут.
+          </p>
+          <ol class="setup-da__steps">
+            <li>
+              Откройте страницу приложений DonationAlerts и войдите под своим стримерским аккаунтом.
+              <div class="button-row" style="margin-top: 6px;">
+                <button id="setupDaOpenButton" class="button button--ghost" type="button">Открыть DonationAlerts</button>
+              </div>
+            </li>
+            <li>Нажмите «Зарегистрировать новое приложение» (Register new application).</li>
+            <li>Название — любое, например <b>TChat</b>.</li>
+            <li>
+              В поле <b>Redirect URI</b> вставьте ровно этот адрес — он должен совпадать символ в символ,
+              иначе DonationAlerts откажет в доступе:
+              <div class="copy-row" style="margin-top: 6px;">
+                <code id="setupDaRedirect">—</code>
+                <button class="button button--ghost" type="button" data-copy-target="setupDaRedirect">Копировать</button>
+              </div>
+            </li>
+            <li>Сохраните приложение — DonationAlerts покажет <b>Client ID</b> и <b>Client secret</b>.</li>
+            <li>Вставьте их сюда и нажмите «Получить токен»: откроется браузер, где нужно разрешить доступ.</li>
+          </ol>
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+            <label class="field"><span>Client ID</span><input id="setupDaClientId" type="text" inputmode="numeric" autocomplete="off" /></label>
+            <label class="field"><span>Client secret</span><input id="setupDaClientSecret" type="password" autocomplete="off" /></label>
+          </div>
+          <div class="button-row" style="margin-top: 8px;">
+            <button id="setupDaAuthButton" class="button button--ghost" type="button">Получить токен</button>
+          </div>
+          <p id="setupDaState" class="muted" style="margin-top: 6px; font-size: 12px;">
+            Можно пропустить и настроить позже во вкладке «Подключения».
+          </p>
+        </details>
 
         <div id="setupDone" class="update-clean" hidden>
           <strong>Готово. Добавьте оверлей в OBS как Browser Source:</strong>
@@ -6421,6 +6493,58 @@
 
         const overlay = document.querySelector('#setupOverlayUrl');
         if (overlay && widgetsState?.urls?.stream) overlay.textContent = widgetsState.urls.stream;
+
+        // Инструкция по DonationAlerts: адрес возврата берём из main, чтобы он
+        // совпадал с тем, что реально уходит в OAuth-запрос.
+        const daRedirect = document.querySelector('#setupDaRedirect');
+        const daClientId = document.querySelector('#setupDaClientId');
+        const daClientSecret = document.querySelector('#setupDaClientSecret');
+        const daState = document.querySelector('#setupDaState');
+        let daRegisterUrl = 'https://www.donationalerts.com/application/clients';
+
+        try {
+          const oauth = await window.tchat.getOauthInfo();
+          if (oauth?.donationAlerts?.redirectUri) {
+            daRedirect.textContent = oauth.donationAlerts.redirectUri;
+          }
+          if (oauth?.donationAlerts?.registerUrl) {
+            daRegisterUrl = oauth.donationAlerts.registerUrl;
+          }
+        } catch {
+          daRedirect.textContent = 'http://localhost:3000/oauth/donationalerts';
+        }
+
+        // Уже введённые ключи подставляем, чтобы не вбивать их заново.
+        daClientId.value = localStorage.getItem(donationAlertsClientIdKey) || '';
+        daClientSecret.value = localStorage.getItem(donationAlertsClientSecretKey) || '';
+
+        document.querySelector('#setupDaOpenButton')?.addEventListener('click', () => {
+          window.tchat.openExternal(daRegisterUrl);
+        });
+
+        document.querySelector('#setupDaAuthButton')?.addEventListener('click', async () => {
+          const clientId = daClientId.value.trim();
+          const clientSecret = daClientSecret.value.trim();
+
+          if (!clientId || !clientSecret) {
+            daState.textContent = 'Сначала заполните Client ID и Client secret.';
+            return;
+          }
+
+          localStorage.setItem(donationAlertsClientIdKey, clientId);
+          localStorage.setItem(donationAlertsClientSecretKey, clientSecret);
+          // Дублируем во вкладку «Подключения», чтобы значения не разъезжались.
+          if (donationAlertsClientIdInput) donationAlertsClientIdInput.value = clientId;
+          if (donationAlertsClientSecretInput) donationAlertsClientSecretInput.value = clientSecret;
+
+          try {
+            const url = await window.tchat.getDonationAlertsAuthUrl({ clientId, clientSecret });
+            await window.tchat.openExternal(url);
+            daState.textContent = 'Разрешите доступ в браузере — токен подхватится сам.';
+          } catch (error) {
+            daState.textContent = 'Не вышло открыть страницу доступа: ' + error.message;
+          }
+        });
 
         setupModal.hidden = false;
         document.body.classList.add('is-modal-open');
