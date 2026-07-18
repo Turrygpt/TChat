@@ -29,6 +29,7 @@ let proc = null; // текущий ffmpeg-listen
 let running = false; // слушатель активен
 let live = false; // OBS подключён, кадры идут
 let destStatus = new Map(); // id -> 'idle'|'live'|'error'
+let bitrateKbps = 0; // текущий сквозной битрейт (из stats ffmpeg)
 let respawnTimer = null;
 let statusListener = () => {};
 
@@ -105,6 +106,7 @@ function getState() {
     ingestPort: config.ingestPort,
     ingestUrl: ingestBase(),
     streamKey: config.streamKey,
+    bitrateKbps: live ? bitrateKbps : 0,
     destinations: config.destinations.map((d) => ({
       id: d.id,
       name: d.name,
@@ -131,6 +133,7 @@ function buildArgs() {
   const listenUrl = `rtmp://0.0.0.0:${config.ingestPort}/live/${config.streamKey}`;
   const args = [
     '-loglevel', 'level+warning',
+    '-stats', // принудительно печатать строку прогресса (frame=/bitrate=) в stderr
     '-listen', '1',
     '-f', 'flv',
     '-i', listenUrl,
@@ -166,11 +169,21 @@ function spawnListener() {
 
   let tail = '';
   const onLog = (chunk) => {
-    tail = (tail + chunk.toString()).slice(-4000);
-    // Пошли кадры — значит OBS подключился и поток идёт.
-    if (/frame=\s*\d+/.test(tail) && !live) {
+    const text = chunk.toString();
+    tail = (tail + text).slice(-4000);
+    let changed = false;
+
+    // Строка прогресса ffmpeg при -c copy: "size=... time=HH:MM:SS bitrate=... speed=".
+    // bitrate часто = N/A для copy, поэтому берём число только если оно есть.
+    const brMatch = text.match(/bitrate=\s*([\d.]+)\s*kbits\/s/i);
+    if (brMatch) {
+      bitrateKbps = Math.round(Number(brMatch[1]));
+      changed = true;
+    }
+    // Появилась строка прогресса (time=) — значит OBS подключился и поток идёт.
+    if (!live && /time=\s*\d\d:\d\d:\d\d/.test(text)) {
       live = true;
-      emitStatus();
+      changed = true;
     }
     // Ошибка конкретного приёмника в tee: "Slave muxer #N failed".
     const failMatch = tail.match(/Slave muxer #(\d+)/i);
@@ -179,8 +192,11 @@ function spawnListener() {
       const id = orderedIds[idx];
       if (id && destStatus.get(id) !== 'error') {
         destStatus.set(id, 'error');
-        emitStatus();
+        changed = true;
       }
+    }
+    if (changed) {
+      emitStatus();
     }
   };
   child.stderr.on('data', onLog);
@@ -191,6 +207,7 @@ function spawnListener() {
       proc = null;
     }
     live = false;
+    bitrateKbps = 0;
     emitStatus();
     // OBS отключился (или сбой) — снова встаём на приём, пока рестрим включён.
     if (config.enabled) {

@@ -1821,9 +1821,11 @@
             </div>
             <p class="muted" style="margin-top: 6px;">
               Адреса: YouTube — <code>rtmp://a.rtmp.youtube.com/live2</code>, Twitch — <code>rtmp://live.twitch.tv/app</code>,
-              VK Видео — <code>rtmp://ovsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
-              В OBS задайте <b>интервал ключевого кадра = 2 с</b> (Настройки → Вывод) — поток идёт без перекодирования,
-              и площадки требуют ключевой кадр не реже 2 с.
+              VK Видео — <code>rtmp://vsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
+              <br /><b>Важно, настройки OBS (Настройки → Вывод, режим «Расширенный»):</b>
+              управление битрейтом <b>CBR</b>, битрейт <b>4000–6000 kbps</b>, <b>интервал ключевого кадра = 2 с</b>.
+              Поток идёт без перекодирования — что задано в OBS, то и уходит на площадки. При VBR/CQP на статичной
+              сцене битрейт падает до ~50 kbps, и площадка пишет «технические проблемы».
             </p>
           </article>
 
@@ -5409,7 +5411,12 @@
             if (!state.available) {
               statusEl.textContent = 'Модуль недоступен в этой сборке.';
             } else if (state.running) {
-              statusEl.textContent = state.live ? 'Сервер запущен · OBS вещает' : 'Сервер запущен · ждём OBS';
+              if (state.live) {
+                const br = state.bitrateKbps ? ' · ' + state.bitrateKbps + ' kbps' : '';
+                statusEl.textContent = 'Сервер запущен · OBS вещает' + br;
+              } else {
+                statusEl.textContent = 'Сервер запущен · ждём OBS';
+              }
             } else {
               statusEl.textContent = 'Выключен.';
             }
