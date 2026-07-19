@@ -23,6 +23,7 @@ Var TChatDataDir
 Var TChatCleanState
 Var TChatBtnKeep
 Var TChatBtnClean
+Var TChatWipeLeft
 
 !macro TChatResolveDataDir
   StrCpy $TChatDataDir "$APPDATA\tchat"
@@ -69,14 +70,73 @@ Function TChatOnKeep
   !insertmacro TChatGoNext
 FunctionEnd
 
+; Сносит папку данных во всех вариантах имени, которые может использовать
+; Electron. Вызывается ТОЛЬКО отсюда, со страницы, а не из customInstall:
+;
+;  - При установке «для всех» контекст папок переключён на all, и $APPDATA
+;    указывал бы на C:\ProgramData вместо профиля пользователя. Electron же
+;    всегда хранит данные в профиле, поэтому контекст временно возвращаем на
+;    current — так же делает сам electron-builder в деинсталляторе.
+;  - customInstall выполняется в поднятом до админа экземпляре установщика,
+;    куда переменные со страниц не передаются: флаг там всегда пустой, и
+;    удаление молча не происходило.
+!macro TChatWipeUserData
+  ; Пока TChat запущен, его база Local Storage заблокирована и не удалится.
+  nsExec::Exec 'taskkill /F /T /IM "${APP_FILENAME}.exe"'
+  Pop $R6
+  Sleep 1200
+
+  ; $installMode здесь ещё не объявлен, поэтому текущий контекст определяем
+  ; сравнением: запоминаем $APPDATA, переключаемся на профиль пользователя и
+  ; смотрим, изменился ли путь. Если да — до этого стоял режим «для всех».
+  StrCpy $R5 "$APPDATA"
+  SetShellVarContext current
+  StrCpy $R4 "$APPDATA"
+
+  ; Имя папки Electron берёт из "name" в package.json — у нас это tchat.
+  !ifdef APP_PACKAGE_NAME
+    RMDir /r "$R4\${APP_PACKAGE_NAME}"
+    RMDir /r "$LOCALAPPDATA\${APP_PACKAGE_NAME}"
+  !endif
+  RMDir /r "$R4\${APP_FILENAME}"
+  RMDir /r "$LOCALAPPDATA\${APP_FILENAME}"
+  !ifdef APP_PRODUCT_FILENAME
+    RMDir /r "$R4\${APP_PRODUCT_FILENAME}"
+    RMDir /r "$LOCALAPPDATA\${APP_PRODUCT_FILENAME}"
+  !endif
+
+  ; Проверяем, что данных действительно не осталось.
+  StrCpy $TChatWipeLeft "0"
+  !ifdef APP_PACKAGE_NAME
+    ${If} ${FileExists} "$R4\${APP_PACKAGE_NAME}\*.*"
+      StrCpy $TChatWipeLeft "$R4\${APP_PACKAGE_NAME}"
+    ${EndIf}
+  !endif
+  ${If} ${FileExists} "$R4\${APP_FILENAME}\*.*"
+    StrCpy $TChatWipeLeft "$R4\${APP_FILENAME}"
+  ${EndIf}
+
+  ; Возвращаем контекст, каким он был до нас.
+  ${If} $R5 != $R4
+    SetShellVarContext all
+  ${EndIf}
+!macroend
+
 Function TChatOnClean
   ; Удаление необратимо — переспрашиваем.
   MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 \
-    "Удалить все сохранённые данные TChat?$\r$\n$\r$\nБудут стёрты история чата, токены DonationAlerts, Telegram и MAX, адреса каналов, правила алертов и стикеров.$\r$\n$\r$\nВосстановить их будет нельзя." \
+    "Удалить все сохранённые данные TChat?$\r$\n$\r$\nБудут стёрты история чата, токены DonationAlerts, Telegram и MAX, адреса каналов, правила алертов и стикеров.$\r$\n$\r$\nЗапущенный TChat будет закрыт. Восстановить данные будет нельзя." \
     IDYES tchat_clean_yes
   Return
   tchat_clean_yes:
   StrCpy $TChatCleanState 1
+  !insertmacro TChatWipeUserData
+
+  ${If} $TChatWipeLeft != "0"
+    MessageBox MB_OK|MB_ICONEXCLAMATION \
+      "Не удалось удалить часть данных:$\r$\n$TChatWipeLeft$\r$\n$\r$\nЗакройте TChat и удалите эту папку вручную, иначе старые настройки останутся."
+  ${EndIf}
+
   !insertmacro TChatGoNext
 FunctionEnd
 
@@ -128,19 +188,10 @@ FunctionEnd
   Page custom TChatWelcomePageCreate TChatWelcomePageLeave
 !macroend
 
-!macro customInstall
-  ${If} $TChatCleanState == 1
-    !insertmacro TChatResolveDataDir
-    DetailPrint "TChat: чистая установка — удаляю сохранённые данные"
-
-    ; Вся папка данных: настройки, токены, история чата, хранилище бэкоффиса.
-    RMDir /r "$TChatDataDir"
-    ; Кеш смайлов и аватарок рядом с программой. Дефолтные картинки и звуки
-    ; алертов не трогаем — они входят в комплект.
-    RMDir /r "$INSTDIR\resources\app\assets\chat"
-
-    DetailPrint "TChat: сохранённые данные удалены"
-  ${EndIf}
-!macroend
+; customInstall здесь намеренно нет. Он выполняется в поднятом до админа
+; экземпляре установщика, куда переменные со страниц не передаются: любой
+; ${If} $TChatCleanState там всегда ложный. Именно на этом прошлая версия и
+; молчала. Все удаления сделаны на странице выбора, в пользовательском
+; контексте, и результат проверяется сразу.
 
 !endif ; BUILD_UNINSTALLER
