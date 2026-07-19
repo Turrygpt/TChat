@@ -61,12 +61,13 @@
         display: grid;
         flex: 0 0 auto;
         grid-template-columns: auto repeat(4, auto) minmax(0, 1fr) auto;
-        gap: 10px;
+        gap: var(--bar-gap, 10px);
         align-items: center;
         border-bottom: 1px solid var(--border);
         background: linear-gradient(180deg, #141927, #10141e);
-        padding: 10px 12px;
-        font-size: 20px;
+        padding: var(--bar-pad-y, 10px) var(--bar-pad-x, 12px);
+        font-size: var(--bar-font, 20px);
+        overflow: hidden;
       }
 
       /* Призрачный режим (Ctrl+Alt+G): прячем шапку окна — фон/границу бара и
@@ -87,13 +88,13 @@
       .platform-counter {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        min-height: 42px;
+        gap: var(--pill-gap, 6px);
+        min-height: var(--pill-size, 42px);
         border: 1px solid var(--border);
         border-radius: 999px;
         background: rgb(255 255 255 / 3%);
         color: #cbd5df;
-        padding: 0 14px;
+        padding: 0 var(--pill-pad, 14px);
         white-space: nowrap;
         transition: border-color 140ms ease, background 140ms ease;
       }
@@ -158,8 +159,13 @@
       }
 
       .settings-button {
-        width: 42px;
-        min-height: 42px;
+        width: var(--pill-size, 42px);
+        min-height: var(--pill-size, 42px);
+        flex: 0 0 auto;
+        display: inline-grid;
+        place-items: center;
+        padding: 0;
+        line-height: 1;
         border: 0;
         border-radius: 12px;
         background: linear-gradient(135deg, var(--accent), var(--accent-2));
@@ -484,7 +490,60 @@
         background: rgb(255 92 122 / 14%);
       }
 
+      /* Узкое окно: шапка ужимается ступенями, а не выкидывает площадки.
+         Раньше при ширине меньше 620px счётчики YouTube и Rutube просто
+         пропадали, а всё остальное всё равно не помещалось. */
+      @media (max-width: 760px) {
+        .statusbar {
+          --bar-font: 18px;
+          --bar-gap: 8px;
+          --bar-pad-x: 10px;
+          --bar-pad-y: 8px;
+          --pill-size: 36px;
+          --pill-pad: 10px;
+          --pill-gap: 5px;
+        }
+      }
+
       @media (max-width: 620px) {
+        .statusbar {
+          --bar-font: 16px;
+          --bar-gap: 6px;
+          --bar-pad-x: 8px;
+          --bar-pad-y: 7px;
+          --pill-size: 32px;
+          --pill-pad: 8px;
+          --pill-gap: 4px;
+        }
+
+        /* Само слово «Общ:» не нужно — число и так первое в ряду. */
+        .counter__label {
+          display: none;
+        }
+
+        .settings-button {
+          border-radius: 9px;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .statusbar {
+          --bar-font: 14px;
+          --bar-gap: 5px;
+          --bar-pad-x: 6px;
+          --bar-pad-y: 6px;
+          --pill-size: 28px;
+          --pill-pad: 6px;
+          --pill-gap: 3px;
+        }
+
+        .settings-button {
+          border-radius: 8px;
+        }
+      }
+
+      /* Совсем узко — только тут прячем необязательные площадки. */
+      @media (max-width: 370px) {
         .statusbar {
           grid-template-columns: auto repeat(2, auto) minmax(0, 1fr) auto;
         }
@@ -498,7 +557,7 @@
   <body>
     <main class="chat-app">
       <header class="statusbar">
-        <span class="counter">Общ: <strong id="viewersCounter">0</strong></span>
+        <span class="counter"><span class="counter__label">Общ:</span> <strong id="viewersCounter">0</strong></span>
         <button id="twitchCounter" class="platform-counter" type="button" title="Twitch: подключаем">
           <span class="platform-counter__icon platform-counter__icon--twitch">T</span>
           <strong id="twitchViewersCounter">0</strong>

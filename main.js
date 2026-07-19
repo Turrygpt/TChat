@@ -2748,6 +2748,14 @@ function createWindow() {
     },
   });
 
+  // Бэкоффис широкий: в окне 920x680 вкладки «Виджеты» и «Рестрим» не влезают.
+  // При самом первом открытии разворачиваем на весь экран. Дальше окно ведёт
+  // себя как раньше: trackWindowState сам вернёт развёрнутое состояние, если
+  // пользователь так его и оставил, и обычный размер, если он окно уменьшил.
+  if (!Number.isFinite(Number(windowState.backoffice?.width))) {
+    mainWindow.maximize();
+  }
+
   trackWindowState(mainWindow, 'backoffice');
   mainWindow.loadFile(path.join(__dirname, 'backoffice.html'));
 
