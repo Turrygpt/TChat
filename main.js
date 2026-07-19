@@ -1983,19 +1983,46 @@ function normalizeSystemAlertRule(rule = {}, fallback = {}) {
   };
 }
 
+// В 1.2.8 дефолтные svg/wav заменены на png/mp3, старые файлы удалены. У тех,
+// кто ставит поверх прежней версии, настройки в userData переживают переустановку
+// и продолжают ссылаться на несуществующие файлы — алерт выходит без картинки и
+// звука. Переписываем такие ссылки на новые дефолты; правки пользователя (свои
+// картинки и звуки) не трогаем, они по этим путям не лежат.
+function upgradeDefaultAlertAssets(rule = {}) {
+  const legacy = /^\/assets\/alerts\/defaults\/(donation|subscriber|raid|portal)\.(svg|wav)$/;
+  const patched = { ...rule };
+
+  const imageMatch = legacy.exec(String(rule.image || ''));
+  if (imageMatch) {
+    patched.image = DEFAULT_ALERT_ASSETS[imageMatch[1]].image;
+  }
+
+  const soundMatch = legacy.exec(String(rule.sound || ''));
+  if (soundMatch) {
+    patched.sound = DEFAULT_ALERT_ASSETS[soundMatch[1]].sound;
+  }
+
+  return patched;
+}
+
 function migrateAlertSettings(settings = {}) {
   const oldDefaultIds = new Set(['amount-666', 'music-link', 'interval-100-499', 'interval-500-1000', 'interval-1000-plus']);
-  const customRules = (Array.isArray(settings.rules) ? settings.rules : []).filter((rule) => {
-    return rule.type !== 'music' && !oldDefaultIds.has(rule.id);
-  });
+  const customRules = (Array.isArray(settings.rules) ? settings.rules : [])
+    .filter((rule) => rule.type !== 'music' && !oldDefaultIds.has(rule.id))
+    .map(upgradeDefaultAlertAssets);
   const hasBaseRule = customRules.some((rule) => rule.id === 'base-donation-100-100000');
+
+  const normalizedSystemAlerts = normalizeAlertSettings(settings).systemAlerts;
+  const systemAlerts = Object.fromEntries(
+    Object.entries(normalizedSystemAlerts).map(([type, rule]) => [type, upgradeDefaultAlertAssets(rule)]),
+  );
 
   return {
     displaySeconds: Math.max(Number(settings.displaySeconds || 8), 3),
     systemAlerts: {
-      ...normalizeAlertSettings(settings).systemAlerts,
+      ...systemAlerts,
       firstMessage: {
-        ...normalizeAlertSettings(settings).systemAlerts.firstMessage,
+        ...systemAlerts.firstMessage,
         enabled: false,
       },
     },

@@ -2631,6 +2631,18 @@
     </div>
 
     <script>
+      // Бэкоффис открыт через file://, а картинки и звуки алертов хранятся как
+      // пути от корня локального сервера (/assets/...). Без этого браузер ищет
+      // их на диске в корне тома и превью остаётся пустым — со стороны выглядит
+      // так, будто дефолтных картинок и звуков нет вовсе.
+      let assetBaseUrl = 'http://localhost:3000';
+
+      function resolveAssetUrl(url) {
+        const value = String(url || '').trim();
+        if (!value.startsWith('/')) return value;
+        return `${assetBaseUrl}${value}`;
+      }
+
       const settingsKey = 'tchat.chatWindowSettings';
       const donationAlertsTokenKey = 'tchat.donationAlertsToken';
       const donationAlertsClientIdKey = 'tchat.donationAlertsClientId';
@@ -2987,7 +2999,7 @@
                 <div class="asset-actions">
                   <button class="mini-button" type="button" data-preview-image>Просмотр</button>
                 </div>
-                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(image)}" ${image ? '' : 'hidden'} />
+                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(resolveAssetUrl(image))}" ${image ? '' : 'hidden'} />
               </div>
               <div class="asset-field wide">
                 <label>Мелодия
@@ -2999,7 +3011,7 @@
                 <div class="asset-actions">
                   <button class="mini-button" type="button" data-preview-sound>Слушать</button>
                 </div>
-                <audio class="rule-audio" controls src="${escapeHtml(sound)}" ${sound ? '' : 'hidden'}></audio>
+                <audio class="rule-audio" controls src="${escapeHtml(resolveAssetUrl(sound))}" ${sound ? '' : 'hidden'}></audio>
               </div>
               <label class="volume-field wide">Громкость, %
                 <input data-rule-field="volume" type="range" min="0" max="100" value="${escapeHtml(rule.volume ?? 100)}" />
@@ -3052,7 +3064,7 @@
                 <div class="asset-actions">
                   <button class="mini-button" type="button" data-preview-image>Просмотр</button>
                 </div>
-                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(image)}" ${image ? '' : 'hidden'} />
+                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(resolveAssetUrl(image))}" ${image ? '' : 'hidden'} />
               </div>
               <div class="asset-field wide">
                 <label>Мелодия
@@ -3064,7 +3076,7 @@
                 <div class="asset-actions">
                   <button class="mini-button" type="button" data-preview-sound>Слушать</button>
                 </div>
-                <audio class="rule-audio" controls src="${escapeHtml(sound)}" ${sound ? '' : 'hidden'}></audio>
+                <audio class="rule-audio" controls src="${escapeHtml(resolveAssetUrl(sound))}" ${sound ? '' : 'hidden'}></audio>
               </div>
               <label class="volume-field wide">Громкость, %
                 <input data-rule-field="volume" type="range" min="0" max="100" value="${escapeHtml(rule.volume ?? 100)}" />
@@ -3337,14 +3349,14 @@
         if (kind === 'image') {
           const imageUrl = card.querySelector('[data-rule-field="image"]').value.trim();
           const preview = card.querySelector('.rule-preview');
-          preview.src = imageUrl;
+          preview.src = resolveAssetUrl(imageUrl);
           preview.hidden = !imageUrl;
           return;
         }
 
         const soundUrl = card.querySelector('[data-rule-field="sound"]').value.trim();
         const audio = card.querySelector('.rule-audio');
-        audio.src = soundUrl;
+        audio.src = resolveAssetUrl(soundUrl);
         audio.hidden = !soundUrl;
       }
 
@@ -3354,7 +3366,7 @@
         const volume = Number(card.querySelector('[data-rule-field="volumeNumber"]').value || 100);
 
         if (!soundUrl) return;
-        audio.src = soundUrl;
+        audio.src = resolveAssetUrl(soundUrl);
         audio.hidden = false;
         audio.volume = Math.min(Math.max(volume, 0), 100) / 100;
         audio.currentTime = 0;
@@ -5446,7 +5458,16 @@
       window.tchat.getDonationAlertsState().then(renderDonationAlerts);
       window.tchat.getGoalState().then(renderGoalState);
       window.tchat.getWidgetsState().then(renderWidgetsState);
-      window.tchat.getAlertSettings().then(renderAlertSettings);
+      // Сначала узнаём адрес локального сервера, иначе первая отрисовка алертов
+      // соберёт превью на дефолтном порту и промахнётся, если порт другой.
+      window.tchat
+        .getServerStatus()
+        .then((status) => {
+          if (status?.url) assetBaseUrl = status.url.replace(/\/+$/, '');
+        })
+        .catch(() => {})
+        .then(() => window.tchat.getAlertSettings())
+        .then(renderAlertSettings);
       window.tchat.getAlertQueue().then(renderAlertQueue);
       window.tchat.getMusicQueue().then(renderMusicQueue);
 
@@ -5532,7 +5553,7 @@
                     <button class="mini-button" type="button" data-pick-sticker>Обзор</button>
                   </span>
                 </label>
-                <img class="rule-preview" alt="Просмотр стикера" src="${escapeHtml(image)}" ${showPreview ? '' : 'hidden'} />
+                <img class="rule-preview" alt="Просмотр стикера" src="${escapeHtml(resolveAssetUrl(image))}" ${showPreview ? '' : 'hidden'} />
               </div>
               <label>Секунд (0 — общее)
                 <input data-sticker-field="seconds" type="number" min="0" max="120" value="${escapeHtml(rule.seconds ?? 0)}" />
@@ -5660,7 +5681,7 @@
           if (asset?.canceled || !asset?.url) return;
           card.querySelector('[data-sticker-field="image"]').value = asset.url;
           const preview = card.querySelector('.rule-preview');
-          preview.src = asset.url;
+          preview.src = resolveAssetUrl(asset.url);
           preview.hidden = isStickerVideo(asset.url);
           return;
         }
