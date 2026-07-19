@@ -103,10 +103,10 @@ const FIRST_MESSAGE_BELL_IMAGE =
 // Дефолтные картинки и звуки алертов — лежат в assets/alerts/defaults/ и входят
 // в сборку. Раздаются локальным сервером по /assets/... (работают из коробки).
 const DEFAULT_ALERT_ASSETS = {
-  donation: { image: '/assets/alerts/defaults/donation.svg', sound: '/assets/alerts/defaults/donation.wav' },
-  subscriber: { image: '/assets/alerts/defaults/subscriber.svg', sound: '/assets/alerts/defaults/subscriber.wav' },
-  raid: { image: '/assets/alerts/defaults/raid.svg', sound: '/assets/alerts/defaults/raid.wav' },
-  portal: { image: '/assets/alerts/defaults/portal.svg', sound: '/assets/alerts/defaults/portal.wav' },
+  donation: { image: '/assets/alerts/defaults/donation.png', sound: '/assets/alerts/defaults/donation.mp3' },
+  subscriber: { image: '/assets/alerts/defaults/subscriber.png', sound: '/assets/alerts/defaults/subscriber.mp3' },
+  raid: { image: '/assets/alerts/defaults/raid.png', sound: '/assets/alerts/defaults/raid.mp3' },
+  portal: { image: '/assets/alerts/defaults/portal.png', sound: '/assets/alerts/defaults/portal.mp3' },
 };
 
 let mainWindow = null;
