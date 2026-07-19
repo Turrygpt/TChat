@@ -6156,7 +6156,7 @@
             } else if (dest.status === 'error') {
               detail = 'обрыв в ' + formatClock(dest.failedAt) + (dest.error ? ' · ' + dest.error : '') +
                 ' · отправлено до обрыва ' + formatBytes(dest.sentBytes) +
-                ' · вернуть в эфир: переключите рестрим';
+                ' · переподключаемся сами, остальные площадки не трогаем';
             }
 
             row.innerHTML =

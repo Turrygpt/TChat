@@ -22,8 +22,6 @@ try {
 const DEFAULT_INGEST_PORT = 1935;
 const DEFAULT_STREAM_KEY = 'tchat';
 const RESPAWN_DELAY = 1200;
-// Куда сбрасывать «счётный» выход: он нужен только ради статистики (см. buildArgs).
-const NULL_SINK = process.platform === 'win32' ? 'NUL' : '/dev/null';
 
 let configFile = '';
 let config = createDefaultConfig();
@@ -169,7 +167,9 @@ function getState() {
     },
     destinations: config.destinations.map((d) => {
       const stat = destStats.get(d.id);
-      const status = !d.enabled ? 'idle' : !live ? 'idle' : stat?.status || 'live';
+      // Статус ведёт процесс площадки: он живёт отдельно от эфира и отдельно
+      // от соседей, поэтому «упала одна» больше не значит «упали все».
+      const status = !d.enabled ? 'idle' : stat?.status === 'error' ? 'error' : !live ? 'idle' : stat?.status || 'idle';
       return {
         id: d.id,
         name: d.name,
@@ -180,7 +180,9 @@ function getState() {
         // Поток на площадки идёт один и тот же (-c copy), поэтому битрейт у всех
         // живых одинаковый; отличаются статус, ошибка и момент обрыва.
         bitrateKbps: status === 'live' ? bitrateKbps : 0,
-        sentBytes: d.enabled && stat ? stat.sentBytes : 0,
+        // Теперь это честный счётчик своей площадки: считаем то, что реально
+        // ушло в её процесс, а не общий размер потока, как было при tee.
+        sentBytes: stat ? stat.sentBytes : 0,
         liveSince: status === 'live' ? stat?.liveSince || 0 : 0,
         failedAt: stat?.failedAt || 0,
         error: stat?.error || '',
@@ -199,18 +201,22 @@ function emitStatus() {
 
 // --- ingest + tee -----------------------------------------------------------
 
-// Строит аргументы ffmpeg: слушаем OBS на локальном RTMP и копируем в tee.
+// Строит аргументы слушателя: принимаем OBS по локальному RTMP и отдаём поток
+// в stdout одним куском mpegts. Раздачу по площадкам делает уже не ffmpeg, а мы.
 //
-// Важно про статистику: муксер tee вообще не считает размер и битрейт — он
-// печатает "size=N/A ... bitrate=N/A", и никакой -progress этого не меняет.
-// А статистику ffmpeg отдаёт по выходу №0. Поэтому первым идёт «счётный» выход
-// в null-устройство (тот же -c copy, тот же поток), и уже по нему мы получаем
-// настоящие байты и битрейт; tee идёт вторым и раздаёт на площадки как раньше.
-// Проверено на ffmpeg 6.1.1: с tee первым — N/A, со счётчиком первым — реальные
-// 4384 kbits/s и 5242880 байт, при этом доставка в слейвы не меняется.
-function buildArgs() {
+// Раньше здесь был муксер tee со списком площадок прямо в аргументах. Из-за
+// этого любое изменение списка означало перезапуск ffmpeg: включаешь одну
+// площадку — рвётся эфир на всех, OBS переподключается. Теперь слушатель живёт
+// сам по себе, а на каждую площадку поднимается отдельный ffmpeg, которому мы
+// подкладываем тот же поток в stdin. Включение и выключение площадки трогает
+// только её процесс.
+//
+// mpegts, а не flv: поток идёт по трубе непрерывно, и площадка, подключённая на
+// середине, находит в нём точку входа сама (PAT/PMT повторяются). Перекодирования
+// по-прежнему нет, везде -c copy.
+function buildListenerArgs() {
   const listenUrl = `rtmp://0.0.0.0:${config.ingestPort}/live/${config.streamKey}`;
-  const args = [
+  return [
     // info нужен ради баннера входного потока: при -c copy ffmpeg не печатает
     // fps= в строке прогресса, и разрешение/fps берутся только оттуда.
     '-loglevel', 'level+info',
@@ -218,23 +224,192 @@ function buildArgs() {
     '-listen', '1',
     '-f', 'flv',
     '-i', listenUrl,
-    // Выход №0 — только для счётчиков, никуда не пишет.
     '-c', 'copy',
     '-map', '0',
-    '-f', 'flv', NULL_SINK,
+    '-f', 'mpegts', 'pipe:1',
   ];
+}
 
-  const dests = enabledDestinations();
-  if (dests.length === 0) {
-    // Площадок нет — счётного выхода достаточно, чтобы принять OBS и проверить связь.
-    return { args, dests };
+function buildDestinationArgs(dest) {
+  return [
+    '-loglevel', 'level+error',
+    '-f', 'mpegts',
+    '-i', 'pipe:0',
+    '-c', 'copy',
+    '-map', '0',
+    '-f', 'flv', targetUrl(dest),
+  ];
+}
+
+// --- раздача по площадкам ---------------------------------------------------
+
+// id -> дочерний ffmpeg площадки. Живут независимо от слушателя и друг от друга.
+const destProcs = new Map();
+// Сколько байт разрешаем накопить в трубе площадки, прежде чем считать её
+// затыком. Площадка, которая не успевает принимать, иначе утащила бы в память
+// весь эфир: пишем мы быстрее, чем она отдаёт в сеть.
+const DEST_BUFFER_LIMIT = 8 * 1024 * 1024;
+const DEST_RETRY_DELAY = 4000;
+
+function ensureDestStat(id) {
+  if (!destStats.has(id)) {
+    destStats.set(id, { status: 'idle', error: '', liveSince: 0, failedAt: 0, sentBytes: 0 });
+  }
+  return destStats.get(id);
+}
+
+function spawnDestination(dest) {
+  if (!ffmpegPath || destProcs.has(dest.id)) {
+    return;
   }
 
-  const slaves = dests
-    .map((d) => `[f=flv:onfail=ignore]${targetUrl(d)}`)
-    .join('|');
-  args.push('-c', 'copy', '-map', '0', '-f', 'tee', slaves);
-  return { args, dests };
+  const stat = ensureDestStat(dest.id);
+  const child = spawn(ffmpegPath, buildDestinationArgs(dest), { windowsHide: true });
+  const entry = { child, pending: 0, retryTimer: null, lastError: '' };
+  destProcs.set(dest.id, entry);
+
+  stat.status = live ? 'live' : 'idle';
+  stat.error = '';
+  if (live && !stat.liveSince) {
+    stat.liveSince = Date.now();
+  }
+
+  child.stdin.on('error', () => {
+    // Площадка закрылась раньше, чем мы дописали кусок — не наша забота,
+    // состояние поправит обработчик exit.
+  });
+
+  child.stderr.on('data', (chunk) => {
+    const line = chunk.toString().trim();
+    if (line) {
+      entry.lastError = line.split('\n').pop().slice(0, 200);
+    }
+  });
+
+  child.on('exit', () => {
+    if (destProcs.get(dest.id) !== entry) {
+      return;
+    }
+
+    destProcs.delete(dest.id);
+    clearTimeout(entry.retryTimer);
+
+    // Выключили руками — процесса быть и не должно, это не ошибка.
+    const stillWanted = enabledDestinations().some((d) => d.id === dest.id);
+    if (!stillWanted || !running) {
+      stat.status = 'idle';
+      stat.liveSince = 0;
+      emitStatus();
+      return;
+    }
+
+    stat.status = 'error';
+    stat.error = entry.lastError || 'обрыв связи с площадкой';
+    stat.failedAt = Date.now();
+    stat.liveSince = 0;
+    emitStatus();
+
+    // Поднимаем только эту площадку: остальные и слушатель ничего не заметят.
+    entry.retryTimer = setTimeout(() => {
+      const fresh = enabledDestinations().find((d) => d.id === dest.id);
+      if (fresh && running && !destProcs.has(dest.id)) {
+        spawnDestination(fresh);
+        emitStatus();
+      }
+    }, DEST_RETRY_DELAY);
+  });
+
+  child.on('error', (error) => {
+    console.error('[restream] площадка не запустилась:', error?.message || error);
+  });
+}
+
+function killDestination(id) {
+  const entry = destProcs.get(id);
+  if (!entry) {
+    return;
+  }
+
+  destProcs.delete(id);
+  clearTimeout(entry.retryTimer);
+  try {
+    entry.child.kill('SIGKILL');
+  } catch {
+    /* уже мёртв */
+  }
+
+  const stat = destStats.get(id);
+  if (stat) {
+    stat.status = 'idle';
+    stat.liveSince = 0;
+  }
+}
+
+// Приводит набор запущенных площадок к тому, что включено в настройках.
+// Вызывается на каждое сохранение конфига — слушатель при этом не трогаем.
+function syncDestinations() {
+  const wanted = running ? enabledDestinations() : [];
+  const wantedIds = new Set(wanted.map((d) => d.id));
+
+  for (const id of [...destProcs.keys()]) {
+    if (!wantedIds.has(id)) {
+      killDestination(id);
+    }
+  }
+
+  for (const id of [...destStats.keys()]) {
+    if (!config.destinations.some((d) => d.id === id)) {
+      destStats.delete(id);
+    }
+  }
+
+  for (const dest of wanted) {
+    ensureDestStat(dest.id);
+    if (!destProcs.has(dest.id)) {
+      spawnDestination(dest);
+    }
+  }
+}
+
+function killAllDestinations() {
+  for (const id of [...destProcs.keys()]) {
+    killDestination(id);
+  }
+}
+
+// Раздаёт очередной кусок эфира всем живым площадкам.
+function fanOut(chunk) {
+  for (const [id, entry] of destProcs) {
+    if (entry.pending > DEST_BUFFER_LIMIT) {
+      // Площадка не успевает принимать. Роняем её процесс: обработчик exit
+      // пометит ошибку и через паузу поднимет заново, с чистой трубой.
+      const stat = destStats.get(id);
+      if (stat) {
+        stat.error = 'площадка не успевает принимать поток';
+      }
+      entry.pending = 0;
+      try {
+        entry.child.kill('SIGKILL');
+      } catch {
+        /* уже мёртв */
+      }
+      continue;
+    }
+
+    entry.pending += chunk.length;
+    try {
+      entry.child.stdin.write(chunk, () => {
+        entry.pending = Math.max(entry.pending - chunk.length, 0);
+      });
+    } catch {
+      entry.pending = Math.max(entry.pending - chunk.length, 0);
+    }
+
+    const stat = destStats.get(id);
+    if (stat && stat.status === 'live') {
+      stat.sentBytes += chunk.length;
+    }
+  }
 }
 
 function spawnListener() {
@@ -242,14 +417,11 @@ function spawnListener() {
     return;
   }
 
-  const { args, dests } = buildArgs();
-  const orderedIds = dests.map((d) => d.id);
-  destStats = new Map(
-    orderedIds.map((id) => [id, { status: 'live', error: '', liveSince: 0, failedAt: 0, sentBytes: 0 }]),
-  );
-
-  const child = spawn(ffmpegPath, args, { windowsHide: true });
+  const child = spawn(ffmpegPath, buildListenerArgs(), { windowsHide: true });
   proc = child;
+
+  child.stdout.on('data', fanOut);
+  syncDestinations();
 
   const onLog = (chunk) => {
     const text = chunk.toString();
@@ -334,49 +506,16 @@ function spawnListener() {
     if (!live && timeMatch) {
       live = true;
       sessionStartedAt = Date.now();
-      for (const stat of destStats.values()) {
-        if (stat.status === 'live' && !stat.liveSince) {
-          stat.liveSince = sessionStartedAt;
+      for (const [id, stat] of destStats) {
+        if (destProcs.has(id)) {
+          stat.status = 'live';
+          stat.error = '';
+          if (!stat.liveSince) {
+            stat.liveSince = sessionStartedAt;
+          }
         }
       }
       important = true;
-    }
-
-    // Байты считаем по каждой живой площадке: пока слейв жив, tee отдаёт ему
-    // ровно тот же поток, а у отвалившегося счётчик замирает на моменте обрыва.
-    if (sizeMatch) {
-      for (const stat of destStats.values()) {
-        if (stat.status === 'live') {
-          stat.sentBytes = sentBytes;
-        }
-      }
-    }
-
-    // Ошибка приёмника в tee:
-    // "Slave muxer #1 failed: <причина>, continuing with 2/3 slaves."
-    // Ищем все вхождения в новом куске: упасть может сразу несколько площадок.
-    for (const match of text.matchAll(/Slave muxer #(\d+) failed:\s*([^,\n]*)/gi)) {
-      const stat = destStats.get(orderedIds[Number(match[1])]);
-      if (stat && stat.status !== 'error') {
-        stat.status = 'error';
-        stat.error = String(match[2] || '').trim() || 'ошибка передачи';
-        stat.failedAt = Date.now();
-        important = true;
-      }
-    }
-    // Площадка, которую не удалось открыть вообще: тут видно URL и причину.
-    for (const match of text.matchAll(/Slave '([^']*)':\s*error opening:\s*([^\n]*)/gi)) {
-      const idx = orderedIds.findIndex((id) => {
-        const dest = dests.find((d) => d.id === id);
-        return dest && match[1].includes(targetUrl(dest));
-      });
-      const stat = idx >= 0 ? destStats.get(orderedIds[idx]) : null;
-      if (stat && stat.status !== 'error') {
-        stat.status = 'error';
-        stat.error = String(match[2] || '').trim() || 'не удалось подключиться';
-        stat.failedAt = Date.now();
-        important = true;
-      }
     }
 
     const now = Date.now();
@@ -385,8 +524,8 @@ function spawnListener() {
       emitStatus();
     }
   };
+  // stdout занят самим эфиром — в лог идёт только stderr.
   child.stderr.on('data', onLog);
-  child.stdout.on('data', onLog);
 
   child.on('exit', () => {
     if (proc === child) {
@@ -400,6 +539,9 @@ function spawnListener() {
     }
     live = false;
     resetSessionStats();
+    // Эфира больше нет — площадкам нечего передавать, гасим их процессы.
+    // Поднимутся снова, когда OBS вернётся и слушатель встанет на приём.
+    killAllDestinations();
     emitStatus();
     // OBS отключился (или сбой) — снова встаём на приём, пока рестрим включён.
     if (config.enabled) {
@@ -423,6 +565,7 @@ function killListener() {
   clearTimeout(respawnTimer);
   respawnTimer = null;
   live = false;
+  killAllDestinations();
   if (proc) {
     const child = proc;
     proc = null;
@@ -434,7 +577,9 @@ function killListener() {
   }
 }
 
-// Перезапуск слушателя, чтобы применить новый список площадок/ключ/порт.
+// Перезапуск слушателя нужен только под смену ключа или порта: там меняется
+// сам сокет, который занял OBS. Список площадок сюда больше не относится —
+// его применяет syncDestinations(), не трогая эфир.
 // Не спавним новый процесс сразу (порт ещё занят) — убиваем текущий, а его
 // exit-обработчик поднимет новый слушатель с новым конфигом. OBS переподключится.
 function restartListener() {
@@ -496,6 +641,9 @@ function stop() {
 }
 
 function saveConfig(next = {}) {
+  const prevKey = config.streamKey;
+  const prevPort = config.ingestPort;
+
   if (next.streamKey !== undefined) {
     config.streamKey = String(next.streamKey || '').trim() || DEFAULT_STREAM_KEY;
   }
@@ -506,7 +654,15 @@ function saveConfig(next = {}) {
     config.destinations = normalizeDestinations(next.destinations);
   }
   save();
-  restartListener();
+
+  // Ключ и порт меняют адрес приёма — без перезапуска слушателя никак, OBS
+  // придётся переподключиться. Правка списка площадок эфир не трогает.
+  if (config.streamKey !== prevKey || config.ingestPort !== prevPort) {
+    restartListener();
+  } else {
+    syncDestinations();
+  }
+
   emitStatus();
   return getState();
 }
