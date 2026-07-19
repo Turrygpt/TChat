@@ -2020,8 +2020,6 @@
               <span id="workspaceStatusText">Единый overlay готов к OBS.</span>
             </div>
             <div class="preset-row">
-              <button class="mini-button" type="button" data-preset="start">Начало стрима</button>
-              <button class="mini-button" type="button" data-preset="gameplay">Геймплей</button>
               <button id="openPreviewButton" class="button" type="button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                 Превью OBS
@@ -4385,29 +4383,6 @@
         renderWorkspace();
       }
 
-      async function applyWorkspacePreset(name) {
-        const updates = widgetsState.items.map((widget) => {
-          if (name === 'start') {
-            return updateWorkspaceWidget(widget.id, {
-              enabled: ['alerts', 'goal'].includes(widget.type) || widget.id === 'builtin-alerts',
-              width: widget.type === 'goal' ? 64 : widget.width,
-            });
-          }
-
-          if (name === 'gameplay') {
-            return updateWorkspaceWidget(widget.id, {
-              enabled: widget.type !== 'chat',
-              width: widget.type === 'goal' ? 46 : widget.width,
-            });
-          }
-
-          return Promise.resolve();
-        });
-
-        await Promise.all(updates);
-        workspaceStatusText.textContent = name === 'start' ? 'Пресет начала стрима применён.' : 'Пресет активного геймплея применён.';
-      }
-
       function startPreviewDrag(event) {
         if (event.target.closest('[data-resize-widget]')) return;
         const node = event.target.closest('[data-preview-widget]');
@@ -5123,7 +5098,6 @@
         const saveConfigButton = event.target.closest('[data-save-config]');
         const toggleSelectedButton = event.target.closest('[data-toggle-selected]');
         const deleteSelectedButton = event.target.closest('[data-delete-selected]');
-        const presetButton = event.target.closest('[data-preset]');
         const workspacePollStart = event.target.closest('[data-workspace-poll-start]');
         const workspacePollFinish = event.target.closest('[data-workspace-poll-finish]');
         const workspacePollShow = event.target.closest('[data-workspace-poll-show]');
@@ -5349,9 +5323,6 @@
           deleteWidget(selectedWorkspaceWidgetId);
         }
 
-        if (presetButton) {
-          applyWorkspacePreset(presetButton.dataset.preset);
-        }
       });
       pollOptionsList.addEventListener('input', collectPollOptions);
       pollOptionsList.addEventListener('click', (event) => {
