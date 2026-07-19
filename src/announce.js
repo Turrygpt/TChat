@@ -14,9 +14,12 @@ const HTTP_HEADERS = {
   'Accept-Language': 'ru-RU,ru;q=0.9',
 };
 
-const DEFAULT_CHANNEL_URL = 'https://live.vkvideo.ru/turry/';
-const DEFAULT_TWITCH_URL = 'https://twitch.tv/turry_ru';
-const DEFAULT_MAX_CHANNEL_URL = 'https://max.ru/turry';
+// Ссылки на каналы — данные пользователя, а не настройки программы: пустые по
+// умолчанию, иначе после чистой установки они возвращались бы из кода.
+// Адрес и модель Ollama оставляем: это технические значения, одинаковые у всех.
+const DEFAULT_CHANNEL_URL = '';
+const DEFAULT_TWITCH_URL = '';
+const DEFAULT_MAX_CHANNEL_URL = '';
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
 const DEFAULT_OLLAMA_MODEL = 'qwen2.5:14b';
 

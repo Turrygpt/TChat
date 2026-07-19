@@ -1964,15 +1964,15 @@
               </label>
               <label class="field">
                 <span>Ссылка на канал VK</span>
-                <input id="announceChannelUrl" type="url" placeholder="https://live.vkvideo.ru/turry/" />
+                <input id="announceChannelUrl" type="url" placeholder="https://live.vkvideo.ru/ваш_канал" />
               </label>
               <label class="field">
                 <span>Ссылка на Twitch</span>
-                <input id="announceTwitchUrl" type="url" placeholder="https://twitch.tv/turry_ru" />
+                <input id="announceTwitchUrl" type="url" placeholder="https://twitch.tv/ваш_канал" />
               </label>
               <label class="field">
                 <span>Ссылка на канал MAX (для «Смотри на MAX»)</span>
-                <input id="announceMaxChannelUrl" type="url" placeholder="https://max.ru/turry" />
+                <input id="announceMaxChannelUrl" type="url" placeholder="https://max.ru/ваш_канал" />
               </label>
               <label class="field">
                 <span>Ollama URL (резерв для текста, если polza.ai недоступен)</span>
@@ -2619,12 +2619,15 @@
       const donationAlertsTokenKey = 'tchat.donationAlertsToken';
       const donationAlertsClientIdKey = 'tchat.donationAlertsClientId';
       const donationAlertsClientSecretKey = 'tchat.donationAlertsClientSecret';
+      // Каналы пустые по умолчанию: это данные пользователя, а не настройки
+      // программы. Раньше сюда были вписаны конкретные каналы, и после чистой
+      // установки они появлялись снова — стереть их было невозможно.
       const defaultSettings = {
         fontSize: 20,
         gap: 4,
-        twitch: 'turry_ru',
-        vk: 'https://live.vkvideo.ru/turry/',
-        youtube: 'https://www.youtube.com/@Turry_ru',
+        twitch: '',
+        vk: '',
+        youtube: '',
         rutube: '',
       };
       let alertSettings = { displaySeconds: 8, systemAlerts: {}, rules: [] };

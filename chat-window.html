@@ -554,15 +554,15 @@
       const eraseDonationButton = document.querySelector('#eraseDonationButton');
       const settingsKey = 'tchat.chatWindowSettings';
       const filtersKey = 'tchat.chatFilters';
-      const defaultHiddenMessages = [
-        'Золото, розыгрыши, полезная инфа - все в нашем MAX https://max.ru/turry и ТГ https://t.me/turrylleksa',
-      ].map(normalizeFilterText);
+      // Ни каналов, ни готовых фильтров: всё это задаёт пользователь, и после
+      // чистой установки ничего не должно возвращаться из кода.
+      const defaultHiddenMessages = [];
       const defaultSettings = {
         fontSize: 20,
         gap: 4,
         direction: 'top-down',
-        twitch: 'turry_ru',
-        vk: 'https://live.vkvideo.ru/turry/',
+        twitch: '',
+        vk: '',
       };
       let selectedMessage = null;
       let selectedDonation = null;
