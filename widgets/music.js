@@ -78,35 +78,38 @@ function writePlaybackLeader(record) {
   localStorage.setItem(MUSIC_LEADER_KEY, JSON.stringify(record));
 }
 
-function claimPlaybackLeadership(force = false) {
+// Играет только один плеер на весь браузер — кто владеет ключом лидера. Раньше
+// встроенный в оверлей плеер забирал лидерство безусловно, и два таких плеера
+// (два источника с stream.html в OBS или два музыкальных виджета в рабочей
+// области) играли один и тот же трек одновременно — получалось эхо. Теперь
+// встроенный вытесняет только отдельное окно виджета, но не другой встроенный:
+// кто занял место первым, тот и играет.
+function claimPlaybackLeadership() {
   const now = Date.now();
   const current = readPlaybackLeader();
   const leaderAlive = Boolean(current?.id) && now - Number(current.at || 0) < LEADER_TTL_MS;
 
-  if (isEmbeddedPlayer) {
-    writePlaybackLeader({ id: playerInstanceId, embedded: true, at: now });
-    return true;
-  }
-
-  if (leaderAlive && current.embedded && current.id !== playerInstanceId) {
+  if (leaderAlive && current.id !== playerInstanceId && !(isEmbeddedPlayer && !current.embedded)) {
     return false;
   }
 
-  if (leaderAlive && !force && current.id !== playerInstanceId) {
-    return false;
-  }
-
-  writePlaybackLeader({ id: playerInstanceId, embedded: false, at: now });
+  writePlaybackLeader({ id: playerInstanceId, embedded: isEmbeddedPlayer, at: now });
   return true;
+}
+
+function releasePlaybackLeadership() {
+  if (readPlaybackLeader()?.id !== playerInstanceId) {
+    return;
+  }
+
+  // Освобождаем место сразу, иначе после перезагрузки страницы новый плеер
+  // ждал бы истечения TTL — пять секунд тишины на ровном месте.
+  localStorage.removeItem(MUSIC_LEADER_KEY);
 }
 
 function refreshPlaybackLeadership() {
   const wasLeader = canPlayAudio;
-  canPlayAudio = claimPlaybackLeadership(false);
-
-  if (canPlayAudio) {
-    writePlaybackLeader({ id: playerInstanceId, embedded: isEmbeddedPlayer, at: Date.now() });
-  }
+  canPlayAudio = claimPlaybackLeadership();
 
   if (wasLeader && !canPlayAudio) {
     stopPlayback(false);
@@ -119,7 +122,7 @@ function refreshPlaybackLeadership() {
 }
 
 function initPlaybackLeader() {
-  canPlayAudio = claimPlaybackLeadership(true);
+  canPlayAudio = claimPlaybackLeadership();
   if (leaderHeartbeatTimer) {
     window.clearInterval(leaderHeartbeatTimer);
   }
@@ -824,6 +827,8 @@ function escapeHtml(value = '') {
 }
 
 window.addEventListener('beforeunload', () => {
+  releasePlaybackLeadership();
+
   if (!currentId) {
     return;
   }
