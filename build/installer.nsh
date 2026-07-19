@@ -1,6 +1,8 @@
 ; Чистая установка из самого установщика.
-; Если от прошлой версии остались настройки и переписка, показываем страницу
-; с предложением стереть их. Страница появляется только когда есть что терять.
+;
+; Первая же страница мастера: если TChat уже установлен или от него остались
+; данные, предлагаем выбор — обновиться с сохранением всего или снести данные
+; и поставить начисто. Страница не показывается, когда ставят на пустое место.
 ;
 ; Данные лежат в %APPDATA%\tchat — Electron берёт имя папки из поля "name"
 ; в package.json. Регистр на Windows не важен, но проверяем оба варианта на
@@ -18,8 +20,9 @@
 !include "WinMessages.nsh"
 
 Var TChatDataDir
-Var TChatCleanCheckbox
 Var TChatCleanState
+Var TChatBtnKeep
+Var TChatBtnClean
 
 !macro TChatResolveDataDir
   StrCpy $TChatDataDir "$APPDATA\tchat"
@@ -28,10 +31,19 @@ Var TChatCleanState
   ${EndIf}
 !macroend
 
-; Кладёт "1" в стек, если есть настройки или переписка.
-Function TChatHasData
+; Кладёт "1" в стек, если TChat уже стоит или от него остались данные.
+Function TChatHasPrevious
   !insertmacro TChatResolveDataDir
 
+  ; Программа уже стоит: в целевой папке лежит exe. APP_FILENAME определяет
+  ; сам electron-builder (он же использует его в шаблоне installer.nsi),
+  ; а $INSTDIR к моменту первой страницы уже подставлен в .onInit.
+  ${If} ${FileExists} "$INSTDIR\${APP_FILENAME}.exe"
+    Push "1"
+    Return
+  ${EndIf}
+
+  ; Либо программы нет, но остались данные от прошлой версии.
   ${If} ${FileExists} "$TChatDataDir\settings\*.*"
     Push "1"
     Return
@@ -45,69 +57,89 @@ Function TChatHasData
   Push "0"
 FunctionEnd
 
-Function TChatCleanPageCreate
-  Call TChatHasData
+; Нажатие любой из кнопок = переход на следующую страницу мастера,
+; поэтому просто нажимаем за пользователя штатную кнопку «Далее».
+!macro TChatGoNext
+  GetDlgItem $R8 $HWNDPARENT 1
+  SendMessage $HWNDPARENT ${WM_COMMAND} 1 $R8
+!macroend
+
+Function TChatOnKeep
+  StrCpy $TChatCleanState 0
+  !insertmacro TChatGoNext
+FunctionEnd
+
+Function TChatOnClean
+  ; Удаление необратимо — переспрашиваем.
+  MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 \
+    "Удалить все сохранённые данные TChat?$\r$\n$\r$\nБудут стёрты история чата, токены DonationAlerts, Telegram и MAX, адреса каналов, правила алертов и стикеров.$\r$\n$\r$\nВосстановить их будет нельзя." \
+    IDYES tchat_clean_yes
+  Return
+  tchat_clean_yes:
+  StrCpy $TChatCleanState 1
+  !insertmacro TChatGoNext
+FunctionEnd
+
+Function TChatWelcomePageCreate
+  Call TChatHasPrevious
   Pop $R0
 
-  ; Ставим поверх пустого места — страница ни к чему.
+  ; Ставят с нуля — выбирать не из чего.
   ${If} $R0 != "1"
     Abort
   ${EndIf}
 
-  ; MUI_HEADER_TEXT в сборке electron-builder недоступен, поэтому заголовок
-  ; рисуем первой строкой самой страницы.
   nsDialogs::Create 1018
   Pop $R1
   ${If} $R1 == error
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 12u "Найдены данные предыдущей установки TChat"
+  ${NSD_CreateLabel} 0 0 100% 12u "TChat уже установлен на этом компьютере"
   Pop $R2
-  CreateFont $R4 "$(^Font)" "$(^FontSize)" 700
-  SendMessage $R2 ${WM_SETFONT} $R4 0
+  CreateFont $R7 "$(^Font)" "$(^FontSize)" 700
+  SendMessage $R2 ${WM_SETFONT} $R7 0
 
-  ${NSD_CreateLabel} 0 16u 100% 26u "На этом компьютере уже есть токены, адреса каналов, правила алертов и стикеров, история чата.$\r$\nПо умолчанию всё сохраняется — обновление их не тронет."
+  ${NSD_CreateLabel} 0 16u 100% 20u "Выберите, что сделать с сохранёнными данными: историей чата, токенами, адресами каналов и правилами алертов."
   Pop $R3
 
-  ${NSD_CreateCheckbox} 0 48u 100% 12u "Чистая установка — стереть настройки и переписку"
-  Pop $TChatCleanCheckbox
-  ${If} $TChatCleanState == 1
-    ${NSD_Check} $TChatCleanCheckbox
-  ${EndIf}
+  ${NSD_CreateButton} 0 42u 100% 16u "Обновить — сохранить все данные и настройки"
+  Pop $TChatBtnKeep
+  ${NSD_OnClick} $TChatBtnKeep TChatOnKeep
 
-  ${NSD_CreateLabel} 13u 62u 92% 40u "Будут удалены: токены DonationAlerts, Telegram и MAX, адреса каналов, правила алертов и стикеров, история чата и кеш смайлов.$\r$\nВосстановить их будет нельзя. После установки TChat откроет быструю настройку."
+  ${NSD_CreateLabel} 4u 60u 96% 10u "Обычное обновление. Ничего не теряется."
+  Pop $R4
+
+  ${NSD_CreateButton} 0 76u 100% 16u "Удалить все данные и установить начисто"
+  Pop $TChatBtnClean
+  ${NSD_OnClick} $TChatBtnClean TChatOnClean
+
+  ${NSD_CreateLabel} 4u 94u 96% 20u "История чата, токены и все настройки будут стёрты без возможности восстановления. После установки TChat откроет быструю настройку."
   Pop $R5
 
   nsDialogs::Show
 FunctionEnd
 
-Function TChatCleanPageLeave
-  ${NSD_GetState} $TChatCleanCheckbox $TChatCleanState
+Function TChatWelcomePageLeave
 FunctionEnd
 
-; Страницу вставляем после выбора папки установки.
-!macro customPageAfterChangeDir
-  Page custom TChatCleanPageCreate TChatCleanPageLeave
+; Самая первая страница мастера — раньше выбора папки и установки.
+!macro customWelcomePage
+  Page custom TChatWelcomePageCreate TChatWelcomePageLeave
 !macroend
 
 !macro customInstall
   ${If} $TChatCleanState == 1
     !insertmacro TChatResolveDataDir
-    DetailPrint "TChat: чистая установка — удаляю данные прошлой версии"
+    DetailPrint "TChat: чистая установка — удаляю сохранённые данные"
 
-    ; Токены, адреса каналов, правила алертов и стикеров.
-    RMDir /r "$TChatDataDir\settings"
-    ; Переписка.
-    RMDir /r "$TChatDataDir\chat-history"
-    ; Хранилище бэкоффиса: токен DonationAlerts, client id/secret, адреса каналов.
-    RMDir /r "$TChatDataDir\Local Storage"
-    RMDir /r "$TChatDataDir\Session Storage"
-    Delete "$TChatDataDir\updater.log"
-    ; Кеш смайлов и аватарок. Дефолтные картинки и звуки алертов не трогаем.
+    ; Вся папка данных: настройки, токены, история чата, хранилище бэкоффиса.
+    RMDir /r "$TChatDataDir"
+    ; Кеш смайлов и аватарок рядом с программой. Дефолтные картинки и звуки
+    ; алертов не трогаем — они входят в комплект.
     RMDir /r "$INSTDIR\resources\app\assets\chat"
 
-    DetailPrint "TChat: данные прошлой версии удалены"
+    DetailPrint "TChat: сохранённые данные удалены"
   ${EndIf}
 !macroend
 
