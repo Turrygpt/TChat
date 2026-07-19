@@ -21,7 +21,6 @@
     "express": "^5.2.1",
     "ffmpeg-static": "^5.3.0",
     "node-edge-tts": "^1.2.10",
-    "node-media-server": "^4.2.8",
     "socket.io": "^4.8.3",
     "tmi.js": "^1.8.5",
     "youtube-chat": "^2.2.0"
@@ -52,7 +51,15 @@
       "!dist/**",
       "!android/**",
       "!deploy/**",
-      "!**/*.map"
+      "!**/*.map",
+      "!node_modules/rxjs/**",
+      "!node_modules/json-schema-to-ts/**",
+      "!node_modules/ts-algebra/**",
+      "!node_modules/@babel/**",
+      "!node_modules/**/*.d.ts",
+      "!node_modules/**/*.md",
+      "!node_modules/**/{test,tests,__tests__,example,examples,docs}/**",
+      "!youtube-bypass/geoip.dat"
     ],
     "win": {
       "target": [
