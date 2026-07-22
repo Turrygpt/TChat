@@ -23,6 +23,20 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   app.use(express.json());
   app.use('/widgets', express.static(widgetsPath));
   app.use('/assets', express.static(assetsPath));
+  // Стабильная ссылка на свежий установщик: URL не меняется от версии к версии,
+  // всегда отдаёт текущую сборку. Версию берём из latest.yml (его кладёт
+  // upload-release), иначе — самый свежий exe в releases/. Должна стоять ДО
+  // статики /download, чтобы имя latest не искалось на диске как файл.
+  app.get(['/download/latest', '/download/TChat-Setup-latest.exe'], (_request, response) => {
+    const file = resolveLatestInstaller(releasesPath);
+    if (!file) {
+      response.status(404).type('text').send('Установщик пока не загружен.');
+      return;
+    }
+    // download() отдаёт файл с его версионным именем и поддерживает Range.
+    response.download(path.join(releasesPath, file), file);
+  });
+
   // Сборки приложения (exe + latest.yml для автообновления). Папку releases/
   // на сервере наполняет upload-release; если её нет — просто 404.
   app.use('/download', express.static(releasesPath));
@@ -205,6 +219,30 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   };
 }
 
+// Имя актуального установщика в releases/. Приоритет — latest.yml (там ровно та
+// сборка, что раздаётся автообновлению); если его нет, берём самый свежий exe.
+function resolveLatestInstaller(releasesPath) {
+  try {
+    const yml = fs.readFileSync(path.join(releasesPath, 'latest.yml'), 'utf8');
+    const match = yml.match(/^path:\s*(TChat-Setup-.+?\.exe)\s*$/m);
+    if (match && fs.existsSync(path.join(releasesPath, match[1]))) {
+      return match[1];
+    }
+  } catch {
+    /* latest.yml нет — падаем в фолбэк по времени файла */
+  }
+  try {
+    const exes = fs
+      .readdirSync(releasesPath)
+      .filter((name) => /^TChat-Setup-.+\.exe$/.test(name))
+      .map((name) => ({ name, mtime: fs.statSync(path.join(releasesPath, name)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    return exes.length ? exes[0].name : '';
+  } catch {
+    return '';
+  }
+}
+
 function normalizeChatMessage(payload = {}) {
   return {
     platform: payload.platform || 'demo',
@@ -279,10 +317,10 @@ function renderLandingPage() {
         '<code class="card__url">/widgets/' + w[0] + '.html</code></a>';
     })
     .join('') +
-    '<a class="card" href="/download/TChat-Setup-' + APP_VERSION + '.exe">' +
+    '<a class="card" href="/download/latest">' +
     '<span class="card__title">Скачать TChat для Windows</span>' +
-    '<span class="card__subtitle">Установщик v' + APP_VERSION + ' (обновляется сам)</span>' +
-    '<code class="card__url">/download/TChat-Setup-' + APP_VERSION + '.exe</code></a>';
+    '<span class="card__subtitle">Всегда свежая версия (обновляется сам)</span>' +
+    '<code class="card__url">/download/latest</code></a>';
 
   return [
     '<!doctype html>',
