@@ -8,6 +8,13 @@ const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
 const MAX_API_BASE = 'https://botapi.max.ru';
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
+// Рассылку ведёт наш сервер (postbot), а не приложение напрямую: из России
+// api.telegram.org недоступен, поэтому TChat отдаёт готовый пост серверу, а тот
+// шлёт его в Telegram и MAX своими токенами. Значения можно переопределить через
+// переменные окружения, по умолчанию — наш VPS.
+const RELAY_URL = process.env.TCHAT_RELAY_URL || 'http://195.62.49.244:8088/api/announce';
+const RELAY_AUTH = process.env.TCHAT_RELAY_AUTH || 'admin:admin';
+
 const HTTP_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -505,35 +512,74 @@ async function buildAnnouncement(rawSettings) {
           sourceUrl: image.sourceUrl,
         }
       : null,
+    // Рассылку ведёт сервер своими токенами, поэтому обе площадки доступны
+    // независимо от того, заданы ли токены локально.
     targets: {
-      telegram: Boolean(settings.telegram.token && settings.telegram.chatId),
-      max: Boolean(settings.max.token && settings.max.chatId),
+      telegram: true,
+      max: true,
     },
   };
 }
 
 async function sendAnnouncement(rawSettings, prepared = {}) {
-  const settings = normalizeSettings(rawSettings);
   const text = String(prepared.text || '').trim();
   if (!text) {
     return { ok: false, error: 'пустой текст поста' };
   }
 
+  // Картинку отдаём серверу в base64 — так же, как она пришла из предпросмотра.
   const image =
     prepared.image && prepared.image.b64
-      ? {
-          buffer: Buffer.from(prepared.image.b64, 'base64'),
-          contentType: prepared.image.contentType || 'image/jpeg',
-          sourceUrl: prepared.image.sourceUrl || '',
-        }
+      ? { b64: prepared.image.b64, contentType: prepared.image.contentType || 'image/jpeg' }
       : null;
 
-  const [telegram, max] = await Promise.all([
-    sendTelegram({ ...settings.telegram, text, image }),
-    sendMax({ ...settings.max, text, image }),
-  ]);
+  // По умолчанию шлём в обе площадки; сервер сам пропустит ту, у которой нет токена.
+  const targets = {
+    telegram: prepared.targets?.telegram !== false,
+    max: prepared.targets?.max !== false,
+  };
 
-  return { ok: telegram.ok || max.ok, telegram, max };
+  try {
+    const response = await fetchWithTimeout(
+      RELAY_URL,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${Buffer.from(RELAY_AUTH).toString('base64')}`,
+        },
+        body: JSON.stringify({ text, image, targets }),
+      },
+      30000,
+    );
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok || !data) {
+      const message = (data && (data.error || data.message)) || `HTTP ${response.status}`;
+      return {
+        ok: false,
+        error: `сервер рассылки: ${message}`,
+        telegram: { ok: false, error: message },
+        max: { ok: false, error: message },
+      };
+    }
+
+    return data; // { ok, telegram, max }
+  } catch (error) {
+    const message = error?.message || String(error);
+    return {
+      ok: false,
+      error: `сервер рассылки недоступен: ${message}`,
+      telegram: { ok: false, error: message },
+      max: { ok: false, error: message },
+    };
+  }
 }
 
 module.exports = {

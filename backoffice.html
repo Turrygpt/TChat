@@ -6160,7 +6160,7 @@
             }
 
             row.innerHTML =
-              '<input type="checkbox" ' + (dest.enabled ? 'checked' : '') + ' data-dest-toggle="' + dest.id + '" title="Включить/выключить" />' +
+              '<button type="button" class="toggle-switch ' + (dest.enabled ? 'is-on' : '') + '" data-dest-toggle="' + dest.id + '" aria-pressed="' + (dest.enabled ? 'true' : 'false') + '" title="Включить/выключить"></button>' +
               '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.url) + '</span>' +
               (detail ? '<br><span class="muted" style="font-size:12px;">' + escapeHtml(detail) + '</span>' : '') +
               '</span>' +
@@ -6206,15 +6206,14 @@
               .filter((d) => d.id !== del.dataset.destDelete)
               .map((d) => ({ id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled }));
             render(await window.tchat.saveRestreamConfig({ destinations }));
+            return;
           }
-        });
 
-        destList?.addEventListener('change', async (event) => {
           const toggle = event.target.closest('[data-dest-toggle]');
           if (toggle) {
             const destinations = (state?.destinations || []).map((d) => ({
               id: d.id, name: d.name, url: d.url, key: d.key,
-              enabled: d.id === toggle.dataset.destToggle ? toggle.checked : d.enabled,
+              enabled: d.id === toggle.dataset.destToggle ? !d.enabled : d.enabled,
             }));
             render(await window.tchat.saveRestreamConfig({ destinations }));
           }
@@ -6386,7 +6385,8 @@
         if (!updateModal) return;
         updateModal.hidden = false;
         document.body.classList.add('is-modal-open');
-        updateModalVersion.textContent = 'v' + (status.version || '');
+        if (status.version) updateModalVersion.textContent = 'v' + status.version;
+        if (status.current && updateModalCurrent) updateModalCurrent.textContent = 'v' + status.current;
         if (status.downloadUrl) {
           updateManualLink.href = status.downloadUrl;
           updateManualLink.hidden = false;

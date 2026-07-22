@@ -2673,28 +2673,41 @@ function setupAutoUpdater() {
     return;
   }
 
+  // Версию из update-available запоминаем: событие download-progress её не несёт,
+  // а окну обновления нужно показывать «TChat vX» и во время скачивания.
+  let pendingUpdateVersion = '';
+
   autoUpdater.on('checking-for-update', () => broadcastUpdaterStatus({ state: 'checking' }));
-  autoUpdater.on('update-available', (info) =>
+  autoUpdater.on('update-available', (info) => {
+    pendingUpdateVersion = info?.version || '';
     broadcastUpdaterStatus({
       state: 'available',
-      version: info?.version || '',
-      downloadUrl: getInstallerDownloadUrl(info?.version || ''),
-    }),
-  );
+      version: pendingUpdateVersion,
+      current: app.getVersion(),
+      downloadUrl: getInstallerDownloadUrl(pendingUpdateVersion),
+    });
+  });
   autoUpdater.on('update-not-available', () =>
     broadcastUpdaterStatus({ state: 'none', current: app.getVersion() }),
   );
   autoUpdater.on('download-progress', (progress) =>
     broadcastUpdaterStatus({
       state: 'downloading',
+      version: pendingUpdateVersion,
+      current: app.getVersion(),
       percent: Math.round(progress?.percent || 0),
       speedKbps: Math.round((progress?.bytesPerSecond || 0) / 1024),
     }),
   );
 
   autoUpdater.on('update-downloaded', (info) => {
-    const version = info?.version || 'новая версия';
-    broadcastUpdaterStatus({ state: 'downloaded', version, downloadUrl: getInstallerDownloadUrl(info?.version || '') });
+    const version = info?.version || pendingUpdateVersion || 'новая версия';
+    broadcastUpdaterStatus({
+      state: 'downloaded',
+      version,
+      current: app.getVersion(),
+      downloadUrl: getInstallerDownloadUrl(info?.version || pendingUpdateVersion || ''),
+    });
 
     // Бэкоффис показывает своё окно обновления, которое нельзя закрыть мимо.
     // Системный диалог нужен только если бэкоффиса на экране нет — иначе
