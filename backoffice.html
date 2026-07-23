@@ -1838,6 +1838,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1a10 10 0 0 1 0-14.2M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M16.2 7.8a6 6 0 0 1 0 8.4"/><circle cx="12" cy="12" r="2"/></svg>
             <span>Рестрим</span>
           </button>
+          <button class="tab" type="button" data-tab="incoming">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m23 7-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            <span>Входящий поток</span>
+          </button>
         </nav>
 
         <div class="sidebar__footer">
@@ -2484,6 +2488,34 @@
               Поток идёт без перекодирования — что задано в OBS, то и уходит на площадки. При VBR/CQP на статичной
               сцене битрейт падает до ~50 kbps, и площадка пишет «технические проблемы».
             </p>
+          </article>
+        </section>
+      </section>
+
+      <section id="incomingSection" class="section">
+        <section class="grid">
+          <article class="panel panel--wide">
+            <h2>Входящий поток</h2>
+            <p class="muted">Несколько камер как отдельные источники для OBS. «Приём» — телефон или второй ПК в той же сети публикует RTMP прямо на этот компьютер. «С сервера» — камера вещает на ваш сервер, а TChat забирает поток по ссылке. У каждого потока свой адрес браузер-источника OBS.</p>
+            <p class="muted">IP этого компьютера в сети: <code id="incomingLanIp">—</code></p>
+
+            <div id="incomingList" class="list" style="margin-top: 12px;"></div>
+
+            <h3 style="margin-top: 18px;">Добавить поток</h3>
+            <div class="rule-grid">
+              <label class="field"><span>Название</span><input id="incomingNewName" type="text" placeholder="Камера 1" /></label>
+              <label class="field"><span>Тип</span>
+                <select id="incomingNewType">
+                  <option value="local">Приём (телефон/ПК → сюда)</option>
+                  <option value="pull">С сервера (забрать по ссылке)</option>
+                </select>
+              </label>
+            </div>
+            <div id="incomingPullFields" hidden>
+              <label class="field"><span>Ссылка на поток</span><input id="incomingNewUrl" type="text" placeholder="rtmp://195.62.49.244:1935/cam1" /></label>
+              <label class="field"><span>Пароль потока (если требуется)</span><input id="incomingNewPassword" type="password" placeholder="—" /></label>
+            </div>
+            <button id="incomingAddButton" class="button" type="button" style="margin-top: 10px;">Добавить</button>
           </article>
         </section>
       </section>
@@ -6221,6 +6253,144 @@
 
         window.tchat.onRestreamStatus(render);
         refresh();
+      })();
+
+      // === Входящий поток (несколько камер → отдельные источники OBS) ===
+      (() => {
+        if (!window.tchat?.getIncomingState) return;
+        const OBS_BASE = 'http://localhost:3000';
+        const listEl = document.querySelector('#incomingList');
+        const lanIpEl = document.querySelector('#incomingLanIp');
+        const newName = document.querySelector('#incomingNewName');
+        const newType = document.querySelector('#incomingNewType');
+        const pullFields = document.querySelector('#incomingPullFields');
+        const newUrl = document.querySelector('#incomingNewUrl');
+        const newPassword = document.querySelector('#incomingNewPassword');
+        const addButton = document.querySelector('#incomingAddButton');
+
+        // Структурную часть перерисовываем только при изменениях, чтобы поля
+        // ввода и фокус не сбрасывались частыми обновлениями статуса.
+        let structuralKey = '';
+
+        const TYPE_LABEL = { local: 'приём', pull: 'с сервера' };
+
+        function statusText(s) {
+          if (!s.enabled) return 'выключен';
+          const parts = [];
+          if (s.live) {
+            const st = s.stats || {};
+            if (st.width && st.height) parts.push(st.width + '×' + st.height);
+            if (st.fps) parts.push(st.fps + ' fps');
+            if (st.bitrateKbps) parts.push(st.bitrateKbps + ' kbps');
+            if (s.viewers) parts.push(s.viewers + ' в OBS');
+            return 'в эфире' + (parts.length ? ' · ' + parts.join(' · ') : '');
+          }
+          if (s.running) {
+            const base = s.type === 'local' ? 'ждём публикацию' : 'подключаемся к серверу…';
+            return s.error ? base + ' · ' + s.error : base;
+          }
+          return s.error || 'запуск…';
+        }
+
+        function rowHtml(s) {
+          const obs = OBS_BASE + s.obsPath;
+          const local = s.type === 'local';
+          const ingestBlock = local ? `
+            <div class="copy-row" style="margin-top:6px;">
+              <span class="muted">Публиковать на:</span>
+              <code id="inc-ingest-${escapeHtml(s.id)}">${escapeHtml(s.ingestUrl)}</code>
+              <button class="mini-button" type="button" data-copy-target="inc-ingest-${escapeHtml(s.id)}">Копировать</button>
+            </div>
+            <div class="rule-grid" style="margin-top:6px;">
+              <label class="field"><span>Порт приёма</span><input type="number" data-field="ingestPort" value="${Number(s.ingestPort) || ''}" /></label>
+              <label class="field"><span>Ключ</span><input type="text" data-field="streamKey" value="${escapeHtml(s.streamKey)}" /></label>
+            </div>` : `
+            <div class="rule-grid" style="margin-top:6px;">
+              <label class="field"><span>Ссылка на поток</span><input type="text" data-field="pullUrl" value="${escapeHtml(s.pullUrl)}" /></label>
+              <label class="field"><span>Пароль (пусто — не менять)</span><input type="password" data-field="pullPassword" placeholder="${s.hasPassword ? '••••••' : '—'}" /></label>
+            </div>`;
+
+          return `
+            <div class="list__row" data-row="${escapeHtml(s.id)}" style="display:block; padding:10px 0; border-bottom:1px solid var(--border-soft);">
+              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <label style="display:flex; gap:8px; align-items:center;">
+                  <input type="checkbox" data-incoming-toggle="${escapeHtml(s.id)}" ${s.enabled ? 'checked' : ''} />
+                  <strong>${escapeHtml(s.name)}</strong>
+                </label>
+                <span class="pill">${escapeHtml(TYPE_LABEL[s.type] || s.type)}</span>
+                <span class="muted" data-status style="flex:1;">${escapeHtml(statusText(s))}</span>
+                <button class="mini-button" type="button" data-incoming-remove="${escapeHtml(s.id)}">Удалить</button>
+              </div>
+              <div class="copy-row" style="margin-top:6px;">
+                <span class="muted">Адрес для OBS (Browser Source):</span>
+                <code id="inc-obs-${escapeHtml(s.id)}">${escapeHtml(obs)}</code>
+                <button class="mini-button" type="button" data-copy-target="inc-obs-${escapeHtml(s.id)}">Копировать</button>
+                <button class="mini-button" type="button" data-open-url="${escapeHtml(obs)}">Открыть</button>
+              </div>
+              ${ingestBlock}
+              <button class="mini-button" type="button" data-incoming-save="${escapeHtml(s.id)}" style="margin-top:6px;">Сохранить настройки</button>
+            </div>`;
+        }
+
+        function render(state) {
+          if (!state) return;
+          if (lanIpEl) lanIpEl.textContent = state.lanIp || '—';
+          const streams = Array.isArray(state.streams) ? state.streams : [];
+
+          const key = JSON.stringify(streams.map((s) => [s.id, s.name, s.type, s.enabled, s.ingestUrl, s.obsPath, s.ingestPort, s.streamKey, s.pullUrl, s.hasPassword]));
+          if (key !== structuralKey) {
+            structuralKey = key;
+            listEl.innerHTML = streams.length
+              ? streams.map(rowHtml).join('')
+              : '<p class="muted">Пока нет потоков. Добавьте ниже.</p>';
+          }
+          // Статус обновляем всегда, не трогая поля ввода.
+          for (const s of streams) {
+            const row = listEl.querySelector(`[data-row="${CSS.escape(s.id)}"] [data-status]`);
+            if (row) row.textContent = statusText(s);
+          }
+        }
+
+        newType?.addEventListener('change', () => {
+          if (pullFields) pullFields.hidden = newType.value !== 'pull';
+        });
+
+        addButton?.addEventListener('click', async () => {
+          const payload = {
+            name: newName?.value || '',
+            type: newType?.value || 'local',
+            pullUrl: newUrl?.value || '',
+            pullPassword: newPassword?.value || '',
+          };
+          render(await window.tchat.addIncomingStream(payload));
+          if (newName) newName.value = '';
+          if (newUrl) newUrl.value = '';
+          if (newPassword) newPassword.value = '';
+        });
+
+        listEl?.addEventListener('click', async (event) => {
+          const removeBtn = event.target.closest('[data-incoming-remove]');
+          const saveBtn = event.target.closest('[data-incoming-save]');
+          const toggle = event.target.closest('[data-incoming-toggle]');
+          if (removeBtn) {
+            render(await window.tchat.removeIncomingStream(removeBtn.dataset.incomingRemove));
+          } else if (saveBtn) {
+            const row = saveBtn.closest('[data-row]');
+            const patch = {};
+            row.querySelectorAll('[data-field]').forEach((input) => {
+              const field = input.dataset.field;
+              // Пустой пароль не отправляем — иначе затрём сохранённый.
+              if (field === 'pullPassword' && !input.value) return;
+              patch[field] = input.value;
+            });
+            render(await window.tchat.updateIncomingStream(saveBtn.dataset.incomingSave, patch));
+          } else if (toggle) {
+            render(await window.tchat.updateIncomingStream(toggle.dataset.incomingToggle, { enabled: toggle.checked }));
+          }
+        });
+
+        window.tchat.onIncomingStatus(render);
+        (async () => render(await window.tchat.getIncomingState()))();
       })();
 
       // === Проверка обновлений ===

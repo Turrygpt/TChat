@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat · Входящий поток</title>
+    <style>
+      /* Один входящий поток как браузер-источник OBS. Приходит по RTMP на ПК с
+         TChat (приём или забор с сервера), ffmpeg переупаковывает в MPEG-TS,
+         здесь его играет mpegts.js. Фон прозрачный: пока сигнала нет — пусто.
+         Параметры URL:
+           ?id=<id>            — какой поток играть (обязателен)
+           ?fit=contain        — вписывать целиком (по умолчанию заполнять с обрезкой)
+           ?muted=0            — включить звук (по умолчанию без звука)
+           ?placeholder=0      — не показывать плашку ожидания */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+      #cam {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: transparent;
+        opacity: 0;
+        transition: opacity 0.35s ease;
+      }
+      body.fit-contain #cam {
+        object-fit: contain;
+      }
+      body.live #cam {
+        opacity: 1;
+      }
+      #placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+        background: rgba(15, 17, 23, 0.72);
+        transition: opacity 0.35s ease;
+      }
+      body.live #placeholder,
+      body.no-placeholder #placeholder {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .dot {
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.18);
+        border-top-color: #3a63ff;
+        animation: spin 0.9s linear infinite;
+      }
+      #placeholderText {
+        font-size: 15px;
+        color: #9aa3b5;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <video id="cam" playsinline muted autoplay></video>
+    <div id="placeholder">
+      <div class="dot"></div>
+      <span id="placeholderText">Ждём поток…</span>
+    </div>
+    <script src="./vendor/mpegts.js"></script>
+    <script src="./incoming.js?v=1"></script>
+  </body>
+</html>

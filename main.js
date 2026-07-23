@@ -10,6 +10,7 @@ const { LiveChat } = require('youtube-chat');
 const { EdgeTTS } = require('node-edge-tts');
 const announce = require('./src/announce');
 const restream = require('./src/restream');
+const incoming = require('./src/incoming');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -2507,6 +2508,16 @@ function createLocalServer() {
     response.json({ ok: true, goal: payload });
   });
 
+  // Живой MPEG-TS входящего потока по id: incoming.js держит ffmpeg на каждый
+  // источник и раздаёт его всем открытым виджетам incoming.html (браузер-источник
+  // OBS). У каждой камеры свой адрес /streams/<id>/live.ts.
+  expressApp.get('/streams/:id/live.ts', (request, response) => {
+    response.setHeader('Content-Type', 'video/mp2t');
+    response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    response.setHeader('Connection', 'close');
+    incoming.attach(request.params.id, response);
+  });
+
   httpServer = http.createServer(expressApp);
   socketServer = new Server(httpServer, {
     cors: {
@@ -2658,8 +2669,9 @@ function installDownloadedUpdate({ clean = false } = {}) {
   }
 
   try {
-    // Рестрим держит ffmpeg — гасим его сами, чтобы установщик не воевал за файлы.
+    // Рестрим и входящие потоки держат ffmpeg — гасим их сами, чтобы установщик не воевал за файлы.
     restream.shutdown();
+    incoming.shutdown();
   } catch {
     /* не критично */
   }
@@ -5087,6 +5099,10 @@ app.whenReady().then(async () => {
     storageDir: path.join(app.getPath('userData'), 'settings'),
     onStatus: (state) => mainWindow?.webContents.send('restream:status', state),
   });
+  incoming.init({
+    storageDir: path.join(app.getPath('userData'), 'settings'),
+    onStatus: (state) => mainWindow?.webContents.send('incoming:status', state),
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -5117,6 +5133,7 @@ app.on('before-quit', async () => {
     youtubeClient.stop();
   }
   restream.shutdown();
+  incoming.shutdown();
   await stopLocalServer();
 });
 
@@ -5230,6 +5247,11 @@ ipcMain.handle('restream:get-state', () => restream.getState());
 ipcMain.handle('restream:start', () => restream.start());
 ipcMain.handle('restream:stop', () => restream.stop());
 ipcMain.handle('restream:save-config', (_event, payload) => restream.saveConfig(payload || {}));
+
+ipcMain.handle('incoming:get-state', () => incoming.getState());
+ipcMain.handle('incoming:add', (_event, payload) => incoming.addStream(payload || {}));
+ipcMain.handle('incoming:update', (_event, payload) => incoming.updateStream(payload?.id, payload?.patch || {}));
+ipcMain.handle('incoming:remove', (_event, payload) => incoming.removeStream(payload?.id));
 
 ipcMain.handle('app:install-update', (_event, payload) => installDownloadedUpdate({ clean: Boolean(payload?.clean) }));
 

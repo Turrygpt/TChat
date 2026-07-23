@@ -19,6 +19,15 @@ contextBridge.exposeInMainWorld('tchat', {
     ipcRenderer.on('restream:status', listener);
     return () => ipcRenderer.removeListener('restream:status', listener);
   },
+  getIncomingState: () => ipcRenderer.invoke('incoming:get-state'),
+  addIncomingStream: (payload) => ipcRenderer.invoke('incoming:add', payload),
+  updateIncomingStream: (id, patch) => ipcRenderer.invoke('incoming:update', { id, patch }),
+  removeIncomingStream: (id) => ipcRenderer.invoke('incoming:remove', { id }),
+  onIncomingStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('incoming:status', listener);
+    return () => ipcRenderer.removeListener('incoming:status', listener);
+  },
   exportConfig: () => ipcRenderer.invoke('config:export'),
   importConfig: () => ipcRenderer.invoke('config:import'),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
