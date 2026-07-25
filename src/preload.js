@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('tchat', {
   getChatHistory: () => ipcRenderer.invoke('chat:get-history'),
   getChatUiSettings: () => ipcRenderer.invoke('chat:get-ui-settings'),
   saveChatUiSettings: (payload) => ipcRenderer.invoke('chat:save-ui-settings', payload),
+  updateChatFilters: (payload) => ipcRenderer.invoke('chat:update-filters', payload),
   updateDonationAlerts: (payload) => ipcRenderer.invoke('donationalerts:update', payload),
   getDonationAlertsState: () => ipcRenderer.invoke('donationalerts:get-state'),
   getDonationAlertsAuthUrl: (payload) => ipcRenderer.invoke('donationalerts:get-auth-url', payload),

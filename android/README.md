@@ -1,40 +1,44 @@
-# TChat для Android
+# TChat Live для Android
 
-Тонкая обёртка (WebView), которая открывает хостируемый TChat как приложение.
-По умолчанию грузит мобильный пульт: `http://195.62.49.244/widgets/remote.html`.
+Нативное стрим-приложение (аналог Prism Live Studio) с функциями TChat:
 
-Адрес меняется в одном месте — `app/src/main/res/values/strings.xml`, строка
-`server_url` (можно поставить свой домен или порт).
+- эфир с **камеры** телефона или с **экрана** (RTMP);
+- переключение задней/фронтальной камеры, **фронталка картинкой-в-картинке**
+  поверх задней (на телефонах с поддержкой одновременных камер, Android 11+);
+- **чат и алерты TChat прямо в кадре** — телефон «прожигает» в поток страницу
+  `widgets/mobile-overlay.html` с сервера TChat на ПК;
+- пульт TChat (`remote.html`), чат для стримера шторкой, тестовый донат.
+
+## Как это устроено
+
+- Поток кодирует и отдаёт [RootEncoder](https://github.com/pedroSG94/RootEncoder)
+  (`GenericStream`: Camera2 / MediaProjection → RTMP).
+- Для оверлеев (чат/алерты) телефон и ПК должны быть в одной сети: адрес ПК
+  вводится на главном экране (порт сервера TChat — 3000). Сам эфир идёт напрямую
+  на площадку и от ПК не зависит.
+- Назначения потока: Twitch, YouTube или свой RTMP-адрес (VK, Rutube и др.).
+- Оверлей рендерится офскрин-WebView на VirtualDisplay и подмешивается
+  GL-фильтром; запасной путь — растеризация WebView в Bitmap (~12 fps).
 
 ## Сборка APK
 
-Нужен Android Studio (или Android SDK + JDK 17).
+Нужен Android SDK + JDK 17 (подойдёт JBR из Android Studio).
 
-**Вариант 1 — Android Studio (проще):**
-
-1. `File → Open` → выберите папку `android/`.
-2. Дождитесь синхронизации Gradle (IDE сама скачает gradle wrapper и зависимости).
-3. `Build → Build Bundle(s)/APK(s) → Build APK(s)`.
-4. Готовый файл: `app/build/outputs/apk/release/app-release.apk`.
-
-**Вариант 2 — из терминала:**
-
-```bash
+```powershell
 cd android
-gradle wrapper          # один раз, создаёт ./gradlew
-./gradlew assembleRelease
-# APK: app/build/outputs/apk/release/app-release.apk
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+.\gradlew.bat assembleDebug     # APK: app/build/outputs/apk/debug/app-debug.apk
+.\gradlew.bat assembleRelease   # подпись debug-ключом, как раньше
 ```
 
-## Установка на телефон
+Или открыть папку `android/` в Android Studio и `Build → Build APK(s)`.
 
-Скиньте APK на телефон и установите (нужно разрешить установку из неизвестных
-источников). Приложение откроет пульт TChat в полноэкранном WebView.
+## Требования на телефоне
 
-## Примечания
+- Android 8.0+ (minSdk 26); захват звука приложений в эфир экрана — Android 10+;
+  фронталка-PiP — Android 11+ и поддержка concurrent camera устройством.
+- Разрешения: камера, микрофон, уведомления (foreground-сервисы эфира).
 
-- Сейчас разрешён HTTP (cleartext) только для `195.62.49.244`. Если поменяете
-  адрес — обновите и `network_security_config.xml`, и `strings.xml`.
-- Как поднимете HTTPS-домен — можно перейти на полноценный TWA (иконка «как
-  настоящее приложение», без адресной строки). Текущий WebView проще и работает по HTTP.
-- `versionName` = 1.0.0, `versionCode` = 1 (в `app/build.gradle`).
+## Заметки
+
+- Старая WebView-обёртка удалена; пульт остался экраном «Пульт TChat».

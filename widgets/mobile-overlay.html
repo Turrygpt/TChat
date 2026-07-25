@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Mobile Overlay</title>
+    <style>
+      /* Сборный оверлей для TChat Live (Android): чат + общий стрим-оверлей
+         (алерты, цель, стикеры) одним прозрачным полотном. Телефон «прожигает»
+         эту страницу в кадр. Параметры: ?chat=1&alerts=1&goal=1&stickers=1&chatPos=left|right */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+      iframe {
+        position: absolute;
+        border: 0;
+        background: transparent;
+        color-scheme: normal;
+      }
+      #streamFrame {
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #chatFrame {
+        bottom: 3%;
+        width: 34%;
+        height: 56%;
+        display: none;
+      }
+      body.chat-left #chatFrame {
+        left: 2%;
+      }
+      body.chat-right #chatFrame {
+        right: 2%;
+      }
+    </style>
+  </head>
+  <body class="chat-left">
+    <iframe id="streamFrame" allowtransparency="true" title="Оверлей стрима"></iframe>
+    <iframe id="chatFrame" allowtransparency="true" title="Чат"></iframe>
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        const on = (name) => params.get(name) === '1';
+
+        // stream.html несёт алерты, цель, стикеры и опросы сразу; какие блоки
+        // реально показывать — решают настройки виджетов на ПК (widgets:state).
+        // Здесь он подключается, если включён хоть один из его блоков.
+        const streamFrame = document.getElementById('streamFrame');
+        if (on('alerts') || on('goal') || on('stickers')) {
+          streamFrame.src = './stream.html';
+        } else {
+          streamFrame.remove();
+        }
+
+        const chatFrame = document.getElementById('chatFrame');
+        if (on('chat')) {
+          chatFrame.src = './chat.html';
+          chatFrame.style.display = 'block';
+        } else {
+          chatFrame.remove();
+        }
+
+        document.body.classList.toggle('chat-right', params.get('chatPos') === 'right');
+        document.body.classList.toggle('chat-left', params.get('chatPos') !== 'right');
+      })();
+    </script>
+  </body>
+</html>

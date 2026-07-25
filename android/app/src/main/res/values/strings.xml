@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TChat</string>
-    <!-- Адрес хостируемого TChat. Поменяйте на свой домен/порт при необходимости. -->
-    <string name="server_url">http://195.62.49.244/tchat/widgets/remote.html</string>
+    <string name="app_name">TChat Live</string>
+    <!-- Дефолтный адрес хостируемого пульта (используется, пока не задан адрес ПК). -->
+    <string name="default_remote_url">http://195.62.49.244/tchat/widgets/remote.html</string>
 </resources>

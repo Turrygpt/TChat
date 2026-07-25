@@ -18,6 +18,36 @@ socket.on('chat:message', addMessage);
 socket.on('chat:ui-settings', applyChatSettings);
 socket.on('chat:music-request', addMusicRequestMessage);
 
+// Скрытые в окне чата отправители/сообщения — не показываем их и здесь.
+let hiddenChatSenders = new Set();
+let hiddenChatMessages = new Set();
+
+function normalizeFilterText(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function chatSenderKey(message = {}) {
+  return `${String(message.platform || '').toLowerCase()}:${normalizeFilterText(message.user)}`;
+}
+
+function chatTextKey(message = {}) {
+  return normalizeFilterText(message.text);
+}
+
+function isChatMessageHidden(message = {}) {
+  return hiddenChatSenders.has(chatSenderKey(message)) || hiddenChatMessages.has(chatTextKey(message));
+}
+
+socket.on('chat:filters', (filters = {}) => {
+  hiddenChatSenders = new Set(Array.isArray(filters.senders) ? filters.senders : []);
+  hiddenChatMessages = new Set(Array.isArray(filters.messages) ? filters.messages : []);
+  chatMessages.querySelectorAll('.chat-message').forEach((node) => {
+    if (hiddenChatSenders.has(node.dataset.senderKey) || hiddenChatMessages.has(node.dataset.textKey)) {
+      node.remove();
+    }
+  });
+});
+
 function addMusicRequestMessage(item = {}) {
   const donation = item.donation || {};
   const title = decodeHtml(item.title || 'Музыкальная заявка');
@@ -51,8 +81,12 @@ function applyChatSettings(settings = {}) {
 }
 
 function addMessage(message) {
+  if (isChatMessageHidden(message)) return; // скрыто в окне чата
+
   const item = document.createElement('article');
   item.className = 'chat-message';
+  item.dataset.senderKey = chatSenderKey(message);
+  item.dataset.textKey = chatTextKey(message);
   item.innerHTML = `
     <div class="chat-message__meta">
       ${message.platform ? `<span class="chat-message__platform">${escapeHtml(message.platform)}</span>` : ''}

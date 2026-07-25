@@ -233,6 +233,14 @@ function buildListenerArgs() {
 function buildDestinationArgs(dest) {
   return [
     '-loglevel', 'level+error',
+    // Площадка может подняться в середине эфира (переподключение). Тогда ffmpeg
+    // входит в mpegts не с начала и должен успеть выцепить extradata H.264
+    // (SPS/PPS), прежде чем писать flv-заголовок — иначе flv-муксер отвечает
+    // «Error opening output files: Invalid argument». Даём анализу запас: это
+    // верхняя граница, ffmpeg останавливается раньше, как только нашёл параметры,
+    // так что на нормальном входе задержки нет.
+    '-analyzeduration', '10000000',
+    '-probesize', '10000000',
     '-f', 'mpegts',
     '-i', 'pipe:0',
     '-c', 'copy',
@@ -249,11 +257,19 @@ const destProcs = new Map();
 // затыком. Площадка, которая не успевает принимать, иначе утащила бы в память
 // весь эфир: пишем мы быстрее, чем она отдаёт в сеть.
 const DEST_BUFFER_LIMIT = 8 * 1024 * 1024;
+// Базовая пауза перед повторным подъёмом площадки. При череде неудач растёт
+// по экспоненте до потолка: Twitch после обрыва держит ключ «в эфире» ещё
+// 10–30 с и отбивает слишком быстрые переподключения тем самым «Invalid
+// argument». Долбёжка раз в 4 с только продлевает это состояние.
 const DEST_RETRY_DELAY = 4000;
+const DEST_RETRY_MAX_DELAY = 30000;
+// Если площадка прожила дольше этого, значит связь встала нормально и обрыв
+// пришёл позже — сбрасываем счётчик неудач, чтобы первая попытка была быстрой.
+const DEST_HEALTHY_MS = 15000;
 
 function ensureDestStat(id) {
   if (!destStats.has(id)) {
-    destStats.set(id, { status: 'idle', error: '', liveSince: 0, failedAt: 0, sentBytes: 0 });
+    destStats.set(id, { status: 'idle', error: '', liveSince: 0, failedAt: 0, sentBytes: 0, failStreak: 0 });
   }
   return destStats.get(id);
 }
@@ -265,7 +281,7 @@ function spawnDestination(dest) {
 
   const stat = ensureDestStat(dest.id);
   const child = spawn(ffmpegPath, buildDestinationArgs(dest), { windowsHide: true });
-  const entry = { child, pending: 0, retryTimer: null, lastError: '' };
+  const entry = { child, pending: 0, retryTimer: null, lastError: '', startedAt: Date.now() };
   destProcs.set(dest.id, entry);
 
   stat.status = live ? 'live' : 'idle';
@@ -294,20 +310,33 @@ function spawnDestination(dest) {
     destProcs.delete(dest.id);
     clearTimeout(entry.retryTimer);
 
-    // Выключили руками — процесса быть и не должно, это не ошибка.
+    // Выключили руками — процесса быть и не должно, это не ошибка. Заодно
+    // обнуляем счётчик неудач, чтобы следующее включение стартовало без паузы.
     const stillWanted = enabledDestinations().some((d) => d.id === dest.id);
     if (!stillWanted || !running) {
       stat.status = 'idle';
       stat.liveSince = 0;
+      stat.failStreak = 0;
       emitStatus();
       return;
     }
+
+    // Площадка отработала долго и упала — это обычный обрыв, а не отказ подъёма:
+    // начинаем отсчёт заново, чтобы переподключиться быстро.
+    if (Date.now() - entry.startedAt >= DEST_HEALTHY_MS) {
+      stat.failStreak = 0;
+    }
+    stat.failStreak += 1;
 
     stat.status = 'error';
     stat.error = entry.lastError || 'обрыв связи с площадкой';
     stat.failedAt = Date.now();
     stat.liveSince = 0;
     emitStatus();
+
+    // Экспоненциальная пауза: 4с → 8с → 16с → … до потолка. Даём Twitch время
+    // освободить зависший ключ, вместо того чтобы биться в него каждые 4 секунды.
+    const delay = Math.min(DEST_RETRY_DELAY * 2 ** (stat.failStreak - 1), DEST_RETRY_MAX_DELAY);
 
     // Поднимаем только эту площадку: остальные и слушатель ничего не заметят.
     entry.retryTimer = setTimeout(() => {
@@ -316,7 +345,7 @@ function spawnDestination(dest) {
         spawnDestination(fresh);
         emitStatus();
       }
-    }, DEST_RETRY_DELAY);
+    }, delay);
   });
 
   child.on('error', (error) => {
@@ -510,6 +539,7 @@ function spawnListener() {
         if (destProcs.has(id)) {
           stat.status = 'live';
           stat.error = '';
+          stat.failStreak = 0; // связь встала — счётчик неудач ни к чему
           if (!stat.liveSince) {
             stat.liveSince = sessionStartedAt;
           }

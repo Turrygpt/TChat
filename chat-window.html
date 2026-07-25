@@ -712,6 +712,8 @@
 
       function saveFilters(filters) {
         localStorage.setItem(filtersKey, JSON.stringify(filters));
+        // Пробрасываем фильтры в main, чтобы виджеты overlay тоже спрятали скрытое.
+        window.tchat?.updateChatFilters?.(filters);
       }
 
       function normalizeFilterText(value = '') {
@@ -1357,6 +1359,8 @@
           direction: uiSettings?.direction ?? localSettings.direction,
         });
         saveSettings({ immediate: true });
+        // Отдаём main сохранённые фильтры, чтобы виджеты знали о них с самого старта.
+        window.tchat?.updateChatFilters?.(readFilters());
         window.tchat.getChatHistory().then(renderHistory);
         window.tchat.onChatHistory(renderHistory);
         window.tchat.onChatMessage(renderMessage);

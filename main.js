@@ -146,6 +146,10 @@ let botConfigFile = '';
 let botConfigKey = '';
 let windowState = createDefaultWindowState();
 let chatUiSettings = createDefaultChatUiSettings();
+// Скрытые в окне чата отправители/сообщения. Источник правды — localStorage окна
+// чата; сюда прилетают через chat:update-filters и раздаются виджетам, чтобы
+// скрытое в чате не появлялось в overlay.
+let chatHiddenFilters = { senders: [], messages: [] };
 let alertSettings = createDefaultAlertSettings();
 let stickerSettings = createDefaultStickerSettings();
 let goalState = createDefaultGoalState();
@@ -594,6 +598,8 @@ function createDefaultStreamWidgets() {
       x: 4,
       y: 48,
       width: 30,
+      opacity: 0,
+      hideSeconds: 0,
       createdAt: new Date().toISOString(),
     },
     {
@@ -865,6 +871,16 @@ function normalizeStreamWidget(widget = {}) {
       title: String(widget.title || 'Задачи на стрим').trim() || 'Задачи на стрим',
       createdAt: widget.createdAt || base.createdAt,
     });
+  }
+
+  if (type === 'chat') {
+    // opacity — прозрачность панели в процентах (0 — непрозрачная, 100 — полностью
+    // прозрачная). hideSeconds — через сколько секунд сообщение исчезает (0 — не исчезает).
+    return {
+      ...base,
+      opacity: Math.min(Math.max(Number(widget.opacity) || 0, 0), 100),
+      hideSeconds: Math.max(Math.round(Number(widget.hideSeconds) || 0), 0),
+    };
   }
 
   return base;
@@ -2533,6 +2549,7 @@ function createLocalServer() {
       connectedAt: new Date().toISOString(),
     });
     socket.emit('chat:ui-settings', chatUiSettings);
+    socket.emit('chat:filters', chatHiddenFilters);
     socket.emit('chat:status', getChatStatusPayload());
     socket.emit('widgets:state', getStreamWidgetsPayload());
     socket.emit('stickers:settings', stickerSettings);
@@ -2853,6 +2870,17 @@ function createChatWindow() {
   chatWindow.on('closed', () => {
     chatWindow = null;
   });
+}
+
+// Принимает свежий набор фильтров из окна чата и раздаёт его всем виджетам.
+// Виджеты сами прячут совпадающие сообщения (и уже показанные, и будущие).
+function setChatHiddenFilters(payload = {}) {
+  chatHiddenFilters = {
+    senders: Array.isArray(payload.senders) ? payload.senders.map(String) : [],
+    messages: Array.isArray(payload.messages) ? payload.messages.map(String) : [],
+  };
+  socketServer?.emit('chat:filters', chatHiddenFilters);
+  return chatHiddenFilters;
 }
 
 function broadcastChatMessage(message) {
@@ -5317,6 +5345,7 @@ ipcMain.handle('chat:get-history', () => getRecentChatMessages());
 ipcMain.handle('chat:get-ui-settings', () => chatUiSettings);
 
 ipcMain.handle('chat:save-ui-settings', (_event, payload) => saveChatUiSettings(payload));
+ipcMain.handle('chat:update-filters', (_event, payload) => setChatHiddenFilters(payload));
 
 ipcMain.handle('donationalerts:update', (_event, payload) => startDonationAlertsSync(payload?.token || ''));
 

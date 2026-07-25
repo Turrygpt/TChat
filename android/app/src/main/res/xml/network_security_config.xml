@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">195.62.49.244</domain>
-    </domain-config>
+    <!-- Приложение работает с TChat на ПК в локальной сети по HTTP/RTMP,
+         адрес задаёт пользователь — поэтому cleartext разрешён глобально. -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

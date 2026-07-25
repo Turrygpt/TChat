@@ -4409,6 +4409,36 @@
           return;
         }
 
+        if (widget.type === 'chat') {
+          workspaceConfigurator.innerHTML = `
+            <label class="field">Название
+              <input data-config-field="title" type="text" value="${escapeHtml(widget.title || 'Чат на экране')}" />
+            </label>
+            <div class="compact-grid">
+              <label class="field">X, %
+                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 4)}" />
+              </label>
+              <label class="field">Y, %
+                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 48)}" />
+              </label>
+            </div>
+            ${renderWorkspaceSizeFields(widget, { defaultWidth: 30 })}
+            <div class="compact-grid">
+              <label class="field">Прозрачность, %
+                <input data-config-field="opacity" type="number" min="0" max="100" step="1" value="${escapeHtml(widget.opacity ?? 0)}" />
+              </label>
+              <label class="field">Скрывать через, сек (0 — не скрывать)
+                <input data-config-field="hideSeconds" type="number" min="0" step="1" value="${escapeHtml(widget.hideSeconds ?? 0)}" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button class="button" type="button" data-save-config>Сохранить</button>
+              <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
+            </div>
+          `;
+          return;
+        }
+
         workspaceConfigurator.innerHTML = `
           <label class="field">Название
             <input data-config-field="title" type="text" value="${escapeHtml(widget.title || widgetTypeLabel(widget.type))}" />
@@ -4439,7 +4469,7 @@
             return;
           }
 
-          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize'].includes(key) ? Number(input.value || 0) : input.value.trim();
+          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds'].includes(key) ? Number(input.value || 0) : input.value.trim();
         });
         return patch;
       }

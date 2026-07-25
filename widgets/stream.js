@@ -6,6 +6,7 @@ const streamTexts = document.querySelector('#streamTexts');
 const streamTasks = document.querySelector('#streamTasks');
 const streamEmbeddedWidgets = document.querySelector('#streamEmbeddedWidgets');
 const streamPoll = document.querySelector('#streamPoll');
+const streamChat = document.querySelector('#streamChat');
 const alertBox = document.querySelector('#streamAlert');
 const alertImage = document.querySelector('#streamAlertImage');
 const alertTitle = document.querySelector('#streamAlertTitle');
@@ -76,6 +77,41 @@ fetch('/alerts/state')
 
 socket.on('widgets:state', applyWidgetsState);
 
+socket.on('chat:message', addChatMessage);
+
+// Скрытые в окне чата отправители/сообщения. Прячем и будущие совпадения,
+// и уже показанные строки в панели.
+let hiddenChatSenders = new Set();
+let hiddenChatMessages = new Set();
+
+function normalizeFilterText(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function chatSenderKey(message = {}) {
+  return `${String(message.platform || '').toLowerCase()}:${normalizeFilterText(message.user)}`;
+}
+
+function chatTextKey(message = {}) {
+  return normalizeFilterText(message.text);
+}
+
+function isChatMessageHidden(message = {}) {
+  return hiddenChatSenders.has(chatSenderKey(message)) || hiddenChatMessages.has(chatTextKey(message));
+}
+
+socket.on('chat:filters', (filters = {}) => {
+  hiddenChatSenders = new Set(Array.isArray(filters.senders) ? filters.senders : []);
+  hiddenChatMessages = new Set(Array.isArray(filters.messages) ? filters.messages : []);
+  if (!streamChat) return;
+  // Сносим уже показанные строки, которые попали под свежий фильтр.
+  streamChat.querySelectorAll('.chat-message').forEach((node) => {
+    if (hiddenChatSenders.has(node.dataset.senderKey) || hiddenChatMessages.has(node.dataset.textKey)) {
+      node.remove();
+    }
+  });
+});
+
 socket.on('alerts:queue', (payload) => {
   displaySeconds = Number(payload?.settings?.displaySeconds || displaySeconds);
 });
@@ -114,6 +150,87 @@ function applyWidgetsState(state = {}) {
   renderTasks(latestState.items);
   renderEmbeddedWidgets(latestState.items);
   renderPoll(latestState.poll);
+  applyChatWidgetLayout(latestState.items);
+}
+
+// Чат в общем overlay: сам виджет (позиция, ширина, вкл/выкл) приходит в
+// widgets:state, а сами сообщения — отдельным потоком chat:message, как и в
+// самостоятельном chat.html. Здесь только показываем/прячем панель и ставим её
+// по координатам виджета builtin-chat.
+let chatWidgetEnabled = false;
+let chatHideMs = 0; // 0 — сообщения не исчезают
+
+function applyChatWidgetLayout(items) {
+  if (!streamChat) return;
+
+  const widget = items.find((item) => item.type === 'chat' || item.id === 'builtin-chat');
+  chatWidgetEnabled = Boolean(widget && widget.enabled !== false);
+
+  if (!chatWidgetEnabled) {
+    streamChat.hidden = true;
+    streamChat.innerHTML = '';
+    return;
+  }
+
+  chatHideMs = Math.max(Number(widget.hideSeconds) || 0, 0) * 1000;
+
+  streamChat.hidden = false;
+  streamChat.style.left = `${Number(widget.x ?? 4)}%`;
+  streamChat.style.top = `${Number(widget.y ?? 48)}%`;
+  streamChat.style.width = `${Number(widget.width ?? 30)}%`;
+  // opacity — прозрачность в процентах: 0 — панель непрозрачна, 100 — полностью прозрачна.
+  const transparency = Math.min(Math.max(Number(widget.opacity) || 0, 0), 100);
+  streamChat.style.opacity = String(1 - transparency / 100);
+}
+
+const CHAT_MAX_MESSAGES = 8;
+
+function addChatMessage(message = {}) {
+  if (!streamChat || !chatWidgetEnabled) return;
+  if (isChatMessageHidden(message)) return; // скрыто в окне чата — в overlay не показываем
+
+  // В общем overlay показываем только источник (площадку), ник и текст. Ролевые
+  // значки (owner/verified/level) не выводим — по просьбе строка должна быть чистой.
+  const item = document.createElement('article');
+  item.className = 'chat-message';
+  item.dataset.senderKey = chatSenderKey(message);
+  item.dataset.textKey = chatTextKey(message);
+  item.innerHTML = `
+    <div class="chat-message__meta">
+      ${message.platform ? `<span class="chat-message__platform">${escapeHtml(message.platform)}</span>` : ''}
+      <strong>${escapeHtml(message.user || '')}</strong>
+    </div>
+    <p>${escapeHtml(message.text || '')}</p>
+  `;
+
+  // FLIP: уже показанные строки после вставки сверху «прыгнули» бы вниз. Плавно
+  // доводим их до новой позиции — новое сообщение будто раздвигает остальные, а
+  // само въезжает слева (slide-in). Растворяющиеся (--old) не трогаем.
+  const settled = [...streamChat.children].filter((node) => !node.classList.contains('chat-message--old'));
+  streamChat.prepend(item);
+  const gap = parseFloat(getComputedStyle(streamChat).rowGap) || 0;
+  const shift = item.offsetHeight + gap;
+  for (const node of settled) {
+    node.style.transition = 'none';
+    node.style.transform = `translateY(${-shift}px)`;
+  }
+  void streamChat.offsetHeight; // фиксируем стартовую позицию до анимации
+  for (const node of settled) {
+    node.style.transition = 'transform 420ms cubic-bezier(0.22, 0.61, 0.36, 1)';
+    node.style.transform = '';
+  }
+
+  // Держим последние N сообщений: лишние убираем снизу — самые старые.
+  while (streamChat.children.length > CHAT_MAX_MESSAGES) {
+    streamChat.lastElementChild.remove();
+  }
+
+  // Автоскрытие: если задано время, плавно гасим (класс --old даёт переход
+  // прозрачности) и убираем из DOM.
+  if (chatHideMs > 0) {
+    setTimeout(() => item.classList.add('chat-message--old'), chatHideMs);
+    setTimeout(() => item.remove(), chatHideMs + 950); // ждём конца дым-анимации
+  }
 }
 
 function applyAlertWidgetLayout() {
