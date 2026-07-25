@@ -1858,7 +1858,10 @@
           </h1>
           <p class="muted">Подключения, виджеты, алерты и музыка.</p>
         </div>
-        <button id="checkUpdatesButton" class="button button--ghost" type="button">Проверить обновления</button>
+        <div class="topbar__actions" style="display: flex; gap: 8px; align-items: center;">
+          <button id="patchnotesButton" class="button button--ghost" type="button">Что нового</button>
+          <button id="checkUpdatesButton" class="button button--ghost" type="button">Проверить обновления</button>
+        </div>
       </header>
 
       <section id="connectionsSection" class="section">
@@ -6826,13 +6829,16 @@
       const patchnotesModal = document.querySelector('#patchnotesModal');
       const patchnotesBody = document.querySelector('#patchnotesBody');
 
-      document.querySelector('#appVersion')?.addEventListener('click', async () => {
+      async function openPatchnotes() {
         patchnotesModal.hidden = false;
         document.body.classList.add('is-modal-open');
         patchnotesBody.innerHTML = '<p class="muted">Загружаю...</p>';
         const data = await loadPatchnotes();
         renderPatchnotes(patchnotesBody, data.notes);
-      });
+      }
+
+      document.querySelector('#appVersion')?.addEventListener('click', openPatchnotes);
+      document.querySelector('#patchnotesButton')?.addEventListener('click', openPatchnotes);
 
       patchnotesModal?.addEventListener('click', (event) => {
         if (event.target.closest('[data-patchnotes-close]')) {
