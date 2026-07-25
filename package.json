@@ -1,6 +1,6 @@
 {
   "name": "tchat",
-  "version": "1.2.13",
+  "version": "1.2.14",
   "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
   "main": "main.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "server:check": "node scripts/check-server.js",
     "smoke:test": "node scripts/smoke-test.js",
     "dist": "electron-builder --win",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "release": "node deploy/release.js"
   },
   "keywords": [],
   "author": "TChat",

@@ -6603,6 +6603,11 @@
             break;
 
           case 'available':
+            // Появилась новая версия — сбрасываем кэш заметок, чтобы «Что нового»
+            // подтянуло патчноуты именно этой версии с раздачи, а не те, что
+            // осели в памяти при старте (до заливки релиза).
+            patchnotesCache = null;
+            updateNotesLoaded = false;
             if (checkUpdatesButton) {
               checkUpdatesButton.disabled = true;
               checkUpdatesButton.textContent = 'Скачиваю v' + status.version + '...';

@@ -33,6 +33,18 @@ bash deploy/deploy.sh
 
 ## Публикация релиза приложения (download + автообновление)
 
+Сначала поднимите `version` в `package.json` — иначе приложения не увидят обновление.
+
+**Одной командой** (сборка + заливка):
+
+```powershell
+$env:TCHAT_DEPLOY_PASS='<пароль сервера>'; npm.cmd run release
+```
+
+`npm run release` сам поставит `ssh2` (если нет), соберёт установщик и зальёт релиз.
+
+**Или по шагам** (то же самое вручную):
+
 ```powershell
 npm.cmd run dist
 npm.cmd install --no-save ssh2
