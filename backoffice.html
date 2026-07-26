@@ -2214,6 +2214,33 @@
         margin-bottom: var(--sp-2);
       }
 
+      /* Крестик «неверно» у утверждения ИИ: не мозолит глаза, но всегда под рукой. */
+      .claim-wrong {
+        border: 0;
+        background: none;
+        padding: 0 var(--sp-1);
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.45;
+        transition: opacity var(--transition), color var(--transition);
+      }
+
+      .claim-wrong:hover {
+        opacity: 1;
+        color: var(--danger);
+      }
+
+      .claim-list {
+        margin: var(--sp-1) 0;
+        padding-left: 18px;
+      }
+
+      .profile-card__corrections {
+        margin-top: var(--sp-3);
+      }
+
       .profile-row__label {
         color: var(--muted);
         font-size: var(--fs-xs);
@@ -7635,7 +7662,13 @@
         function renderCard(p) {
           const s = p.stats || {};
           const cell = (label, value) => `<div class="stat-tile"><div class="stat-tile__label">${label}</div><div class="stat-tile__value">${value}</div></div>`;
-          const chips = (values) => values.map((v) => `<span class="chip">${esc(v)}</span>`).join('');
+          // Крестик «неверно» у каждого утверждения ИИ: пометка убирает его из
+          // портрета и уходит в контекст следующей сборки, чтобы не повторялось.
+          const wrongBtn = (text) =>
+            `<button class="claim-wrong" type="button" data-wrong="${esc(text)}" title="Пометить как неверное — ИИ пересоберёт портрет без этого">✕</button>`;
+          const chips = (values) =>
+            values.map((v) => `<span class="chip">${esc(v)}${wrongBtn(v)}</span>`).join('');
+          const claim = (text) => `${esc(text)} ${wrongBtn(text)}`;
           const row = (label, html) => (html ? `<div class="profile-row"><span class="profile-row__label">${label}</span><div>${html}</div></div>` : '');
 
           const busy = p.aiStatus === 'pending';
@@ -7658,14 +7691,29 @@
             status = '<span class="muted">Портрет ещё не собран.</span>';
           }
 
+          const corrections = (p.corrections || []).length
+            ? `<details class="help profile-card__corrections">
+                 <summary>Помечено как неверное: ${p.corrections.length}</summary>
+                 <p class="muted">ИИ больше не будет писать это в портрете. Если пометили по ошибке — снимите, и утверждение снова разрешено.</p>
+                 <div class="list-stack">
+                   ${p.corrections.map((c) => `
+                     <div class="list-row">
+                       <span class="list-row__main"><span class="list-row__sub">${esc(c.date)}</span>${esc(c.text)}</span>
+                       <button class="button button--ghost" type="button" data-unwrong="${esc(c.id)}">Снять</button>
+                     </div>`).join('')}
+                 </div>
+               </details>`
+            : '';
+
           const portrait = p.aiUpdatedAt
-            ? `${row('Био', p.bio ? esc(p.bio) : '')}
-               ${row('Профессия', p.profession ? esc(p.profession) : '')}
+            ? `${row('Био', p.bio ? claim(p.bio) : '')}
+               ${row('Профессия', p.profession ? claim(p.profession) : '')}
                ${row('Хобби', p.hobbies.length ? chips(p.hobbies) : '')}
                ${row('Черты характера', p.traits.length ? chips(p.traits) : '')}
-               ${row('Интересные факты', p.facts.length ? '<ul style="margin:4px 0; padding-left:18px;">' + p.facts.map((f) => '<li>' + esc(f) + '</li>').join('') + '</ul>' : '')}
-               ${row('О вашем общении', p.aiSummary ? '<span class="muted">' + esc(p.aiSummary) + '</span>' : '')}`
-            : `<p class="muted" style="font-size:13px;">${busy ? 'Портрет собирается, это займёт несколько секунд.' : 'Нажмите «Собрать портрет» — ИИ прочитает переписку и заполнит карточку сам.'}</p>`;
+               ${row('Интересные факты', p.facts.length ? '<ul class="claim-list">' + p.facts.map((f) => '<li>' + claim(f) + '</li>').join('') + '</ul>' : '')}
+               ${row('О вашем общении', p.aiSummary ? '<span class="muted">' + esc(p.aiSummary) + '</span>' : '')}
+               ${corrections}`
+            : `<p class="muted">${busy ? 'Портрет собирается, это займёт несколько секунд.' : 'Нажмите «Собрать портрет» — ИИ прочитает переписку и заполнит карточку сам.'}</p>${corrections}`;
 
           cardEl.innerHTML = `
             <div class="row-between">
@@ -7718,6 +7766,20 @@
           cardEl.querySelector('#pe-analyze').addEventListener('click', () => analyzeProfile(p.id));
           cardEl.querySelector('#pe-entry-add').addEventListener('click', () => addEntry(p.id));
           cardEl.querySelectorAll('[data-remove-entry]').forEach((b) => b.addEventListener('click', () => removeEntry(p.id, b.dataset.removeEntry)));
+          cardEl.querySelectorAll('[data-wrong]').forEach((b) => b.addEventListener('click', () => markWrong(p.id, b.dataset.wrong)));
+          cardEl.querySelectorAll('[data-unwrong]').forEach((b) => b.addEventListener('click', () => unmarkWrong(p.id, b.dataset.unwrong)));
+        }
+
+        // Пометка «неверно» убирает утверждение из портрета и запускает пересборку:
+        // ИИ получит список того, что писать нельзя.
+        async function markWrong(id, text) {
+          const updated = await api.markProfileClaimWrong(id, text).catch(() => null);
+          if (updated && updated.id === selectedId) renderCard(updated);
+        }
+
+        async function unmarkWrong(id, correctionId) {
+          const updated = await api.unmarkProfileClaim(id, correctionId).catch(() => null);
+          if (updated && updated.id === selectedId) renderCard(updated);
         }
 
         async function togglePin(id, pinned) {

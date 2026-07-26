@@ -83,6 +83,32 @@ function normalizeProfile(profile = {}) {
     // ready — портрет готов, error — последняя попытка упала (текст в aiError).
     aiStatus: ['pending', 'ready', 'error'].includes(profile.aiStatus) ? profile.aiStatus : '',
     aiError: String(profile.aiError || ''),
+    // Другие ники того же человека: он пишет то из VK, то из Twitch, то под
+    // сокращением имени. Сообщения со всех этих ников идут в один лог и в один
+    // портрет, иначе на одного человека заводится три половинчатых профиля.
+    aliases: asArray(profile.aliases).map(normalizeUser).filter(Boolean),
+    // Кто это для канала: зритель или стример. Стример — не зритель: у него
+    // портрет пишется про него самого, а не про то, как он общается со стримером.
+    role: profile.role === 'streamer' ? 'streamer' : 'viewer',
+    // Что стример знает про человека наверняка (родство, роль на канале).
+    // Не часть портрета — это вводные для ИИ, как и заметки в таймлайне.
+    note: String(profile.note || ''),
+    // Утверждения, которые ИИ выдумал или переврал, а стример пометил как
+    // неверные. Портрет по-прежнему пишет ИИ — стример только говорит, что
+    // неправда: при следующей сборке эти утверждения не повторяются.
+    corrections: (Array.isArray(profile.corrections) ? profile.corrections : [])
+      .map((c) => {
+        const text = String(c?.text || '').trim();
+        if (!text) {
+          return null;
+        }
+        return {
+          id: String(c.id || `c-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`),
+          text,
+          date: String(c.date || new Date().toISOString().slice(0, 10)),
+        };
+      })
+      .filter(Boolean),
     // Наполнен ли лог сообщений из общего архива чата (делается один раз).
     messagesSeeded: Boolean(profile.messagesSeeded),
     // Сколько сообщений из лога уже учтено в портрете: следующий разбор берёт
@@ -236,12 +262,14 @@ function recordMessage(message = {}) {
   if (!text) {
     return '';
   }
-  const id = makeId(message.platform, message.user);
-  const profile = profiles.find((p) => p.id === id);
+  // Ищем с учётом псевдонимов: сообщение под вторым ником того же человека
+  // должно попасть в его же лог, а не потеряться.
+  const profile = findByUser(message.platform, message.user);
   if (!profile) {
     // Профиля нет — сообщение и так лежит в общем архиве чата.
     return '';
   }
+  const id = profile.id;
   const entry = { text, createdAt: message.createdAt || new Date().toISOString() };
   if (!profile.messagesSeeded) {
     // Лог ещё наполняется архивом — придержим сообщение до конца наполнения.
@@ -284,12 +312,34 @@ function get(id) {
   return profiles.find((p) => p.id === id) || null;
 }
 
+// Профиль этого ника: сначала по точному ключу платформы, потом по псевдонимам.
+// Псевдоним сравнивается без платформы — один и тот же человек пишет и из VK,
+// и из Twitch под тем же именем.
 function findByUser(platform, user) {
-  return profiles.find((p) => p.id === makeId(platform, user)) || null;
+  const id = makeId(platform, user);
+  const exact = profiles.find((p) => p.id === id);
+  if (exact) {
+    return exact;
+  }
+  const nick = normalizeUser(user);
+  if (!nick) {
+    return null;
+  }
+  return profiles.find((p) => p.aliases.includes(nick)) || null;
+}
+
+// Все ники профиля (основной + псевдонимы) — по ним собираются сообщения.
+function nicksOf(profile) {
+  if (!profile) {
+    return [];
+  }
+  return [...new Set([normalizeUser(profile.user), ...profile.aliases].filter(Boolean))];
 }
 
 // Поля, которые пишет только анализ переписки (applyAiResult). Из патчей
 // интерфейса они выбрасываются: портрет зрителя делает ИИ, а не руки.
+// Псевдонимы, роль и заметка сюда не входят: это не портрет, а вводные о том,
+// кто перед нами. Их задаёт стример, а ИИ уже пишет по ним портрет.
 const AI_OWNED_FIELDS = ['bio', 'profession', 'hobbies', 'traits', 'facts', 'aiSummary', 'aiUpdatedAt', 'aiStatus', 'aiError'];
 
 // Создаёт/обновляет профиль. Из патча берём только ник, платформу, отображаемое
@@ -385,12 +435,16 @@ function applyAiResult(id, result = {}, options = {}) {
   }
   const asArray = (v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
 
+  // Подстраховка на случай, если модель всё же повторит помеченное как неверное.
+  const wrong = new Set(profile.corrections.map((c) => c.text.trim().toLowerCase()));
+  const keep = (value) => !wrong.has(String(value || '').trim().toLowerCase());
+
   profile.aiSummary = String(result.summary || result.aiSummary || '').trim();
-  profile.bio = String(result.bio || '').trim();
-  profile.profession = String(result.profession || '').trim();
-  profile.hobbies = asArray(result.hobbies);
-  profile.traits = asArray(result.traits);
-  profile.facts = asArray(result.facts);
+  profile.bio = keep(result.bio) ? String(result.bio || '').trim() : '';
+  profile.profession = keep(result.profession) ? String(result.profession || '').trim() : '';
+  profile.hobbies = asArray(result.hobbies).filter(keep);
+  profile.traits = asArray(result.traits).filter(keep);
+  profile.facts = asArray(result.facts).filter(keep);
 
   const aiEntries = (Array.isArray(result.timeline) ? result.timeline : [])
     .map((entry) => normalizeEntry({ ...entry, source: 'ai' }))
@@ -416,6 +470,50 @@ function applyAiResult(id, result = {}, options = {}) {
   profile.updatedAt = new Date().toISOString();
   save();
   return profile;
+}
+
+// Стример пометил утверждение как неверное. Убираем его из портрета сразу — и
+// запоминаем, чтобы следующая сборка его не повторила.
+function addCorrection(id, text) {
+  const profile = get(id);
+  const claim = String(text || '').trim();
+  if (!profile || !claim) {
+    return null;
+  }
+  const same = (value) => String(value || '').trim().toLowerCase() === claim.toLowerCase();
+  if (!profile.corrections.some((c) => same(c.text))) {
+    profile.corrections.push({
+      id: `c-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      text: claim,
+      date: new Date().toISOString().slice(0, 10),
+    });
+  }
+
+  profile.facts = profile.facts.filter((f) => !same(f));
+  profile.hobbies = profile.hobbies.filter((h) => !same(h));
+  profile.traits = profile.traits.filter((t) => !same(t));
+  if (same(profile.bio)) profile.bio = '';
+  if (same(profile.profession)) profile.profession = '';
+  if (same(profile.aiSummary)) profile.aiSummary = '';
+
+  profile.updatedAt = new Date().toISOString();
+  save();
+  return profile;
+}
+
+function removeCorrection(id, correctionId) {
+  const profile = get(id);
+  if (!profile) {
+    return false;
+  }
+  const before = profile.corrections.length;
+  profile.corrections = profile.corrections.filter((c) => c.id !== correctionId);
+  if (profile.corrections.length === before) {
+    return false;
+  }
+  profile.updatedAt = new Date().toISOString();
+  save();
+  return true;
 }
 
 // Состояние генерации портрета — чтобы интерфейс показывал «собираю портрет…»
@@ -448,4 +546,7 @@ module.exports = {
   messageStats,
   seedMessages,
   recordMessage,
+  nicksOf,
+  addCorrection,
+  removeCorrection,
 };

@@ -90,9 +90,7 @@ function addMessage(message) {
   item.innerHTML = `
     <div class="chat-message__meta">
       ${message.platform ? `<span class="chat-message__platform">${escapeHtml(message.platform)}</span>` : ''}
-      ${Array.isArray(message.badges) && message.badges.length
-        ? message.badges.map((badge) => `<span class="chat-message__badge">${escapeHtml(badge)}</span>`).join('')
-        : ''}
+      ${renderOverlayBadges(message.badges)}
       <strong>${escapeHtml(message.user)}</strong>
     </div>
     <p>${escapeHtml(message.text)}</p>
@@ -114,6 +112,20 @@ function addMessage(message) {
 }
 
 applyChatSettings(chatSettings);
+
+// В overlay показываем только свои пометки-строки вроде «ЗАКАЗ». Ролевые бейджи
+// площадок приходят объектами {label, url} — раньше они попадали сюда как есть и
+// печатались как «[object Object]». На экране зрителю они и не нужны: в строке
+// остаются источник, ник и текст.
+function renderOverlayBadges(badges) {
+  if (!Array.isArray(badges) || !badges.length) {
+    return '';
+  }
+  return badges
+    .filter((badge) => typeof badge === 'string' && badge.trim())
+    .map((badge) => `<span class="chat-message__badge">${escapeHtml(badge)}</span>`)
+    .join('');
+}
 
 function escapeHtml(value = '') {
   return String(value)

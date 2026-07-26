@@ -2996,19 +2996,30 @@ function updateGoalState(payload = {}) {
   return goalState;
 }
 
+// Донат идёт в счётчик только тех сборов, которые сейчас включены. Выключенный
+// сбор — это сбор, который не идёт: пока он выключен, донаты мимо него, а не
+// копятся втихую, чтобы выскочить цифрой при включении.
 function addDonationToGoal(amount) {
   const value = Math.max(Number(amount || 0), 0);
   if (!value) {
     return goalState;
   }
 
-  updateGoalState({
-    current: Number(goalState.current || 0) + value,
-  });
+  const goalWidgets = streamWidgets.filter((widget) => widget.type === 'goal');
+  const activeGoalWidgets = goalWidgets.filter((widget) => widget.enabled !== false);
+
+  // Отдельный виджет сбора (/widgets/goal.html) живёт своим состоянием: если на
+  // рабочей области нет ни одного сбора, он и есть тот самый сбор — считаем.
+  // Если сборы есть, но все выключены, счётчик стоит.
+  if (!goalWidgets.length || activeGoalWidgets.length) {
+    updateGoalState({
+      current: Number(goalState.current || 0) + value,
+    });
+  }
 
   let hasGoalWidgets = false;
   streamWidgets = streamWidgets.map((widget) => {
-    if (widget.type !== 'goal') {
+    if (widget.type !== 'goal' || widget.enabled === false) {
       return widget;
     }
 
@@ -4451,22 +4462,61 @@ async function connectYouTubeChat(channelUrl) {
   }
 }
 
+// Роли, которые мы выводим текстовой буквой, и слова, которыми ту же роль
+// называет сама площадка в своих картинках-бейджах.
+const BADGE_ROLE_ALIASES = {
+  owner: ['owner', 'broadcaster', 'streamer'],
+  moderator: ['moderator', 'mod'],
+  verified: ['verified'],
+  member: ['member', 'subscriber'],
+};
+
+// Площадки присылают свои картинки-бейджи (у VK модератор — меч, владелец —
+// корона), а мы поверх этого добавляли свою букву роли. В итоге у модератора в
+// чате висели и «M», и меч, у владельца — «O» и корона: одно и то же дважды.
+// Оставляем картинку площадки, а свою букву показываем, только если картинки
+// для этой роли нет.
+function dropRolesCoveredByImages(roleBadges, imageBadges) {
+  const covered = (role) => {
+    const aliases = BADGE_ROLE_ALIASES[role] || [role];
+    return imageBadges.some((badge) => {
+      const label = String(badge.label || '').toLowerCase();
+      return Boolean(badge.url) && aliases.some((alias) => label.includes(alias));
+    });
+  };
+  return roleBadges.filter((badge) => !covered(String(badge.label || '').toLowerCase()));
+}
+
+// Убирает повторы: одна и та же картинка или одна и та же роль дважды.
+function dedupeBadges(badges) {
+  const seen = new Set();
+  return badges.filter((badge) => {
+    const key = badge.url ? `url:${badge.url}` : `label:${String(badge.label || '').toLowerCase()}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 async function buildYouTubeBadges(chatItem) {
-  const badges = [
+  const roleBadges = [
     chatItem.isOwner ? { label: 'owner' } : null,
     chatItem.isModerator ? { label: 'moderator' } : null,
     chatItem.isVerified ? { label: 'verified' } : null,
     chatItem.isMembership ? { label: 'member' } : null,
   ].filter(Boolean);
 
+  const imageBadges = [];
   if (chatItem.author?.badge?.thumbnail?.url) {
-    badges.push({
+    imageBadges.push({
       label: chatItem.author.badge.label || 'badge',
       url: await cacheRemoteAsset(chatItem.author.badge.thumbnail.url, 'badges'),
     });
   }
 
-  return badges;
+  return dedupeBadges([...dropRolesCoveredByImages(roleBadges, imageBadges), ...imageBadges]);
 }
 
 async function resolveYouTubeLiveId(channelUrl) {
@@ -4857,7 +4907,8 @@ async function buildVkBadges(badges = [], author = {}) {
     }),
   );
 
-  return [...roleBadges, ...imageBadges].filter((badge) => badge.label || badge.url);
+  const images = imageBadges.filter((badge) => badge.label || badge.url);
+  return dedupeBadges([...dropRolesCoveredByImages(roleBadges, images), ...images]);
 }
 
 function extractVkMessageText(parts = []) {
@@ -5356,11 +5407,14 @@ async function getProfilesAiStatus() {
 // оттуда все сообщения зрителя. Дальше лог пополняется на лету из saveChatMessage,
 // так что второй раз архив по этому зрителю уже не читается.
 async function seedProfileMessagesFromArchive(profile) {
-  const key = profiles.makeId(profile.platform, profile.user);
+  // Собираем по всем никам человека: основному и псевдонимам. Ник сравниваем
+  // без платформы — один и тот же человек пишет из VK и с Twitch.
+  const nicks = new Set(profiles.nicksOf(profile));
   const collected = [];
 
   const collect = (message) => {
-    if (profiles.makeId(message.platform, message.user) !== key) return;
+    const nick = String(message.user || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!nicks.has(nick)) return;
     const text = String(message.text || '').trim();
     if (text) {
       collected.push({ text, createdAt: message.createdAt || '' });
@@ -5528,7 +5582,25 @@ async function runProfileAnalysis(id, { force = false } = {}) {
     ? `Донаты за сессию: ${stats.donationCount} на ${Math.round(stats.donationTotal)} ${stats.donationCurrency || ''}`.trim()
     : 'Донатов не зафиксировано';
   const notesBlock = manualNotes.length
-    ? `\nЗаметки стримера об этом зрителе (учитывай их, но не копируй дословно):\n${manualNotes.map((e) => `- ${e.date}: ${e.text}`).join('\n')}`
+    ? `\nЗаметки стримера об этом человеке (учитывай их, но не копируй дословно):\n${manualNotes.map((e) => `- ${e.date}: ${e.text}`).join('\n')}`
+    : '';
+
+  // Кто это для канала. Для стримера портрет пишется про него самого, а не про
+  // то, как он общается со стримером, — иначе получается дичь вроде «активный
+  // зритель» про хозяина канала.
+  const identityBlock =
+    (profile.role === 'streamer'
+      ? '\nВАЖНО: это не зритель, а стример этого канала. Пиши портрет про самого человека, ' +
+        'а в summary опиши, как он ведёт эфир и общается с чатом.'
+      : '') +
+    (profile.note ? `\nЧто стример знает про него точно (считай это фактом): ${profile.note}` : '') +
+    (profile.aliases.length ? `\nОн же пишет под никами: ${profile.aliases.join(', ')}.` : '');
+
+  // Утверждения, помеченные стримером как неверные. Модель их выдумала или
+  // переврала — повторять нельзя, даже если в переписке есть намёк.
+  const correctionsBlock = profile.corrections.length
+    ? `\nСтример пометил эти утверждения как НЕВЕРНЫЕ. Не повторяй их и не выводи заново ` +
+      `ни в каком виде:\n${profile.corrections.map((c) => `- ${c.text}`).join('\n')}`
     : '';
   const portraitBlock = incremental
     ? `\nТекущий портрет (JSON):\n${JSON.stringify({
@@ -5544,8 +5616,8 @@ async function runProfileAnalysis(id, { force = false } = {}) {
     ? `Новые сообщения с прошлого разбора${fresh.length > shown.length ? `, последние ${shown.length} из ${fresh.length}` : ` (${shown.length})`}`
     : `Его сообщения в чате${log.length > shown.length ? `, последние ${shown.length} из ${log.length}` : ''}`;
   const userPrompt =
-    `Ник зрителя: ${profile.displayName} (${profile.platform})\n` +
-    `Всего сообщений: ${log.length}. ${donationsLine}.${notesBlock}${portraitBlock}\n` +
+    `${profile.role === 'streamer' ? 'Стример' : 'Зритель'}: ${profile.displayName} (${profile.platform})\n` +
+    `Всего сообщений: ${log.length}. ${donationsLine}.${identityBlock}${correctionsBlock}${notesBlock}${portraitBlock}\n` +
     `${messagesTitle} (дата — текст):\n` +
     (shown.length ? shown.map((m) => `${m.date || '—'} — ${m.text}`).join('\n') : '— новых сообщений нет, уточни портрет по заметкам стримера');
 
@@ -5575,8 +5647,11 @@ async function runProfileAnalysis(id, { force = false } = {}) {
 // причина (DNS, отказ соединения, сертификат) лежит в error.cause. Разворачиваем
 // цепочку — иначе в карточке нечего показать, кроме «fetch failed».
 function describeNetworkError(error) {
+  if (error?.describedAlready) {
+    return String(error.message || '');
+  }
   if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-    return 'Polza.ai не ответила вовремя (таймаут)';
+    return 'модель не ответила вовремя (таймаут)';
   }
   const parts = [];
   let current = error;
@@ -5658,7 +5733,11 @@ async function requestProfileCompletion(messages) {
       console.error(`[profiles] ${attempt.name} не ответил: ${reason}`);
     }
   }
-  throw new Error(failures.join('; '));
+  // Причины уже расшифрованы по каждому источнику: помечаем ошибку готовой,
+  // чтобы внешний обработчик не приписал «сеть:» второй раз.
+  const error = new Error(failures.join('; '));
+  error.describedAlready = true;
+  throw error;
 }
 
 // Обёртка вокруг разбора: держит статус профиля (pending → ready/error),
@@ -5774,6 +5853,21 @@ ipcMain.handle('profiles:add-timeline', async (_event, payload) => {
   return entry;
 });
 ipcMain.handle('profiles:remove-timeline', (_event, payload) => ({ ok: profiles.removeTimelineEntry(payload?.id, payload?.entryId) }));
+
+// Стример пометил утверждение как неверное: убираем его из портрета и сразу
+// пересобираем портрет — теперь модель знает, что так писать нельзя.
+ipcMain.handle('profiles:mark-wrong', async (_event, payload) => {
+  const updated = profiles.addCorrection(payload?.id, payload?.text);
+  if (updated && (await getProfilesAiStatus()).canAnalyze) {
+    scheduleProfileAnalysis(payload.id, { force: true });
+  }
+  return getProfilePayload(payload?.id);
+});
+
+ipcMain.handle('profiles:unmark-wrong', async (_event, payload) => {
+  profiles.removeCorrection(payload?.id, payload?.correctionId);
+  return getProfilePayload(payload?.id);
+});
 // Кнопка «Обновить портрет» — обновляем даже без новых сообщений.
 ipcMain.handle('profiles:analyze', (_event, id) => analyzeProfileWithAI(id, { force: true }));
 ipcMain.handle('profiles:get-keys', () => profiles.list().map((p) => p.id));
