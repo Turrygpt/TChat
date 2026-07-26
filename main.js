@@ -13,6 +13,7 @@ const announce = require('./src/announce');
 const restream = require('./src/restream');
 const incoming = require('./src/incoming');
 const profiles = require('./src/profiles');
+const donatepay = require('./src/donatepay');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -5187,6 +5188,12 @@ app.whenReady().then(async () => {
     onStatus: (state) => mainWindow?.webContents.send('incoming:status', state),
   });
   profiles.init(path.join(app.getPath('userData'), 'settings'));
+  donatepay.init({
+    storageDir: path.join(app.getPath('userData'), 'settings'),
+    // Донат из любого источника идёт в общую воронку: алерты, сбор, музыка, чат.
+    onDonation: (donation) => enqueueDonationAlert({ ...donation, showInChat: true }),
+    onStatus: () => broadcastDonationSources(),
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -5938,6 +5945,92 @@ ipcMain.handle('chat:get-ui-settings', () => chatUiSettings);
 
 ipcMain.handle('chat:save-ui-settings', (_event, payload) => saveChatUiSettings(payload));
 ipcMain.handle('chat:update-filters', (_event, payload) => setChatHiddenFilters(payload));
+
+// --- Источники донатов --------------------------------------------------------
+//
+// DonationAlerts и DonatePay — это просто два сервиса донатов, и дальше их может
+// стать больше. Поэтому интерфейс работает не с конкретным сервисом, а со
+// списком источников: у каждого свой способ авторизации и своё состояние, а
+// донаты все приходят в одну воронку (enqueueDonationAlert).
+//
+// Чтобы добавить третий сервис: написать модуль с init/getState/saveSettings и
+// добавить сюда одну запись.
+const DONATION_SOURCES = [
+  {
+    id: 'donationalerts',
+    name: 'DonationAlerts',
+    // oauth — подключается кнопкой «Получить токен», поля ключа нет.
+    auth: 'oauth',
+    site: 'https://www.donationalerts.com',
+    getState: () => {
+      const state = getDonationAlertsState();
+      return {
+        // Токен есть — значит, подключено: опрос идёт по нему.
+        connected: Boolean(state.hasToken),
+        hasKey: Boolean(state.hasToken),
+        enabled: Boolean(state.hasToken),
+        error: state.error || '',
+        account: '',
+      };
+    },
+  },
+  {
+    id: 'donatepay',
+    name: 'DonatePay',
+    // apiKey — ключ из личного кабинета вставляется руками.
+    auth: 'apiKey',
+    site: 'https://donatepay.ru/page/api',
+    keyHint: 'Ключ берётся на donatepay.ru → API',
+    getState: () => {
+      const state = donatepay.getState();
+      return {
+        connected: state.connected,
+        hasKey: state.hasKey,
+        enabled: state.enabled,
+        error: state.error,
+        account: state.user?.name || '',
+        lastEventAt: state.lastEventAt,
+      };
+    },
+    save: (patch) => donatepay.saveSettings(patch),
+    check: (apiKey) => donatepay.checkKey(apiKey),
+  },
+];
+
+function getDonationSources() {
+  return DONATION_SOURCES.map((source) => ({
+    id: source.id,
+    name: source.name,
+    auth: source.auth,
+    site: source.site,
+    keyHint: source.keyHint || '',
+    ...source.getState(),
+  }));
+}
+
+function broadcastDonationSources() {
+  mainWindow?.webContents.send('donations:sources', getDonationSources());
+}
+
+ipcMain.handle('donations:get-sources', () => getDonationSources());
+
+ipcMain.handle('donations:save-source', async (_event, payload) => {
+  const source = DONATION_SOURCES.find((s) => s.id === payload?.id);
+  if (!source?.save) {
+    return { ok: false, error: 'этот источник так не настраивается' };
+  }
+  await source.save(payload.patch || {});
+  broadcastDonationSources();
+  return { ok: true, sources: getDonationSources() };
+});
+
+ipcMain.handle('donations:check-source', async (_event, payload) => {
+  const source = DONATION_SOURCES.find((s) => s.id === payload?.id);
+  if (!source?.check) {
+    return { ok: false, error: 'проверка недоступна для этого источника' };
+  }
+  return source.check(payload.apiKey);
+});
 
 ipcMain.handle('donationalerts:update', (_event, payload) => startDonationAlertsSync(payload?.token || ''));
 

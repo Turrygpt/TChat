@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld('tchat', {
     ipcRenderer.on('restream:status', listener);
     return () => ipcRenderer.removeListener('restream:status', listener);
   },
+  getDonationSources: () => ipcRenderer.invoke('donations:get-sources'),
+  saveDonationSource: (id, patch) => ipcRenderer.invoke('donations:save-source', { id, patch }),
+  checkDonationSource: (id, apiKey) => ipcRenderer.invoke('donations:check-source', { id, apiKey }),
+  onDonationSources: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('donations:sources', listener);
+    return () => ipcRenderer.removeListener('donations:sources', listener);
+  },
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   getProfile: (id) => ipcRenderer.invoke('profiles:get', id),
   upsertProfile: (patch) => ipcRenderer.invoke('profiles:upsert', patch),

@@ -2017,6 +2017,23 @@
         font-size: var(--fs-sm);
       }
 
+      /* Источник донатов: строка списка с полем ключа под названием. */
+      .donation-source {
+        align-items: flex-start;
+      }
+
+      .donation-source__form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        margin-top: var(--sp-2);
+      }
+
+      .donation-source__form input {
+        flex: 1;
+        min-width: 180px;
+      }
+
       /* Статусная метка: «в эфире», «обрыв», «выкл». */
       .badge {
         flex: none;
@@ -2483,6 +2500,13 @@
               <button id="saveVlessButton" class="button" type="button">Сохранить</button>
             </div>
             <p id="vlessState" class="muted">—</p>
+          </article>
+
+          <article class="panel panel--wide">
+            <h2>Донаты</h2>
+            <p class="muted">Сервисы донатов, с которых TChat принимает поступления. Донат с любого из них
+              одинаково попадает в алерты, сбор, музыкальные заказы и чат. Ниже — состояние подключений.</p>
+            <div id="donationSources" class="list-stack"></div>
           </article>
 
           <article class="panel">
@@ -6740,6 +6764,92 @@
         } catch {
           /* без версии живём */
         }
+      })();
+
+      // === Источники донатов ===
+      // Список рисуется по данным из main: DonationAlerts и DonatePay сейчас,
+      // третий сервис появится здесь сам, как только его добавят в реестр.
+      (() => {
+        if (!window.tchat?.getDonationSources) return;
+        const listEl = document.querySelector('#donationSources');
+        if (!listEl) return;
+
+        function statusBadge(source) {
+          if (source.error) return '<span class="badge badge--danger">ошибка</span>';
+          if (source.connected) return '<span class="badge badge--live">на связи</span>';
+          if (!source.hasKey) return '<span class="badge">не подключён</span>';
+          return '<span class="badge">выключен</span>';
+        }
+
+        function render(sources) {
+          listEl.innerHTML = (sources || []).map((s) => {
+            const details = s.auth === 'apiKey'
+              ? `<div class="donation-source__form">
+                   <input type="password" data-key="${escapeHtml(s.id)}" placeholder="${s.hasKey ? '•••••••• (сохранён)' : 'API-ключ'}" autocomplete="off" />
+                   <button class="button button--ghost" type="button" data-check="${escapeHtml(s.id)}">Проверить</button>
+                   <button class="button" type="button" data-save="${escapeHtml(s.id)}">${s.enabled ? 'Сохранить' : 'Подключить'}</button>
+                   ${s.hasKey ? `<button class="button button--ghost" type="button" data-toggle="${escapeHtml(s.id)}">${s.enabled ? 'Выключить' : 'Включить'}</button>` : ''}
+                 </div>`
+              : '<p class="muted">Настраивается в блоке DonationAlerts ниже: ID приложения, secret и токен.</p>';
+
+            const note = s.error
+              ? `<span class="list-row__sub" style="color: var(--danger);">${escapeHtml(s.error)}</span>`
+              : s.account
+                ? `<span class="list-row__sub">${escapeHtml(s.account)}</span>`
+                : s.keyHint
+                  ? `<span class="list-row__sub">${escapeHtml(s.keyHint)}</span>`
+                  : '';
+
+            return `<div class="list-row donation-source">
+              <span class="list-row__main">
+                <span class="list-row__title">${escapeHtml(s.name)}</span>
+                ${note}
+                ${details}
+              </span>
+              ${statusBadge(s)}
+            </div>`;
+          }).join('') || '<p class="empty-state">Источники донатов не настроены.</p>';
+        }
+
+        async function refresh() {
+          render(await window.tchat.getDonationSources().catch(() => []));
+        }
+
+        listEl.addEventListener('click', async (event) => {
+          const check = event.target.closest('[data-check]');
+          if (check) {
+            const id = check.dataset.check;
+            const key = listEl.querySelector(`[data-key="${id}"]`)?.value || '';
+            check.disabled = true;
+            const res = await window.tchat.checkDonationSource(id, key).catch((e) => ({ ok: false, error: e.message }));
+            check.disabled = false;
+            check.textContent = res?.ok ? `✓ ${res.user?.name || 'ключ принят'}` : `✕ ${res?.error || 'не принят'}`;
+            setTimeout(() => { check.textContent = 'Проверить'; }, 4000);
+            return;
+          }
+
+          const save = event.target.closest('[data-save]');
+          if (save) {
+            const id = save.dataset.save;
+            const input = listEl.querySelector(`[data-key="${id}"]`);
+            await window.tchat.saveDonationSource(id, { apiKey: input?.value || '', enabled: true });
+            if (input) input.value = '';
+            await refresh();
+            return;
+          }
+
+          const toggle = event.target.closest('[data-toggle]');
+          if (toggle) {
+            const id = toggle.dataset.toggle;
+            const sources = await window.tchat.getDonationSources().catch(() => []);
+            const current = sources.find((s) => s.id === id);
+            await window.tchat.saveDonationSource(id, { enabled: !current?.enabled });
+            await refresh();
+          }
+        });
+
+        window.tchat.onDonationSources?.(render);
+        refresh();
       })();
 
       // === Рестрим-сервер (локальный) ===
