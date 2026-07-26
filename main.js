@@ -2,6 +2,7 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const readline = require('node:readline');
 const express = require('express');
 const { Server } = require('socket.io');
 const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut } = require('electron');
@@ -11,6 +12,7 @@ const { EdgeTTS } = require('node-edge-tts');
 const announce = require('./src/announce');
 const restream = require('./src/restream');
 const incoming = require('./src/incoming');
+const profiles = require('./src/profiles');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -2113,6 +2115,8 @@ function saveChatMessage(message) {
       console.error(`Не удалось сохранить сообщение чата: ${error.message}`);
     }
   });
+  // Если у автора есть профиль — сообщение сразу уходит и в его собственный лог.
+  profiles.recordMessage(message);
 }
 
 function getRecentChatMessages(limit = 30) {
@@ -5131,6 +5135,8 @@ app.whenReady().then(async () => {
     storageDir: path.join(app.getPath('userData'), 'settings'),
     onStatus: (state) => mainWindow?.webContents.send('incoming:status', state),
   });
+  profiles.init(path.join(app.getPath('userData'), 'settings'));
+  loadProfilesAiSettings();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -5280,6 +5286,390 @@ ipcMain.handle('incoming:get-state', () => incoming.getState());
 ipcMain.handle('incoming:add', (_event, payload) => incoming.addStream(payload || {}));
 ipcMain.handle('incoming:update', (_event, payload) => incoming.updateStream(payload?.id, payload?.patch || {}));
 ipcMain.handle('incoming:remove', (_event, payload) => incoming.removeStream(payload?.id));
+
+// --- Профили зрителей ---------------------------------------------------------
+
+// Настройки анализа чата через Polza.ai (OpenAI-совместимый API, дешёвая DeepSeek).
+// Ключ вводит сам стример в бэкофисе; храним локально рядом с остальными настройками.
+let profilesAiSettings = { apiKey: '', baseUrl: 'https://api.polza.ai/v1', model: 'deepseek/deepseek-chat' };
+let profilesAiFile = '';
+
+function loadProfilesAiSettings() {
+  profilesAiFile = path.join(app.getPath('userData'), 'settings', 'profiles-ai.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(profilesAiFile, 'utf8'));
+    profilesAiSettings = {
+      apiKey: String(raw.apiKey || ''),
+      baseUrl: String(raw.baseUrl || '').trim() || 'https://api.polza.ai/v1',
+      model: String(raw.model || '').trim() || 'deepseek/deepseek-chat',
+    };
+  } catch {
+    /* файла ещё нет — остаются значения по умолчанию */
+  }
+}
+
+function saveProfilesAiSettings(patch = {}) {
+  profilesAiSettings = {
+    // пустой ключ в патче не затирает сохранённый — так UI может не пересылать его
+    apiKey: patch.apiKey !== undefined && patch.apiKey !== '' ? String(patch.apiKey) : profilesAiSettings.apiKey,
+    baseUrl: String(patch.baseUrl || profilesAiSettings.baseUrl || '').trim() || 'https://api.polza.ai/v1',
+    model: String(patch.model || profilesAiSettings.model || '').trim() || 'deepseek/deepseek-chat',
+  };
+  try {
+    fs.writeFileSync(profilesAiFile, JSON.stringify(profilesAiSettings, null, 2));
+  } catch (error) {
+    console.error(`[profiles] не удалось сохранить настройки ИИ: ${error.message}`);
+  }
+  return { hasKey: Boolean(profilesAiSettings.apiKey), baseUrl: profilesAiSettings.baseUrl, model: profilesAiSettings.model };
+}
+
+// Разовое наполнение лога профиля: проходим общий архив chat.jsonl и достаём
+// оттуда все сообщения зрителя. Дальше лог пополняется на лету из saveChatMessage,
+// так что второй раз архив по этому зрителю уже не читается.
+async function seedProfileMessagesFromArchive(profile) {
+  const key = profiles.makeId(profile.platform, profile.user);
+  const collected = [];
+
+  const collect = (message) => {
+    if (profiles.makeId(message.platform, message.user) !== key) return;
+    const text = String(message.text || '').trim();
+    if (text) {
+      collected.push({ text, createdAt: message.createdAt || '' });
+    }
+  };
+
+  if (chatHistoryFile && fs.existsSync(chatHistoryFile)) {
+    const stream = fs.createReadStream(chatHistoryFile, { encoding: 'utf8' });
+    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        if (!line) continue;
+        try {
+          collect(JSON.parse(line));
+        } catch {
+          /* битая строка архива — пропускаем */
+        }
+      }
+    } finally {
+      lines.close();
+      stream.destroy();
+    }
+  } else {
+    chatHistory.forEach(collect);
+  }
+
+  profiles.seedMessages(profile.id, collected);
+  return collected.length;
+}
+
+// Профили, заведённые до появления собственного лога, и только что созданные
+// наполняются архивом один раз. Параллельные вызовы делят один проход.
+const profileSeedInFlight = new Map();
+
+function ensureProfileMessages(profile) {
+  if (!profile || profile.messagesSeeded) {
+    return Promise.resolve(0);
+  }
+  const running = profileSeedInFlight.get(profile.id);
+  if (running) {
+    return running;
+  }
+  const task = seedProfileMessagesFromArchive(profile)
+    .catch((error) => {
+      console.error(`[profiles] не удалось наполнить лог сообщений: ${error?.message || error}`);
+      return 0;
+    })
+    .finally(() => profileSeedInFlight.delete(profile.id));
+  profileSeedInFlight.set(profile.id, task);
+  return task;
+}
+
+// Донаты — только те, что отдал DonationAlerts за сессию: полной истории у нас
+// нет, поэтому статистика по ним помечена как неполная.
+function computeDonationStats(profile) {
+  const userNorm = String(profile.user || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  let donationCount = 0;
+  let donationTotal = 0;
+  let donationCurrency = '';
+  for (const d of donationAlertsState.donations || []) {
+    if (String(d.username || '').replace(/\s+/g, ' ').trim().toLowerCase() !== userNorm) continue;
+    donationCount += 1;
+    donationTotal += Number(d.amount || 0);
+    donationCurrency = d.currency || donationCurrency;
+  }
+  return { donationCount, donationTotal, donationCurrency, donationsPartial: true };
+}
+
+// Статистика профиля: сообщения — из его же лога, донаты — из сессии.
+async function getProfilePayload(id) {
+  const profile = profiles.get(id);
+  if (!profile) return null;
+  await ensureProfileMessages(profile);
+  return {
+    ...profile,
+    stats: { ...profiles.messageStats(id), ...computeDonationStats(profile) },
+  };
+}
+
+// Ники с профилем — чтобы чат ставил метку и предлагал «Открыть», а не «Создать».
+function broadcastProfileKeys() {
+  const keys = profiles.list().map((p) => p.id);
+  socketServer?.emit('profiles:keys', keys);
+  chatWindow?.webContents.send('profiles:keys', keys);
+  mainWindow?.webContents.send('profiles:keys', keys);
+}
+
+// Профили генерируются целиком, поэтому одновременный запуск на одном зрителе
+// смысла не имеет: второй вызов дожидается первого.
+const profileAnalysisInFlight = new Map();
+
+// Сколько последних сообщений зрителя уходит в модель. Лог хранится целиком,
+// но в промпт всё не влезет — да и портрет по свежему общению точнее.
+const PROFILE_PROMPT_MESSAGES = 200;
+
+// Формат портрета — один и для первого разбора, и для обновления.
+const PROFILE_JSON_SHAPE =
+  '{"bio":"1-2 предложения о человеке","facts":["интересный факт", "..."],' +
+  '"summary":"краткая сводка о том, как этот зритель общается со стримером",' +
+  '"profession":"если следует из сообщений, иначе пустая строка",' +
+  '"hobbies":["..."],"traits":["черта характера", "..."],' +
+  '"timeline":[{"date":"ГГГГ-ММ-ДД","type":"health|trip|purchase|event|note","text":"что произошло в жизни зрителя"}]}';
+
+// Что считаем событием для таймлайна — одинаково для первого разбора и обновления.
+const PROFILE_TIMELINE_RULES =
+  'В timeline клади всё заметное, что произошло у зрителя и о чём он сам написал: ' +
+  'заболел или выздоровел, лежал в больнице (type "health"); куда-то съездил, отпуск, командировка, ' +
+  'переезд (type "trip"); что-то купил — машина, техника, животное, крупная покупка (type "purchase"); ' +
+  'сменил работу, экзамены, свадьба, ребёнок, новая учёба и прочие важные новости (type "event"). ' +
+  'Дату бери из того сообщения, где он об этом сказал. Мелкую болтовню и шутки в события не записывай.';
+
+// Анализ переписки через Polza.ai.
+//
+// Первый разбор идёт по всей переписке. Дальше портрет не пересобирается с нуля:
+// модель получает прежний портрет и только те сообщения, что пришли после
+// прошлого разбора, и обновляет им портрет. Отметка — profile.messagesAnalyzed,
+// поэтому промпт не растёт вместе с логом, а старые выводы никуда не деваются.
+async function runProfileAnalysis(id, { force = false } = {}) {
+  const profile = profiles.get(id);
+  if (!profile) return { ok: false, error: 'профиль не найден' };
+  if (!profilesAiSettings.apiKey) return { ok: false, error: 'не задан ключ Polza.ai в настройках профилей' };
+
+  await ensureProfileMessages(profile);
+  const log = profiles.readMessages(id);
+  if (!log.length) return { ok: false, error: 'нет сообщений этого зрителя для анализа' };
+
+  const analyzed = Math.min(profile.messagesAnalyzed || 0, log.length);
+  const incremental = Boolean(profile.aiUpdatedAt) && analyzed > 0;
+  const fresh = incremental ? log.slice(analyzed) : log;
+  if (incremental && !fresh.length && !force) {
+    return { ok: true, skipped: true };
+  }
+
+  const shown = fresh.slice(-PROFILE_PROMPT_MESSAGES).map((m) => ({
+    text: m.text,
+    date: m.createdAt ? String(m.createdAt).slice(0, 10) : '',
+  }));
+
+  const stats = computeDonationStats(profile);
+  const manualNotes = profile.timeline.filter((e) => e.source === 'manual');
+
+  const system = incremental
+    ? 'Ты помощник стримера и ведёшь досье на зрителей. У тебя есть готовый портрет зрителя и его новые ' +
+      'сообщения в чате. Обнови портрет: сохрани то, что осталось верным, добавь новое, убери то, что новые ' +
+      'сообщения опровергают. Ответь СТРОГО валидным JSON без markdown и пояснений, портретом целиком: ' +
+      `${PROFILE_JSON_SHAPE}. ` +
+      `${PROFILE_TIMELINE_RULES} ` +
+      'При этом клади в timeline ТОЛЬКО новые события из новых сообщений — прежние уже сохранены, повторять их не нужно. ' +
+      'Остальные поля возвращай полностью, включая факты из прежнего портрета, которые остаются в силе. ' +
+      'Не выдумывай того, чего нет ни в портрете, ни в сообщениях.'
+    : 'Ты помощник стримера и ведёшь досье на зрителей. По сообщениям зрителя в чате составь ' +
+      'портрет на русском языке. Ответь СТРОГО валидным JSON без markdown и пояснений: ' +
+      `${PROFILE_JSON_SHAPE}. ` +
+      `${PROFILE_TIMELINE_RULES} Если таких событий нет — пустой массив. ` +
+      'Не выдумывай фактов, которых нет в сообщениях: лучше пустая строка или пустой массив.';
+
+  const donationsLine = stats?.donationCount
+    ? `Донаты за сессию: ${stats.donationCount} на ${Math.round(stats.donationTotal)} ${stats.donationCurrency || ''}`.trim()
+    : 'Донатов не зафиксировано';
+  const notesBlock = manualNotes.length
+    ? `\nЗаметки стримера об этом зрителе (учитывай их, но не копируй дословно):\n${manualNotes.map((e) => `- ${e.date}: ${e.text}`).join('\n')}`
+    : '';
+  const portraitBlock = incremental
+    ? `\nТекущий портрет (JSON):\n${JSON.stringify({
+        bio: profile.bio,
+        profession: profile.profession,
+        hobbies: profile.hobbies,
+        traits: profile.traits,
+        facts: profile.facts,
+        summary: profile.aiSummary,
+      })}\n`
+    : '';
+  const messagesTitle = incremental
+    ? `Новые сообщения с прошлого разбора${fresh.length > shown.length ? `, последние ${shown.length} из ${fresh.length}` : ` (${shown.length})`}`
+    : `Его сообщения в чате${log.length > shown.length ? `, последние ${shown.length} из ${log.length}` : ''}`;
+  const userPrompt =
+    `Ник зрителя: ${profile.displayName} (${profile.platform})\n` +
+    `Всего сообщений: ${log.length}. ${donationsLine}.${notesBlock}${portraitBlock}\n` +
+    `${messagesTitle} (дата — текст):\n` +
+    (shown.length ? shown.map((m) => `${m.date || '—'} — ${m.text}`).join('\n') : '— новых сообщений нет, уточни портрет по заметкам стримера');
+
+  try {
+    const response = await fetch(`${profilesAiSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${profilesAiSettings.apiKey}` },
+      body: JSON.stringify({
+        model: profilesAiSettings.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.4,
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { ok: false, error: `Polza.ai HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    const data = await response.json();
+    let content = String(data?.choices?.[0]?.message?.content || '').trim();
+    content = content.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return { ok: false, error: 'модель вернула не JSON' };
+    }
+    // Отметку ставим по длине лога на момент чтения: сообщения, пришедшие
+    // за время запроса, попадут в следующий разбор.
+    profiles.applyAiResult(id, parsed, { mergeTimeline: incremental, analyzedCount: log.length });
+    return { ok: true, incremental, usedMessages: shown.length };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+}
+
+// Обёртка вокруг разбора: держит статус профиля (pending → ready/error),
+// не даёт запустить два разбора одного зрителя и сообщает интерфейсу результат.
+function analyzeProfileWithAI(id, { force = false } = {}) {
+  const running = profileAnalysisInFlight.get(id);
+  if (running) {
+    return running;
+  }
+  const task = (async () => {
+    profiles.setAiStatus(id, 'pending');
+    notifyProfileChanged(id);
+    let result;
+    try {
+      result = await runProfileAnalysis(id, { force });
+    } catch (error) {
+      result = { ok: false, error: String(error?.message || error) };
+    }
+    if (!result.ok) {
+      profiles.setAiStatus(id, 'error', result.error);
+    } else if (result.skipped) {
+      // Новых сообщений не было — портрет остался прежним, снимаем «собираю».
+      profiles.setAiStatus(id, 'ready');
+    }
+    broadcastProfileKeys();
+    notifyProfileChanged(id);
+    return { ...result, profile: await getProfilePayload(id) };
+  })().finally(() => profileAnalysisInFlight.delete(id));
+  profileAnalysisInFlight.set(id, task);
+  return task;
+}
+
+// Портрет собирается сам: профиль заводится по нику, содержимое пишет ИИ.
+// Если разбор уже идёт, ставим ровно один повтор — чтобы новый контекст
+// (например, только что добавленная заметка) точно попал в портрет.
+const profileAnalysisQueued = new Set();
+
+function scheduleProfileAnalysis(id, options = {}) {
+  const running = profileAnalysisInFlight.get(id);
+  if (running) {
+    if (profileAnalysisQueued.has(id)) {
+      return;
+    }
+    profileAnalysisQueued.add(id);
+    running.finally(() => {
+      profileAnalysisQueued.delete(id);
+      scheduleProfileAnalysis(id, options);
+    });
+    return;
+  }
+  analyzeProfileWithAI(id, options).catch((error) => {
+    console.error(`[profiles] анализ не удался: ${error?.message || error}`);
+  });
+}
+
+// Бэкофис держит открытым один профиль — шлём ему свежую версию, чтобы карточка
+// сама обновилась, когда фоновый разбор закончится.
+async function notifyProfileChanged(id) {
+  const payload = await getProfilePayload(id);
+  if (payload) {
+    mainWindow?.webContents.send('profiles:changed', payload);
+  }
+}
+
+ipcMain.handle('profiles:list', () => profiles.list());
+ipcMain.handle('profiles:get', (_event, id) => getProfilePayload(id));
+ipcMain.handle('profiles:upsert', async (_event, patch) => {
+  const saved = profiles.upsert(patch || {});
+  broadcastProfileKeys();
+  return getProfilePayload(saved.id);
+});
+ipcMain.handle('profiles:ensure', async (_event, payload) => {
+  const isNew = !profiles.findByUser(payload?.platform, payload?.user);
+  const saved = profiles.ensureForUser(payload || {});
+  broadcastProfileKeys();
+  if (isNew) {
+    scheduleProfileAnalysis(saved.id);
+  }
+  return getProfilePayload(saved.id);
+});
+// Правый клик по нику в чате: заводим профиль (портрет сразу начинает
+// собираться) и открываем бэкофис прямо на его карточке.
+ipcMain.handle('profiles:open', async (_event, payload) => {
+  const isNew = !profiles.findByUser(payload?.platform, payload?.user);
+  const saved = profiles.ensureForUser(payload || {});
+  broadcastProfileKeys();
+  if (isNew) {
+    scheduleProfileAnalysis(saved.id);
+  }
+  createWindow();
+  const target = mainWindow?.webContents;
+  if (target) {
+    if (target.isLoading()) {
+      target.once('did-finish-load', () => target.send('profiles:focus', saved.id));
+    } else {
+      target.send('profiles:focus', saved.id);
+    }
+  }
+  return { ok: true, id: saved.id };
+});
+ipcMain.handle('profiles:remove', (_event, id) => {
+  const ok = profiles.remove(id);
+  broadcastProfileKeys();
+  return { ok };
+});
+ipcMain.handle('profiles:add-timeline', async (_event, payload) => {
+  const entry = profiles.addTimelineEntry(payload?.id, payload?.entry);
+  // Заметка стримера — новый контекст для портрета, обновляем его даже если
+  // новых сообщений в чате не было.
+  if (entry && profilesAiSettings.apiKey) {
+    scheduleProfileAnalysis(payload.id, { force: true });
+  }
+  return entry;
+});
+ipcMain.handle('profiles:remove-timeline', (_event, payload) => ({ ok: profiles.removeTimelineEntry(payload?.id, payload?.entryId) }));
+// Кнопка «Обновить портрет» — обновляем даже без новых сообщений.
+ipcMain.handle('profiles:analyze', (_event, id) => analyzeProfileWithAI(id, { force: true }));
+ipcMain.handle('profiles:get-keys', () => profiles.list().map((p) => p.id));
+ipcMain.handle('profiles:get-ai-settings', () => ({
+  hasKey: Boolean(profilesAiSettings.apiKey),
+  baseUrl: profilesAiSettings.baseUrl,
+  model: profilesAiSettings.model,
+}));
+ipcMain.handle('profiles:save-ai-settings', (_event, payload) => saveProfilesAiSettings(payload || {}));
 
 ipcMain.handle('app:install-update', (_event, payload) => installDownloadedUpdate({ clean: Boolean(payload?.clean) }));
 

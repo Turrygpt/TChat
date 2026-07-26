@@ -19,6 +19,33 @@ contextBridge.exposeInMainWorld('tchat', {
     ipcRenderer.on('restream:status', listener);
     return () => ipcRenderer.removeListener('restream:status', listener);
   },
+  listProfiles: () => ipcRenderer.invoke('profiles:list'),
+  getProfile: (id) => ipcRenderer.invoke('profiles:get', id),
+  upsertProfile: (patch) => ipcRenderer.invoke('profiles:upsert', patch),
+  ensureProfile: (payload) => ipcRenderer.invoke('profiles:ensure', payload),
+  openProfile: (payload) => ipcRenderer.invoke('profiles:open', payload),
+  removeProfile: (id) => ipcRenderer.invoke('profiles:remove', id),
+  addProfileTimeline: (id, entry) => ipcRenderer.invoke('profiles:add-timeline', { id, entry }),
+  removeProfileTimeline: (id, entryId) => ipcRenderer.invoke('profiles:remove-timeline', { id, entryId }),
+  analyzeProfile: (id) => ipcRenderer.invoke('profiles:analyze', id),
+  getProfileKeys: () => ipcRenderer.invoke('profiles:get-keys'),
+  getProfilesAiSettings: () => ipcRenderer.invoke('profiles:get-ai-settings'),
+  saveProfilesAiSettings: (payload) => ipcRenderer.invoke('profiles:save-ai-settings', payload),
+  onProfileKeys: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('profiles:keys', listener);
+    return () => ipcRenderer.removeListener('profiles:keys', listener);
+  },
+  onProfileChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('profiles:changed', listener);
+    return () => ipcRenderer.removeListener('profiles:changed', listener);
+  },
+  onProfileFocus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('profiles:focus', listener);
+    return () => ipcRenderer.removeListener('profiles:focus', listener);
+  },
   getIncomingState: () => ipcRenderer.invoke('incoming:get-state'),
   addIncomingStream: (payload) => ipcRenderer.invoke('incoming:add', payload),
   updateIncomingStream: (id, patch) => ipcRenderer.invoke('incoming:update', { id, patch }),

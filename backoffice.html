@@ -1842,6 +1842,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m23 7-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             <span>Входящий поток</span>
           </button>
+          <button class="tab" type="button" data-tab="profiles">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Профили</span>
+          </button>
         </nav>
 
         <div class="sidebar__footer">
@@ -2477,6 +2481,23 @@
               выключить и включить рестрим.
             </p>
             <div id="restreamDestList" class="list"></div>
+
+            <details id="restreamRelayConfig" style="margin-top: 10px;">
+              <summary class="muted" style="cursor: pointer; font-size: 12px;">Ретрансляция через свой сервер · <span id="restreamRelayState">выключена у всех площадок</span></summary>
+              <p class="muted" style="margin: 8px 0; font-size: 12px;">
+                Галочка «через мой сервер» у площадки отправляет её поток не напрямую, а на ваш VPS — сервер уже
+                кормит площадку сам. Помогает, когда прямой канал до площадки не держит 1080p: до сервера поток
+                идёт по толстому каналу, а он досылает без перекодирования. Ключ трансляции в этом режиме берётся
+                из настройки пересылки на сервере, из приложения он не уходит: сюда отправляется только путь
+                (у Twitch — <code>twitch</code>). Пересылку с этого пути на площадку нужно один раз настроить на сервере.
+              </p>
+              <div class="grid" style="grid-template-columns: 2fr 1fr 1fr; gap: 8px; align-items: end;">
+                <label class="field"><span>Адрес приёма на сервере</span><input id="restreamRelayUrl" type="text" placeholder="rtmps://195.62.49.244.sslip.io:2935/live" /></label>
+                <label class="field"><span>Логин публикации</span><input id="restreamRelayUser" type="text" placeholder="turry" /></label>
+                <label class="field"><span>Пароль публикации</span><input id="restreamRelayPassword" type="password" placeholder="••••••••" /></label>
+              </div>
+              <button id="restreamRelaySave" class="button button--ghost" type="button" style="margin-top: 8px;">Сохранить сервер</button>
+            </details>
             <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
               <label class="field"><span>Название</span><input id="restreamNewName" type="text" placeholder="YouTube" /></label>
               <label class="field"><span>RTMP-адрес</span><input id="restreamNewUrl" type="text" placeholder="rtmp://a.rtmp.youtube.com/live2" /></label>
@@ -2519,6 +2540,44 @@
               <label class="field"><span>Пароль потока (если требуется)</span><input id="incomingNewPassword" type="password" placeholder="—" /></label>
             </div>
             <button id="incomingAddButton" class="button" type="button" style="margin-top: 10px;">Добавить</button>
+          </article>
+        </section>
+      </section>
+
+      <section id="profilesSection" class="section">
+        <section class="grid">
+          <article class="panel panel--wide">
+            <h2>Профили зрителей</h2>
+            <p class="muted">CRM по избранным зрителям. Портрет — био, профессию, хобби, черты, интересные факты и сводку общения — целиком пишет ИИ по переписке зрителя: заполнять руками ничего не нужно. Правый клик по нику в чате → «Профиль», либо добавьте ник здесь. Дальше портрет не собирается заново: ИИ дополняет его сообщениями, которые пришли с прошлого разбора. Анализ — через Polza.ai (модель DeepSeek).</p>
+
+            <details id="profilesAiConfig" style="margin: 10px 0 16px;">
+              <summary class="muted" style="cursor: pointer;">Настройки анализа (Polza.ai) · <span id="profilesAiState">ключ не задан</span></summary>
+              <div class="rule-grid" style="margin-top: 8px;">
+                <label class="field"><span>API-ключ Polza.ai</span><input id="profilesAiKey" type="password" placeholder="sk-..." /></label>
+                <label class="field"><span>Модель</span><input id="profilesAiModel" type="text" placeholder="deepseek/deepseek-chat" /></label>
+                <label class="field"><span>Базовый URL</span><input id="profilesAiBaseUrl" type="text" placeholder="https://api.polza.ai/v1" /></label>
+              </div>
+              <button id="profilesAiSaveButton" class="button button--ghost" type="button" style="margin-top: 8px;">Сохранить настройки</button>
+            </details>
+
+            <div style="display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start;">
+              <div>
+                <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                  <input id="profilesAddName" type="text" placeholder="Ник зрителя" style="flex: 1; min-width: 0;" />
+                  <select id="profilesAddPlatform" style="width: 90px;">
+                    <option value="vk">VK</option>
+                    <option value="twitch">Twitch</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="rutube">Rutube</option>
+                  </select>
+                </div>
+                <button id="profilesAddButton" class="button" type="button" style="width: 100%;">+ Добавить профиль</button>
+                <div id="profilesList" class="list" style="margin-top: 12px;"></div>
+              </div>
+              <div id="profileCard">
+                <p class="muted">Выберите профиль слева или добавьте нового.</p>
+              </div>
+            </div>
           </article>
         </section>
       </section>
@@ -6102,6 +6161,11 @@
         const newUrl = document.querySelector('#restreamNewUrl');
         const newKey = document.querySelector('#restreamNewKey');
         const addButton = document.querySelector('#restreamAddButton');
+        const relayUrlInput = document.querySelector('#restreamRelayUrl');
+        const relayUserInput = document.querySelector('#restreamRelayUser');
+        const relayPasswordInput = document.querySelector('#restreamRelayPassword');
+        const relaySaveButton = document.querySelector('#restreamRelaySave');
+        const relayStateEl = document.querySelector('#restreamRelayState');
 
         let state = null;
         let keyFocused = false;
@@ -6134,6 +6198,22 @@
           }
           renderStats(state);
           renderDestinations(state.destinations || []);
+          renderRelay(state);
+        }
+
+        // Поля сервера не перетираем, пока в них печатают: рендер приходит на
+        // каждое обновление статуса эфира.
+        function renderRelay(next) {
+          const relay = next.relay || {};
+          if (relayUrlInput && document.activeElement !== relayUrlInput) relayUrlInput.value = relay.url || '';
+          if (relayUserInput && document.activeElement !== relayUserInput) relayUserInput.value = relay.user || '';
+          if (relayPasswordInput && relay.hasPassword) relayPasswordInput.placeholder = '•••••••• (сохранён)';
+          if (relayStateEl) {
+            const via = (next.destinations || []).filter((d) => d.viaRelay);
+            relayStateEl.textContent = via.length
+              ? 'через сервер: ' + via.map((d) => d.name).join(', ')
+              : 'выключена у всех площадок';
+          }
         }
 
         function formatDuration(sec) {
@@ -6199,6 +6279,19 @@
           statsHint.textContent = notes.join(' · ');
         }
 
+        // Площадка целиком, как её ждёт saveRestreamConfig: любое изменение списка
+        // пересылает все поля, иначе флаг ретрансляции и путь потерялись бы.
+        const destPayload = (d, patch = {}) => ({
+          id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled,
+          viaRelay: d.viaRelay, relayPath: d.relayPath, ...patch,
+        });
+
+        // Что показать вместо прямого адреса, когда площадка идёт через сервер.
+        function relayLabel(dest) {
+          const base = (state?.relay?.url || '').replace(/\/+$/, '');
+          return 'через мой сервер: ' + (base ? base + '/' + (dest.relayPath || '') : 'сервер не задан') + ' → ' + dest.url;
+        }
+
         function renderDestinations(list) {
           if (!destList) return;
           if (!list.length) {
@@ -6224,10 +6317,19 @@
                 ' · переподключаемся сами, остальные площадки не трогаем';
             }
 
+            // Ретрансляция через свой сервер предлагается там, где она и нужна —
+            // на Twitch: прямой канал до него чаще всего и не держит 1080p.
+            const relayable = /twitch\.tv/i.test(dest.url) || dest.viaRelay;
+            const relayBox = relayable
+              ? '<label class="muted" style="display:inline-flex; align-items:center; gap:4px; font-size:12px; margin-top:4px;" title="Поток пойдёт на ваш сервер (путь ' + escapeHtml(dest.relayPath || '') + '), а он отдаст его площадке">' +
+                '<input type="checkbox" data-dest-relay="' + dest.id + '"' + (dest.viaRelay ? ' checked' : '') + ' /> через мой сервер (1080p)</label>'
+              : '';
+
             row.innerHTML =
               '<button type="button" class="toggle-switch ' + (dest.enabled ? 'is-on' : '') + '" data-dest-toggle="' + dest.id + '" aria-pressed="' + (dest.enabled ? 'true' : 'false') + '" title="Включить/выключить"></button>' +
-              '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.url) + '</span>' +
+              '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.viaRelay ? relayLabel(dest) : dest.url) + '</span>' +
               (detail ? '<br><span class="muted" style="font-size:12px;">' + escapeHtml(detail) + '</span>' : '') +
+              (relayBox ? '<br>' + relayBox : '') +
               '</span>' +
               '<span style="font-size:12px;' + (badgeColor ? 'color:' + badgeColor + ';' : '') + '">' + escapeHtml(badge) + '</span>' +
               '<button class="button button--ghost" type="button" data-dest-delete="' + dest.id + '">Удалить</button>';
@@ -6258,7 +6360,7 @@
         addButton?.addEventListener('click', async () => {
           const url = newUrl.value.trim();
           if (!url) { newUrl.focus(); return; }
-          const destinations = (state?.destinations || []).map((d) => ({ id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled }));
+          const destinations = (state?.destinations || []).map((d) => destPayload(d));
           destinations.push({ name: newName.value.trim() || 'Площадка', url, key: newKey.value.trim(), enabled: true });
           render(await window.tchat.saveRestreamConfig({ destinations }));
           newName.value = ''; newUrl.value = ''; newKey.value = '';
@@ -6269,19 +6371,41 @@
           if (del) {
             const destinations = (state?.destinations || [])
               .filter((d) => d.id !== del.dataset.destDelete)
-              .map((d) => ({ id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled }));
+              .map((d) => destPayload(d));
             render(await window.tchat.saveRestreamConfig({ destinations }));
             return;
           }
 
           const toggle = event.target.closest('[data-dest-toggle]');
           if (toggle) {
-            const destinations = (state?.destinations || []).map((d) => ({
-              id: d.id, name: d.name, url: d.url, key: d.key,
-              enabled: d.id === toggle.dataset.destToggle ? !d.enabled : d.enabled,
-            }));
+            const destinations = (state?.destinations || []).map((d) =>
+              destPayload(d, d.id === toggle.dataset.destToggle ? { enabled: !d.enabled } : {}),
+            );
             render(await window.tchat.saveRestreamConfig({ destinations }));
           }
+        });
+
+        // Галочка «через мой сервер»: адрес площадки меняется на ходу, рестрим
+        // перезапускает только её процесс — эфир и соседи не рвутся.
+        destList?.addEventListener('change', async (event) => {
+          const relayBox = event.target.closest('[data-dest-relay]');
+          if (!relayBox) return;
+          const destinations = (state?.destinations || []).map((d) =>
+            destPayload(d, d.id === relayBox.dataset.destRelay ? { viaRelay: relayBox.checked } : {}),
+          );
+          render(await window.tchat.saveRestreamConfig({ destinations }));
+        });
+
+        relaySaveButton?.addEventListener('click', async () => {
+          render(await window.tchat.saveRestreamConfig({
+            relay: {
+              url: relayUrlInput.value.trim(),
+              user: relayUserInput.value.trim(),
+              password: relayPasswordInput.value,
+            },
+          }));
+          relayPasswordInput.value = '';
+          statusEl.textContent = 'Сервер ретрансляции сохранён.';
         });
 
         window.tchat.onRestreamStatus(render);
@@ -6874,6 +6998,245 @@
           resetUpdateButtonLater(8000);
         }
       });
+
+      // --- Профили зрителей ---------------------------------------------------
+      (() => {
+        const api = window.tchat;
+        if (!api?.listProfiles) return;
+
+        const listEl = document.querySelector('#profilesList');
+        const cardEl = document.querySelector('#profileCard');
+        const addNameEl = document.querySelector('#profilesAddName');
+        const addPlatformEl = document.querySelector('#profilesAddPlatform');
+        const addButton = document.querySelector('#profilesAddButton');
+        const aiKeyEl = document.querySelector('#profilesAiKey');
+        const aiModelEl = document.querySelector('#profilesAiModel');
+        const aiBaseUrlEl = document.querySelector('#profilesAiBaseUrl');
+        const aiSaveButton = document.querySelector('#profilesAiSaveButton');
+        const aiStateEl = document.querySelector('#profilesAiState');
+
+        const esc = (s) => escapeHtml(String(s ?? ''));
+        const fmtDate = (ts) => { if (!ts) return '—'; try { return new Date(ts).toLocaleDateString('ru-RU'); } catch { return '—'; } };
+        const typeIcon = (t) => ({ note: '📝', event: '⭐', health: '🏥', trip: '✈️', purchase: '🛒', donation: '💸' }[t] || '📝');
+
+        let items = [];
+        let selectedId = '';
+        let loaded = false;
+
+        async function loadList() {
+          items = (await api.listProfiles().catch(() => [])) || [];
+          renderList();
+        }
+
+        function renderList() {
+          if (!items.length) {
+            listEl.innerHTML = '<p class="muted" style="padding:8px; font-size:13px;">Пока никого. Добавьте зрителя выше.</p>';
+            return;
+          }
+          listEl.innerHTML = items.map((p) => `
+            <button type="button" data-profile-id="${esc(p.id)}"
+              style="display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; padding:8px 10px; margin-bottom:6px; border-radius:10px; cursor:pointer;
+                     background:${p.id === selectedId ? 'rgba(139,92,246,0.18)' : 'rgba(255,255,255,0.04)'};
+                     border:1px solid ${p.id === selectedId ? 'rgba(139,92,246,0.6)' : 'rgba(255,255,255,0.08)'}; color:inherit;">
+              <span style="min-width:0;"><strong>${esc(p.displayName)}</strong><br><span class="muted" style="font-size:11px;">${esc(p.platform)}${p.profession ? ' · ' + esc(p.profession) : ''}</span></span>
+              ${p.pinned ? '<span title="Закреплён">📌</span>' : ''}
+            </button>`).join('');
+          listEl.querySelectorAll('[data-profile-id]').forEach((b) => b.addEventListener('click', () => selectProfile(b.dataset.profileId)));
+        }
+
+        async function selectProfile(id) {
+          selectedId = id;
+          renderList();
+          const p = await api.getProfile(id).catch(() => null);
+          if (!p) { cardEl.innerHTML = '<p class="muted">Профиль не найден.</p>'; return; }
+          renderCard(p);
+        }
+
+        // Карточка только показывает то, что написал ИИ: править портрет руками нельзя,
+        // можно закрепить профиль, добавить свою заметку в таймлайн и пересобрать портрет.
+        function renderCard(p) {
+          const s = p.stats || {};
+          const cell = (label, value) => `<div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:8px;"><div class="muted" style="font-size:11px;">${label}</div><strong>${value}</strong></div>`;
+          const chips = (values) => values.map((v) => `<span style="display:inline-block; background:rgba(139,92,246,0.16); border:1px solid rgba(139,92,246,0.35); border-radius:999px; padding:2px 10px; margin:0 4px 4px 0; font-size:12px;">${esc(v)}</span>`).join('');
+          const row = (label, html) => (html ? `<div style="margin-bottom:8px;"><span class="muted" style="font-size:11px; text-transform:uppercase;">${label}</span><div>${html}</div></div>` : '');
+
+          const busy = p.aiStatus === 'pending';
+          const analyzed = Math.min(p.messagesAnalyzed || 0, s.messageCount || 0);
+          const unread = Math.max(0, (s.messageCount || 0) - analyzed);
+          let status = '';
+          if (busy) {
+            status = '<span class="muted">✨ Собираю портрет по переписке…</span>';
+          } else if (p.aiStatus === 'error') {
+            status = `<span style="color:#f87171;">Не удалось собрать портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>`;
+          } else if (p.aiUpdatedAt) {
+            status = `<span class="muted">Портрет от ${fmtDate(new Date(p.aiUpdatedAt).getTime())} · учтено ${analyzed} сообщ.${unread ? ` · новых с тех пор: ${unread}` : ''}</span>`;
+          } else {
+            status = '<span class="muted">Портрет ещё не собран.</span>';
+          }
+
+          const portrait = p.aiUpdatedAt
+            ? `${row('Био', p.bio ? esc(p.bio) : '')}
+               ${row('Профессия', p.profession ? esc(p.profession) : '')}
+               ${row('Хобби', p.hobbies.length ? chips(p.hobbies) : '')}
+               ${row('Черты характера', p.traits.length ? chips(p.traits) : '')}
+               ${row('Интересные факты', p.facts.length ? '<ul style="margin:4px 0; padding-left:18px;">' + p.facts.map((f) => '<li>' + esc(f) + '</li>').join('') + '</ul>' : '')}
+               ${row('О вашем общении', p.aiSummary ? '<span class="muted">' + esc(p.aiSummary) + '</span>' : '')}`
+            : `<p class="muted" style="font-size:13px;">${busy ? 'Портрет собирается, это займёт несколько секунд.' : 'Нажмите «Собрать портрет» — ИИ прочитает переписку и заполнит карточку сам.'}</p>`;
+
+          cardEl.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <strong style="font-size:18px; flex:1; min-width:0;">${esc(p.displayName)}</strong>
+              <label class="muted" style="font-size:12px; display:flex; align-items:center; gap:4px; white-space:nowrap;"><input id="pe-pin" type="checkbox" ${p.pinned ? 'checked' : ''}/> закрепить</label>
+              <button id="pe-delete" class="button button--danger" type="button">Удалить</button>
+            </div>
+            <p class="muted" style="font-size:12px; margin:4px 0 12px;">${esc(p.platform)} · ${esc(p.user)}</p>
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px;">
+              ${cell('Сообщений', s.messageCount || 0)}
+              ${cell('Первое', fmtDate(s.firstSeen))}
+              ${cell('Последнее', fmtDate(s.lastSeen))}
+              ${cell('Донаты', (s.donationCount || 0) + ' · ' + Math.round(s.donationTotal || 0) + ' ' + esc(s.donationCurrency || ''))}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+              <strong>Портрет от ИИ</strong>
+              <button id="pe-analyze" class="button button--ghost" type="button" ${busy ? 'disabled' : ''}>${p.aiUpdatedAt ? '✨ Обновить портрет' : '✨ Собрать портрет'}</button>
+            </div>
+            <div style="font-size:12px; min-height:16px; margin-bottom:8px;">${status}</div>
+            <div style="margin-bottom:14px;">${portrait}</div>
+            <div style="margin:14px 0;">
+              <strong>Таймлайн общения</strong>
+              <div class="muted" style="font-size:11px; margin-top:2px;">🏥 болезнь · ✈️ поездка · 🛒 покупка · ⭐ событие · 📝 заметка. Значок ✨ — событие нашёл в переписке ИИ; ваши заметки уходят в контекст следующего портрета.</div>
+              <div style="margin:6px 0;">
+                ${(p.timeline || []).slice().reverse().map((e) => `
+                  <div style="display:flex; gap:8px; align-items:baseline; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <span class="muted" style="font-size:12px; min-width:84px;">${esc(e.date)}</span>
+                    <span title="${e.source === 'ai' ? 'Нашёл ИИ' : 'Ваша заметка'}" style="white-space:nowrap;">${typeIcon(e.type)}${e.source === 'ai' ? '<span style="font-size:10px;">✨</span>' : ''}</span>
+                    <span style="flex:1;">${esc(e.text)}</span>
+                    <button class="mini-button" type="button" data-remove-entry="${esc(e.id)}">✕</button>
+                  </div>`).join('') || '<p class="muted" style="font-size:13px;">Событий пока нет.</p>'}
+              </div>
+              <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                <input id="pe-entry-date" type="date" style="width:150px;" />
+                <select id="pe-entry-type" style="width:130px;">
+                  <option value="note">Заметка</option>
+                  <option value="event">Событие</option>
+                  <option value="health">Здоровье</option>
+                  <option value="trip">Поездка</option>
+                  <option value="purchase">Покупка</option>
+                </select>
+                <input id="pe-entry-text" type="text" placeholder="Что случилось…" style="flex:1; min-width:140px;" />
+                <button id="pe-entry-add" class="button button--ghost" type="button">+ В таймлайн</button>
+              </div>
+            </div>`;
+
+          cardEl.querySelector('#pe-pin').addEventListener('change', (event) => togglePin(p.id, event.target.checked));
+          cardEl.querySelector('#pe-delete').addEventListener('click', () => deleteProfile(p.id));
+          cardEl.querySelector('#pe-analyze').addEventListener('click', () => analyzeProfile(p.id));
+          cardEl.querySelector('#pe-entry-add').addEventListener('click', () => addEntry(p.id));
+          cardEl.querySelectorAll('[data-remove-entry]').forEach((b) => b.addEventListener('click', () => removeEntry(p.id, b.dataset.removeEntry)));
+        }
+
+        async function togglePin(id, pinned) {
+          await api.upsertProfile({ id, pinned });
+          await loadList();
+        }
+
+        async function deleteProfile(id) {
+          await api.removeProfile(id);
+          selectedId = '';
+          cardEl.innerHTML = '<p class="muted">Профиль удалён.</p>';
+          await loadList();
+        }
+
+        async function addEntry(id) {
+          const textEl = cardEl.querySelector('#pe-entry-text');
+          const text = textEl.value.trim();
+          if (!text) return;
+          await api.addProfileTimeline(id, {
+            date: cardEl.querySelector('#pe-entry-date').value || undefined,
+            type: cardEl.querySelector('#pe-entry-type').value,
+            text,
+          });
+          await selectProfile(id);
+        }
+
+        async function removeEntry(id, entryId) {
+          await api.removeProfileTimeline(id, entryId);
+          await selectProfile(id);
+        }
+
+        // Пересборка идёт в главном процессе: он сам пришлёт profiles:changed
+        // с pending, а потом с готовым портретом.
+        async function analyzeProfile(id) {
+          const result = await api.analyzeProfile(id).catch((e) => ({ ok: false, error: e.message }));
+          if (result?.profile && result.profile.id === selectedId) {
+            renderCard(result.profile);
+          }
+        }
+
+        async function addProfile() {
+          const user = addNameEl.value.trim();
+          if (!user) return;
+          const saved = await api.ensureProfile({ platform: addPlatformEl.value, user, displayName: user });
+          addNameEl.value = '';
+          await loadList();
+          if (saved?.id) selectProfile(saved.id);
+        }
+
+        addButton?.addEventListener('click', addProfile);
+        addNameEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addProfile(); });
+
+        async function loadAiSettings() {
+          const s = await api.getProfilesAiSettings().catch(() => null);
+          if (!s) return;
+          aiModelEl.value = s.model || '';
+          aiBaseUrlEl.value = s.baseUrl || '';
+          aiStateEl.textContent = s.hasKey ? 'ключ сохранён' : 'ключ не задан';
+          if (s.hasKey) aiKeyEl.placeholder = '•••••••• (сохранён)';
+        }
+
+        aiSaveButton?.addEventListener('click', async () => {
+          const res = await api.saveProfilesAiSettings({
+            apiKey: aiKeyEl.value,
+            model: aiModelEl.value.trim(),
+            baseUrl: aiBaseUrlEl.value.trim(),
+          });
+          aiKeyEl.value = '';
+          aiStateEl.textContent = res?.hasKey ? 'ключ сохранён' : 'ключ не задан';
+          if (res?.hasKey) aiKeyEl.placeholder = '•••••••• (сохранён)';
+        });
+
+        function ensureLoaded() {
+          if (loaded) return;
+          loaded = true;
+          loadList();
+          loadAiSettings();
+        }
+        document.querySelector('.tab[data-tab="profiles"]')?.addEventListener('click', ensureLoaded);
+
+        // Портрет собирается в фоне — карточка и список обновляются сами.
+        api.onProfileChanged?.((profile) => {
+          if (!profile) return;
+          const known = items.find((p) => p.id === profile.id);
+          if (known) {
+            Object.assign(known, profile);
+            renderList();
+          } else {
+            loadList();
+          }
+          if (profile.id === selectedId) {
+            renderCard(profile);
+          }
+        });
+
+        // Правый клик по нику в чате открывает бэкофис сразу на этом профиле.
+        api.onProfileFocus?.(async (id) => {
+          if (!id) return;
+          switchTab('profiles');
+          ensureLoaded();
+          await loadList();
+          selectProfile(id);
+        });
+      })();
     </script>
   </body>
 </html>

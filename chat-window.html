@@ -585,6 +585,7 @@
       </section>
 
       <div id="contextMenu" class="context-menu" role="menu">
+        <button id="profileButton" type="button">Профиль</button>
         <button id="hideSenderButton" type="button">Скрыть отправителя</button>
         <button id="hideMessageButton" type="button">Скрыть сообщение</button>
         <button id="unpinDonationButton" type="button" hidden>Открепить</button>
@@ -607,6 +608,7 @@
       const youtubeViewersCounter = document.querySelector('#youtubeViewersCounter');
       const rutubeViewersCounter = document.querySelector('#rutubeViewersCounter');
       const contextMenu = document.querySelector('#contextMenu');
+      const profileButton = document.querySelector('#profileButton');
       const hideSenderButton = document.querySelector('#hideSenderButton');
       const hideMessageButton = document.querySelector('#hideMessageButton');
       const unpinDonationButton = document.querySelector('#unpinDonationButton');
@@ -1119,6 +1121,7 @@
 
       function openContextMenu(x, y, mode = 'message') {
         const isDonation = mode === 'donation';
+        profileButton.hidden = isDonation;
         hideSenderButton.hidden = isDonation;
         hideMessageButton.hidden = isDonation;
         unpinDonationButton.hidden = !isDonation || selectedDonation?.mode !== 'pinned';
@@ -1143,6 +1146,22 @@
         }
         closeContextMenu();
         applyFiltersToVisibleMessages();
+      }
+
+      async function openSelectedProfile() {
+        if (!selectedMessage) return;
+        closeContextMenu();
+        try {
+          // Заводим/находим профиль зрителя и открываем бэкофис прямо на его карточке.
+          // Портрет для нового профиля начинает собираться сам.
+          await window.tchat?.openProfile?.({
+            platform: selectedMessage.platform,
+            user: selectedMessage.user,
+            displayName: selectedMessage.user,
+          });
+        } catch {
+          window.tchat?.openBackoffice?.();
+        }
       }
 
       function hideSelectedMessage() {
@@ -1318,6 +1337,7 @@
       }
 
       settingsButton.addEventListener('click', () => window.tchat.openBackoffice());
+      profileButton.addEventListener('click', openSelectedProfile);
       hideSenderButton.addEventListener('click', hideSelectedSender);
       hideMessageButton.addEventListener('click', hideSelectedMessage);
       unpinDonationButton.addEventListener('click', unpinSelectedDonation);

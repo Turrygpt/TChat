@@ -23,6 +23,15 @@ const DEFAULT_INGEST_PORT = 1935;
 const DEFAULT_STREAM_KEY = 'tchat';
 const RESPAWN_DELAY = 1200;
 
+// Ретрансляция через свой сервер. Площадка с флагом viaRelay получает поток не
+// напрямую, а через VPS: мы публикуем на MediaMTX, а он уже отдаёт площадке.
+// Нужно, когда канал до площадки не тянет 1080p — до своего сервера поток идёт
+// по толстому каналу, а дальше площадку кормит сервер.
+//
+// Ключ площадки в этом режиме живёт на сервере (в его настройке пересылки),
+// поэтому из приложения он не уходит: сюда отправляется только путь.
+const DEFAULT_RELAY_URL = 'rtmps://195.62.49.244.sslip.io:2935/live';
+
 let configFile = '';
 let config = createDefaultConfig();
 let proc = null; // текущий ffmpeg-listen
@@ -78,7 +87,37 @@ function createDefaultConfig() {
     ingestPort: DEFAULT_INGEST_PORT,
     streamKey: DEFAULT_STREAM_KEY,
     destinations: [],
+    relay: createDefaultRelay(),
   };
+}
+
+function createDefaultRelay() {
+  return { url: DEFAULT_RELAY_URL, user: '', password: '' };
+}
+
+function normalizeRelay(raw = {}) {
+  return {
+    url: String(raw.url || '').trim() || DEFAULT_RELAY_URL,
+    user: String(raw.user || '').trim(),
+    password: String(raw.password || ''),
+  };
+}
+
+// Путь на своём сервере: латиница из названия площадки. Для Twitch получается
+// `twitch` — именно этот путь и настраивается на сервере на пересылку.
+function relayPathFor(dest) {
+  const explicit = String(dest.relayPath || '').trim().replace(/^\/+|\/+$/g, '');
+  if (explicit) {
+    return explicit;
+  }
+  if (/twitch\.tv/i.test(dest.url || '')) {
+    return 'twitch';
+  }
+  const slug = String(dest.name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || String(dest.id || 'dest');
 }
 
 function normalizeDestinations(list) {
@@ -89,6 +128,9 @@ function normalizeDestinations(list) {
       url: String(d.url || '').trim(),
       key: String(d.key || '').trim(),
       enabled: d.enabled !== false,
+      // Отдавать эту площадку через свой сервер, а не напрямую.
+      viaRelay: Boolean(d.viaRelay),
+      relayPath: String(d.relayPath || '').trim(),
     }))
     .filter((d) => d.url);
 }
@@ -105,6 +147,7 @@ function load(storageDir) {
       ingestPort: Number(raw.ingestPort) || DEFAULT_INGEST_PORT,
       streamKey: String(raw.streamKey || '').trim() || DEFAULT_STREAM_KEY,
       destinations: normalizeDestinations(raw.destinations),
+      relay: normalizeRelay(raw.relay),
     };
   } catch (error) {
     console.error(`[restream] не удалось прочитать конфиг: ${error.message}`);
@@ -131,7 +174,20 @@ function enabledDestinations() {
   return config.destinations.filter((d) => d.enabled && d.url);
 }
 
+// Куда реально уходит поток этой площадки: напрямую на её RTMP или, если включена
+// ретрансляция, на свой сервер — логин и пароль публикации подставляем в адрес.
 function targetUrl(dest) {
+  if (dest.viaRelay) {
+    const relay = config.relay || createDefaultRelay();
+    const base = String(relay.url || DEFAULT_RELAY_URL).replace(/\/+$/, '');
+    const withAuth = relay.user
+      ? base.replace(
+          /^(rtmps?:\/\/)/i,
+          `$1${encodeURIComponent(relay.user)}:${encodeURIComponent(relay.password || '')}@`,
+        )
+      : base;
+    return `${withAuth}/${relayPathFor(dest)}`;
+  }
   const base = dest.url.replace(/\/+$/, '');
   return dest.key ? `${base}/${dest.key}` : base;
 }
@@ -145,6 +201,12 @@ function getState() {
     ingestPort: config.ingestPort,
     ingestUrl: ingestBase(),
     streamKey: config.streamKey,
+    // Пароль наружу не отдаём — интерфейсу хватает признака, что он задан.
+    relay: {
+      url: (config.relay || createDefaultRelay()).url,
+      user: (config.relay || createDefaultRelay()).user,
+      hasPassword: Boolean((config.relay || createDefaultRelay()).password),
+    },
     bitrateKbps: live ? bitrateKbps : 0,
     stats: {
       uptimeSec: live ? uptimeSec : 0,
@@ -176,6 +238,8 @@ function getState() {
         url: d.url,
         key: d.key,
         enabled: d.enabled,
+        viaRelay: d.viaRelay,
+        relayPath: relayPathFor(d),
         status,
         // Поток на площадки идёт один и тот же (-c copy), поэтому битрейт у всех
         // живых одинаковый; отличаются статус, ошибка и момент обрыва.
@@ -281,7 +345,9 @@ function spawnDestination(dest) {
 
   const stat = ensureDestStat(dest.id);
   const child = spawn(ffmpegPath, buildDestinationArgs(dest), { windowsHide: true });
-  const entry = { child, pending: 0, retryTimer: null, lastError: '', startedAt: Date.now() };
+  // target запоминаем, чтобы заметить смену адреса (например, включили
+  // ретрансляцию через свой сервер) и перезапустить только эту площадку.
+  const entry = { child, pending: 0, retryTimer: null, lastError: '', startedAt: Date.now(), target: targetUrl(dest) };
   destProcs.set(dest.id, entry);
 
   stat.status = live ? 'live' : 'idle';
@@ -394,6 +460,12 @@ function syncDestinations() {
 
   for (const dest of wanted) {
     ensureDestStat(dest.id);
+    const entry = destProcs.get(dest.id);
+    if (entry && entry.target && entry.target !== targetUrl(dest)) {
+      // Адрес площадки сменился на ходу — поднимаем её заново по новому адресу.
+      // Соседей и сам приём это не трогает.
+      killDestination(dest.id);
+    }
     if (!destProcs.has(dest.id)) {
       spawnDestination(dest);
     }
@@ -682,6 +754,14 @@ function saveConfig(next = {}) {
   }
   if (next.destinations !== undefined) {
     config.destinations = normalizeDestinations(next.destinations);
+  }
+  if (next.relay !== undefined) {
+    const prevRelay = config.relay || createDefaultRelay();
+    config.relay = normalizeRelay({
+      ...next.relay,
+      // Пустой пароль в патче не затирает сохранённый: интерфейс его не пересылает.
+      password: next.relay?.password ? next.relay.password : prevRelay.password,
+    });
   }
   save();
 
