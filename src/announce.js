@@ -29,13 +29,20 @@ const DEFAULT_TWITCH_URL = '';
 const DEFAULT_MAX_CHANNEL_URL = '';
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
 const DEFAULT_OLLAMA_MODEL = 'qwen2.5:14b';
+// Модель polza.ai по умолчанию — DeepSeek V3 (в каталоге polza это
+// `deepseek/deepseek-chat`, 163k контекста). Раньше здесь стоял Claude Opus:
+// для анонса и разбора чата он избыточно дорог.
+const DEFAULT_POLZA_MODEL = 'deepseek/deepseek-chat';
+// Значение прежнего умолчания: у кого оно уже сохранено — переводим на DeepSeek,
+// иначе смена умолчания не дошла бы до тех, кто модель руками не трогал.
+const LEGACY_POLZA_MODEL = 'anthropic/claude-opus-4.8';
 
 function createDefaultSettings() {
   return {
     telegram: { token: '', chatId: '' },
     max: { token: '', chatId: '', channelUrl: DEFAULT_MAX_CHANNEL_URL },
     anthropic: { apiKey: '' },
-    polza: { apiKey: '', model: 'anthropic/claude-opus-4.8' },
+    polza: { apiKey: '', model: DEFAULT_POLZA_MODEL },
     ollama: { baseUrl: DEFAULT_OLLAMA_BASE_URL, model: DEFAULT_OLLAMA_MODEL },
     channelUrl: DEFAULT_CHANNEL_URL,
     twitchUrl: DEFAULT_TWITCH_URL,
@@ -63,7 +70,15 @@ function normalizeSettings(raw) {
     },
     polza: {
       apiKey: String(raw.polza?.apiKey || '').trim(),
-      model: String(raw.polza?.model || '').trim() || base.polza.model,
+      // Сохранённый Opus из прежнего умолчания заменяем на DeepSeek V3. Модель,
+      // выбранную вручную, не трогаем — совпадение именно с прежним умолчанием.
+      model: (() => {
+        const stored = String(raw.polza?.model || '').trim();
+        if (!stored || stored === LEGACY_POLZA_MODEL) {
+          return base.polza.model;
+        }
+        return stored;
+      })(),
     },
     ollama: {
       baseUrl: String(raw.ollama?.baseUrl || '').trim() || base.ollama.baseUrl,
@@ -272,12 +287,12 @@ function buildPostPrompt(game, title) {
   );
 }
 
-// polza.ai — OpenAI-совместимый агрегатор моделей (в т.ч. anthropic/claude-*).
+// polza.ai — OpenAI-совместимый агрегатор моделей (DeepSeek, Qwen, GPT и др.).
 async function generateWithPolza({ game, title, apiKey, model }) {
   const data = await postJson('https://polza.ai/api/v1/chat/completions', {
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: model || 'anthropic/claude-opus-4.8',
+      model: model || DEFAULT_POLZA_MODEL,
       max_tokens: 400,
       messages: [{ role: 'user', content: buildPostPrompt(game, title) }],
     }),
