@@ -12,8 +12,8 @@
       :root {
         color-scheme: dark;
         font-family: "Segoe UI", Arial, sans-serif;
-        background: #0d1117;
-        color: #eef2f5;
+        background: var(--surface);
+        color: var(--text);
       }
 
       * {
@@ -26,7 +26,7 @@
         overflow: auto;
         background:
           linear-gradient(180deg, rgb(18 28 42 / 78%), transparent 340px),
-          #0d1117;
+          var(--surface);
       }
 
       button,
@@ -53,9 +53,9 @@
 
       .topbar {
         justify-content: space-between;
-        border: 1px solid #27313a;
-        border-radius: 8px;
-        background: linear-gradient(135deg, #141c27, #101418);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: linear-gradient(135deg, var(--surface-2), var(--surface));
         padding: 16px;
       }
 
@@ -66,39 +66,39 @@
       }
 
       h1 {
-        font-size: 26px;
+        font-size: var(--fs-2xl);
       }
 
       h2 {
         margin-bottom: 12px;
-        font-size: 18px;
+        font-size: var(--fs-lg);
       }
 
       .muted {
-        color: #9faab5;
+        color: var(--muted);
       }
 
       .tabs {
         gap: 6px;
-        border-bottom: 1px solid #27313a;
+        border-bottom: 1px solid var(--border);
       }
 
       .tab {
         min-height: 42px;
         border: 1px solid transparent;
         border-bottom: 3px solid transparent;
-        border-radius: 8px 8px 0 0;
-        background: #111820;
-        color: #cbd5df;
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+        background: var(--surface);
+        color: var(--text-2);
         font-weight: 800;
         padding: 0 14px;
         cursor: pointer;
       }
 
       .tab.is-active {
-        border-color: #27313a #27313a #28c76f;
-        background: #18222c;
-        color: #ffffff;
+        border-color: var(--border) var(--border) var(--green);
+        background: var(--surface-2);
+        color: var(--text);
       }
 
       .section {
@@ -117,9 +117,9 @@
       }
 
       .panel {
-        border: 1px solid #27313a;
-        border-radius: 8px;
-        background: linear-gradient(180deg, #18202a, #141a21);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: linear-gradient(180deg, var(--surface-2), var(--surface));
         box-shadow: 0 16px 42px rgb(0 0 0 / 18%);
         padding: 16px;
       }
@@ -132,7 +132,7 @@
         display: grid;
         gap: 7px;
         margin-bottom: 12px;
-        color: #cbd5df;
+        color: var(--text-2);
       }
 
       .field input,
@@ -140,10 +140,10 @@
       .rule-grid input,
       .rule-grid select {
         min-height: 40px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
-        color: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
         padding: 0 12px;
       }
 
@@ -158,18 +158,18 @@
       .button {
         min-height: 40px;
         border: 0;
-        border-radius: 8px;
-        background: linear-gradient(135deg, #28c76f, #6ee7d8);
-        color: #06120b;
+        border-radius: var(--radius-sm);
+        background: linear-gradient(135deg, var(--green), var(--cyan));
+        color: var(--bg);
         font-weight: 800;
         padding: 0 14px;
         cursor: pointer;
       }
 
       .button--ghost {
-        border: 1px solid #303943;
-        background: #202a34;
-        color: #eef2f5;
+        border: 1px solid var(--border);
+        background: var(--surface-3);
+        color: var(--text);
       }
 
       .button--danger {
@@ -185,16 +185,16 @@
 
       .stat,
       .widget-link {
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 12px;
       }
 
       .stat strong {
         display: block;
         margin-top: 4px;
-        font-size: 24px;
+        font-size: var(--fs-2xl);
       }
 
       .list {
@@ -208,9 +208,9 @@
       }
 
       .list li {
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 10px;
         overflow-wrap: anywhere;
       }
@@ -222,7 +222,7 @@
       }
 
       .donation-list li.is-new {
-        border-color: #28c76f;
+        border-color: var(--green);
         background: #14281e;
       }
 
@@ -233,19 +233,19 @@
 
       .donation-user,
       .queue-title {
-        color: #ffffff;
+        color: var(--text);
         font-weight: 700;
       }
 
       .donation-amount {
-        color: #28c76f;
+        color: var(--green);
         font-weight: 800;
         white-space: nowrap;
       }
 
       .donation-message,
       .queue-message {
-        color: #cbd5df;
+        color: var(--text-2);
       }
 
       .badge-new,
@@ -253,20 +253,20 @@
         display: inline-flex;
         align-items: center;
         min-height: 22px;
-        border-radius: 4px;
-        font-size: 12px;
+        border-radius: var(--radius-xs);
+        font-size: var(--fs-sm);
         font-weight: 800;
         padding: 0 7px;
       }
 
       .badge-new {
-        background: #28c76f;
-        color: #06120b;
+        background: var(--green);
+        color: var(--bg);
       }
 
       .badge-played {
-        background: #303943;
-        color: #cbd5df;
+        background: var(--border);
+        color: var(--text-2);
       }
 
       .rule-list {
@@ -277,9 +277,9 @@
       }
 
       .rule-card {
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 12px;
         box-shadow: 0 10px 22px rgb(0 0 0 / 18%);
       }
@@ -298,8 +298,8 @@
       .rule-grid label {
         display: grid;
         gap: 5px;
-        color: #9faab5;
-        font-size: 13px;
+        color: var(--muted);
+        font-size: var(--fs-md);
       }
 
       .rule-card input,
@@ -338,11 +338,11 @@
 
       .mini-button {
         min-height: 32px;
-        border: 1px solid #303943;
-        border-radius: 6px;
-        background: #20272e;
-        color: #eef2f5;
-        font-size: 13px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xs);
+        background: var(--surface-2);
+        color: var(--text);
+        font-size: var(--fs-md);
         font-weight: 700;
         padding: 0 9px;
         cursor: pointer;
@@ -351,9 +351,9 @@
       .rule-preview {
         width: 100%;
         max-height: 120px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #0d1115;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         object-fit: contain;
         padding: 4px;
       }
@@ -399,8 +399,8 @@
         display: grid;
         gap: 12px;
         border: 1px solid rgb(110 231 216 / 35%);
-        border-radius: 8px;
-        background: linear-gradient(135deg, #121c2a, #111418 58%, #182016);
+        border-radius: var(--radius-sm);
+        background: linear-gradient(135deg, var(--surface-2), var(--surface) 58%, #182016);
         padding: 16px;
       }
 
@@ -414,9 +414,9 @@
 
       .copy-row code {
         min-height: 40px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #0d1115;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         color: #b8f8d3;
         padding: 10px 12px;
         overflow-wrap: anywhere;
@@ -429,17 +429,17 @@
       }
 
       .widget-type-card {
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101820;
-        color: #eef2f5;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
         padding: 12px;
         text-align: left;
         cursor: pointer;
       }
 
       .widget-type-card.is-active {
-        border-color: #28c76f;
+        border-color: var(--green);
         background: #14281e;
       }
 
@@ -450,8 +450,8 @@
 
       .widget-type-card span {
         margin-top: 4px;
-        color: #9faab5;
-        font-size: 13px;
+        color: var(--muted);
+        font-size: var(--fs-md);
       }
 
       .widget-card-list {
@@ -462,9 +462,9 @@
       .stream-widget-card {
         display: grid;
         gap: 10px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 12px;
       }
 
@@ -477,10 +477,10 @@
       }
 
       .pill {
-        border-radius: 999px;
-        background: #20272e;
+        border-radius: var(--radius-pill);
+        background: var(--surface-2);
         color: #b8f8d3;
-        font-size: 12px;
+        font-size: var(--fs-sm);
         font-weight: 800;
         padding: 4px 8px;
         white-space: nowrap;
@@ -494,9 +494,9 @@
       .poll-live {
         display: grid;
         gap: 8px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #0d1115;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 12px;
       }
 
@@ -515,9 +515,9 @@
 
       .workspace-topbar,
       .workspace-zone {
-        border: 1px solid #27313a;
-        border-radius: 8px;
-        background: linear-gradient(180deg, #18202a, #121820);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: linear-gradient(180deg, var(--surface-2), var(--surface));
         box-shadow: 0 16px 42px rgb(0 0 0 / 20%);
       }
 
@@ -532,7 +532,7 @@
 
       .workspace-topbar strong,
       .zone-title span:first-child {
-        color: #ffffff;
+        color: var(--text);
         font-weight: 900;
       }
 
@@ -542,8 +542,8 @@
       }
 
       .workspace-topbar span {
-        color: #9faab5;
-        font-size: 13px;
+        color: var(--muted);
+        font-size: var(--fs-md);
       }
 
       .preset-row {
@@ -604,16 +604,16 @@
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 10px;
         align-items: center;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101820;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 12px;
         cursor: pointer;
       }
 
       .control-card.is-selected {
-        border-color: #6ee7d8;
-        background: #14232a;
+        border-color: var(--cyan);
+        background: var(--surface-2);
       }
 
       .control-card__meta {
@@ -630,17 +630,17 @@
       }
 
       .control-card__meta span {
-        color: #9faab5;
-        font-size: 13px;
+        color: var(--muted);
+        font-size: var(--fs-md);
       }
 
       .toggle-switch {
         position: relative;
         width: 54px;
         height: 30px;
-        border: 1px solid #303943;
-        border-radius: 999px;
-        background: #28313a;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-pill);
+        background: var(--surface-3);
         cursor: pointer;
       }
 
@@ -652,17 +652,17 @@
         width: 20px;
         height: 20px;
         border-radius: 50%;
-        background: #cbd5df;
+        background: var(--text-2);
         transition: transform 180ms ease, background 180ms ease;
       }
 
       .toggle-switch.is-on {
-        background: linear-gradient(135deg, #28c76f, #6ee7d8);
+        background: linear-gradient(135deg, var(--green), var(--cyan));
       }
 
       .toggle-switch.is-on::after {
         transform: translateX(24px);
-        background: #06120b;
+        background: var(--bg);
       }
 
       .stream-preview {
@@ -673,11 +673,11 @@
         aspect-ratio: 16 / 9;
         height: auto;
         align-self: center;
-        border: 1px solid #303943;
-        border-radius: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
         background:
           linear-gradient(180deg, rgb(11 16 22 / 82%), rgb(5 8 12 / 92%)),
-          #080c10;
+          var(--bg);
       }
 
       .preview-grid {
@@ -839,9 +839,9 @@
         bottom: -7px;
         width: 16px;
         height: 16px;
-        border: 2px solid #06120b;
+        border: 2px solid var(--bg);
         border-radius: 50%;
-        background: linear-gradient(135deg, #6ee7d8, #28c76f);
+        background: linear-gradient(135deg, var(--cyan), var(--green));
         box-shadow: 0 4px 14px rgb(0 0 0 / 45%);
         cursor: nwse-resize;
         /* Компенсируем масштаб сцены, чтобы ручка оставалась одного размера на экране. */
@@ -861,12 +861,12 @@
       }
 
       .workspace-countdown-status {
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 10px 12px;
-        color: #cbd5df;
-        font-size: 14px;
+        color: var(--text-2);
+        font-size: var(--fs-base);
       }
 
       .countdown-mode-row {
@@ -893,19 +893,19 @@
         display: grid;
         gap: 2px;
         width: 100%;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101820;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 10px 12px;
-        color: #cbd5df;
+        color: var(--text-2);
         font: inherit;
         text-align: left;
         cursor: pointer;
       }
 
       .workspace-text-item:hover {
-        border-color: #4a5561;
-        background: #141c24;
+        border-color: var(--border-strong);
+        background: var(--surface);
       }
 
       .workspace-text-item.is-active {
@@ -922,8 +922,8 @@
 
       .workspace-tasks-intro {
         margin: 0 0 4px;
-        color: #9faab5;
-        font-size: 13px;
+        color: var(--muted);
+        font-size: var(--fs-md);
       }
 
       .workspace-tasks-count-row {
@@ -956,42 +956,42 @@
       .workspace-skin-card {
         display: grid;
         gap: 4px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101820;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 10px 12px;
         transition: border-color 160ms ease, background 160ms ease;
       }
 
       .workspace-skin-option input:checked + .workspace-skin-card {
-        border-color: #28c76f;
+        border-color: var(--green);
         background: #14281e;
       }
 
       .workspace-skin-name {
-        color: #ffffff;
-        font-size: 13px;
+        color: var(--text);
+        font-size: var(--fs-md);
         font-weight: 800;
       }
 
       .workspace-skin-description {
-        color: #9faab5;
-        font-size: 12px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
       }
 
       .workspace-tasks-section {
         display: grid;
         gap: 10px;
         border: 1px solid rgb(110 231 216 / 28%);
-        border-radius: 8px;
-        background: #101820;
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 12px;
       }
 
       .workspace-tasks-heading {
         margin: 0;
-        color: #ffffff;
-        font-size: 15px;
+        color: var(--text);
+        font-size: var(--fs-lg);
         font-weight: 800;
       }
 
@@ -1006,9 +1006,9 @@
       .workspace-task-card {
         display: grid;
         gap: 8px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #0d1115;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 10px 12px;
       }
 
@@ -1022,10 +1022,10 @@
       .workspace-task-input {
         width: 100%;
         min-height: 40px;
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
-        color: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
         padding: 0 12px;
         font: inherit;
       }
@@ -1039,8 +1039,8 @@
 
       .workspace-task-row__num {
         width: 24px;
-        color: #9faab5;
-        font-size: 13px;
+        color: var(--muted);
+        font-size: var(--fs-md);
         font-weight: 800;
         text-align: center;
       }
@@ -1049,8 +1049,8 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        color: #cbd5df;
-        font-size: 12px;
+        color: var(--text-2);
+        font-size: var(--fs-sm);
         white-space: nowrap;
       }
 
@@ -1075,12 +1075,12 @@
       }
 
       .workspace-poll-status {
-        border: 1px solid #303943;
-        border-radius: 8px;
-        background: #101418;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
         padding: 10px 12px;
-        color: #cbd5df;
-        font-size: 14px;
+        color: var(--text-2);
+        font-size: var(--fs-base);
       }
 
       .workspace-form {
@@ -1106,9 +1106,9 @@
         display: grid;
         place-items: center;
         min-height: 180px;
-        border: 1px dashed #303943;
-        border-radius: 8px;
-        color: #9faab5;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--muted);
         text-align: center;
         padding: 18px;
       }
@@ -1144,27 +1144,97 @@
       }
     </style>
     <style>
-      /* ===== TChat modern theme (redesign layer) ===== */
+      /* ===== TChat modern theme (redesign layer) =====
+         Единственный источник правды по цветам, размерам и радиусам. Всё, что
+         ниже и в первом листе стилей, ссылается сюда: раньше по файлу были
+         раскиданы 65 hex-литералов и 34 rgba() в трёх поколениях стилей, из-за
+         чего одинаковые по смыслу поверхности выглядели по-разному. */
       :root {
-        --bg: #0b0e14;
-        --bg-soft: #0f131b;
-        --panel: #141926;
-        --panel-2: #171d2c;
-        --border: #232b3d;
-        --border-soft: #1c2333;
-        --text: #e8ecf4;
-        --muted: #8b94a7;
+        /* Фон и поверхности: глубже прежнего, с явными ступенями подъёма —
+           панель, приподнятый блок, наведение. */
+        --bg: #070910;
+        --bg-soft: #0b0f19;
+        --surface: #111726;
+        --surface-2: #161d2f;
+        --surface-3: #1d2539;
+        /* Совместимость: старые правила ещё зовут --panel/--panel-2. */
+        --panel: var(--surface);
+        --panel-2: var(--surface-2);
+
+        /* Границы: заметнее, чем были, — на глубоком фоне слабые пропадали. */
+        --border: #283248;
+        --border-soft: #1b2233;
+        --border-strong: #3a4665;
+
+        /* Текст: три уровня вместо двух — заголовок, основной, подпись. */
+        --text: #f3f6fc;
+        --text-2: #c6cddc;
+        --muted: #939cb0;
+
         --accent: #8b5cf6;
         --accent-2: #6366f1;
-        --accent-soft: rgb(139 92 246 / 14%);
+        --accent-soft: rgb(139 92 246 / 16%);
+        --accent-line: rgb(139 92 246 / 45%);
         --cyan: #22d3ee;
-        --green: #34d399;
+        --green: #3ddc97;
+        --warn: #fbbf24;
         --danger: #fb7185;
-        --radius: 14px;
+
+        /* Шкала кеглей: шесть ступеней вместо четырнадцати случайных. */
+        --fs-xs: 11px;
+        --fs-sm: 12px;
+        --fs-md: 13px;
+        --fs-base: 14px;
+        --fs-lg: 17px;
+        --fs-xl: 22px;
+        --fs-2xl: 26px;
+
+        /* Ритм 8px: все отступы кратны шагу. */
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-5: 24px;
+        --sp-6: 32px;
+
+        /* Радиусы: четыре ступени вместо двенадцати. */
+        --radius-xs: 6px;
         --radius-sm: 10px;
-        --shadow: 0 18px 48px rgb(0 0 0 / 35%);
+        --radius: 14px;
+        --radius-pill: 999px;
+
+        --shadow: 0 18px 48px rgb(0 0 0 / 45%);
+        --shadow-sm: 0 6px 18px rgb(0 0 0 / 28%);
+        --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+        --transition: 140ms ease;
+
         background: var(--bg);
         color: var(--text);
+      }
+
+      /* Клавиатурная навигация была почти невидимой: 4 правила :focus-visible
+         на 172 кнопки и 241 поле. Одно общее кольцо на всё интерактивное. */
+      a:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible,
+      summary:focus-visible,
+      [tabindex]:focus-visible {
+        outline: none;
+        box-shadow: var(--ring);
+        border-radius: var(--radius-xs);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
       }
 
       body {
@@ -1185,12 +1255,12 @@
 
       *::-webkit-scrollbar-thumb {
         border: 3px solid transparent;
-        border-radius: 999px;
-        background: #2a3348 content-box;
+        border-radius: var(--radius-pill);
+        background: var(--border) content-box;
       }
 
       *::-webkit-scrollbar-thumb:hover {
-        background: #38425c content-box;
+        background: var(--border-strong) content-box;
       }
 
       *::-webkit-scrollbar-track {
@@ -1212,7 +1282,7 @@
         gap: 18px;
         height: 100vh;
         border-right: 1px solid var(--border-soft);
-        background: linear-gradient(180deg, #10141e, #0c0f17);
+        background: linear-gradient(180deg, var(--surface), var(--bg-soft));
         padding: 18px 14px;
       }
 
@@ -1228,11 +1298,11 @@
         place-items: center;
         width: 40px;
         height: 40px;
-        border-radius: 12px;
+        border-radius: var(--radius);
         background: linear-gradient(135deg, var(--accent), var(--accent-2) 60%, var(--cyan));
-        color: #fff;
+        color: var(--text);
         font-family: "Exo 2", "Segoe UI", sans-serif;
-        font-size: 22px;
+        font-size: var(--fs-xl);
         font-weight: 900;
         box-shadow: 0 6px 18px rgb(139 92 246 / 35%);
       }
@@ -1245,14 +1315,14 @@
 
       .brand__meta strong {
         font-family: "Exo 2", "Segoe UI", sans-serif;
-        font-size: 19px;
+        font-size: var(--fs-xl);
         font-weight: 800;
         letter-spacing: 0.3px;
       }
 
       .brand__meta span {
         color: var(--muted);
-        font-size: 12px;
+        font-size: var(--fs-sm);
       }
 
       .tabs {
@@ -1270,7 +1340,7 @@
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--muted);
-        font-size: 14.5px;
+        font-size: var(--fs-base);
         font-weight: 600;
         padding: 0 12px;
         text-align: left;
@@ -1292,7 +1362,7 @@
       .tab.is-active {
         border-color: rgb(139 92 246 / 35%);
         background: var(--accent-soft);
-        color: #fff;
+        color: var(--text);
         box-shadow: inset 3px 0 0 var(--accent);
       }
 
@@ -1324,14 +1394,14 @@
 
       h1 {
         font-family: "Exo 2", "Segoe UI", sans-serif;
-        font-size: 24px;
+        font-size: var(--fs-2xl);
         font-weight: 800;
         letter-spacing: 0.2px;
       }
 
       h2 {
         font-family: "Exo 2", "Segoe UI", sans-serif;
-        font-size: 16.5px;
+        font-size: var(--fs-lg);
         font-weight: 700;
       }
 
@@ -1369,7 +1439,7 @@
       }
 
       .control-card:hover {
-        border-color: #32405e;
+        border-color: var(--border-strong);
         transform: translateY(-1px);
       }
 
@@ -1386,7 +1456,7 @@
         gap: 8px;
         border-radius: var(--radius-sm);
         background: linear-gradient(135deg, var(--accent), var(--accent-2));
-        color: #fff;
+        color: var(--text);
         font-weight: 700;
         box-shadow: 0 6px 16px rgb(99 102 241 / 30%);
         transition: filter 140ms ease, transform 140ms ease, box-shadow 140ms ease;
@@ -1414,19 +1484,19 @@
       }
 
       .button--ghost:hover {
-        border-color: #33405f;
+        border-color: var(--border-strong);
         background: rgb(255 255 255 / 6%);
         filter: none;
       }
 
       .button--danger {
-        background: linear-gradient(135deg, #f43f5e, #fb7185);
-        color: #fff;
+        background: linear-gradient(135deg, var(--danger), #fb7185);
+        color: var(--text);
         box-shadow: 0 6px 16px rgb(244 63 94 / 25%);
       }
 
       .mini-button {
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         transition: filter 140ms ease;
       }
 
@@ -1440,7 +1510,7 @@
       .rule-grid select {
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
-        background: #0d1119;
+        background: var(--surface);
         transition: border-color 140ms ease, box-shadow 140ms ease;
       }
 
@@ -1500,24 +1570,24 @@
         max-height: 90vh;
         overflow: auto;
         border: 1px solid var(--border);
-        border-radius: 18px;
-        background: linear-gradient(180deg, var(--panel-2), #10141f);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, var(--panel-2), var(--surface));
         box-shadow: 0 40px 120px rgb(0 0 0 / 60%);
         padding: 24px;
       }
 
       .update-modal__dialog h2 {
         margin: 10px 0 6px;
-        font-size: 22px;
+        font-size: var(--fs-xl);
       }
 
       .update-modal__badge {
         display: inline-block;
         padding: 4px 10px;
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
         background: rgb(137 87 229 / 22%);
         color: #c4b5fd;
-        font-size: 12px;
+        font-size: var(--fs-sm);
         font-weight: 700;
         letter-spacing: 0.03em;
         text-transform: uppercase;
@@ -1537,17 +1607,17 @@
       .update-modal__warning {
         margin: 14px 0 0;
         padding: 10px 12px;
-        border-radius: 10px;
+        border-radius: var(--radius-sm);
         border: 1px solid rgb(251 191 36 / 35%);
         background: rgb(251 191 36 / 12%);
         color: #fcd34d;
-        font-size: 13px;
+        font-size: var(--fs-md);
       }
 
       .update-modal__error {
         margin: 12px 0 0;
-        color: #f87171;
-        font-size: 13px;
+        color: var(--danger);
+        font-size: var(--fs-md);
       }
 
       .update-clean {
@@ -1565,9 +1635,9 @@
         align-items: start;
         padding: 10px 12px;
         border: 1px solid var(--border);
-        border-radius: 10px;
+        border-radius: var(--radius-sm);
         cursor: pointer;
-        font-size: 13px;
+        font-size: var(--fs-md);
       }
 
       .update-clean__option:has(input:checked) {
@@ -1582,22 +1652,22 @@
       .setup-da {
         margin-top: 16px;
         border: 1px solid var(--border);
-        border-radius: 10px;
+        border-radius: var(--radius-sm);
         padding: 12px 14px;
       }
 
       .setup-da > summary {
         cursor: pointer;
         font-weight: 700;
-        font-size: 14px;
+        font-size: var(--fs-base);
       }
 
       .setup-da__steps {
         margin: 0;
         padding-left: 20px;
-        font-size: 13px;
+        font-size: var(--fs-md);
         line-height: 1.6;
-        color: #c8d0dc;
+        color: var(--text-2);
       }
 
       .setup-da__steps li + li {
@@ -1607,9 +1677,9 @@
       .setup-da code {
         display: inline-block;
         padding: 4px 8px;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         background: rgb(255 255 255 / 6%);
-        font-size: 12px;
+        font-size: var(--fs-sm);
         word-break: break-all;
       }
 
@@ -1619,7 +1689,7 @@
 
       .update-progress__bar {
         height: 8px;
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
         background: rgb(255 255 255 / 8%);
         overflow: hidden;
       }
@@ -1628,14 +1698,14 @@
         display: block;
         height: 100%;
         width: 0%;
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
         background: linear-gradient(90deg, #8957e5, #22d3ee);
         transition: width 200ms ease;
       }
 
       .update-progress p {
         margin: 6px 0 0;
-        font-size: 12px;
+        font-size: var(--fs-sm);
       }
 
       .update-notes {
@@ -1658,15 +1728,15 @@
 
       .update-notes__version {
         font-weight: 700;
-        font-size: 15px;
+        font-size: var(--fs-lg);
       }
 
       .update-notes__list {
         margin: 8px 0 0;
         padding-left: 18px;
-        font-size: 13px;
+        font-size: var(--fs-md);
         line-height: 1.55;
-        color: #c8d0dc;
+        color: var(--text-2);
       }
 
       .update-notes__list li + li {
@@ -1701,8 +1771,8 @@
         width: min(1240px, 96vw);
         max-height: 94vh;
         border: 1px solid var(--border);
-        border-radius: 18px;
-        background: linear-gradient(180deg, var(--panel-2), #10141f);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, var(--panel-2), var(--surface));
         box-shadow: 0 40px 120px rgb(0 0 0 / 60%);
         padding: 18px;
         animation: preview-modal-in 180ms ease;
@@ -1734,12 +1804,12 @@
 
       .preview-modal__head strong {
         font-family: "Exo 2", "Segoe UI", sans-serif;
-        font-size: 17px;
+        font-size: var(--fs-lg);
         font-weight: 800;
       }
 
       .preview-modal__head .muted {
-        font-size: 13px;
+        font-size: var(--fs-md);
       }
 
       .preview-modal .stream-preview {
@@ -1747,11 +1817,462 @@
         max-height: calc(94vh - 110px);
         margin: 0 auto;
         border-color: var(--border);
-        border-radius: 12px;
+        border-radius: var(--radius);
       }
 
       body.is-modal-open {
         overflow: hidden;
+      }
+
+      /* ---- Компоненты ----
+         Раньше каждая новая панель рисовала список, чип и плитку своими
+         inline-стилями (93 штуки по файлу), а чекбоксы и селекты оставались
+         системными — светлыми пятнами на тёмной панели. Здесь общий набор. */
+
+      /* Поля ввода: одинаковые везде, а не только внутри .field/.rule-grid. */
+      input:not([type='checkbox']):not([type='radio']):not([type='range']),
+      select,
+      textarea {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+        font-size: var(--fs-base);
+        padding: 9px 11px;
+        transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+      }
+
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--muted);
+        opacity: 1;
+      }
+
+      input:not([type='checkbox']):not([type='radio']):hover,
+      select:hover,
+      textarea:hover {
+        border-color: var(--border-strong);
+      }
+
+      input:not([type='checkbox']):not([type='radio']):focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      input:disabled,
+      select:disabled,
+      textarea:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      /* Селект: убираем системный вид и рисуем свою стрелку. */
+      select {
+        appearance: none;
+        padding-right: 30px;
+        background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23939cb0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5l5-5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-size: 11px;
+      }
+
+      select option {
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      /* Чекбокс и радио: своя отрисовка вместо системной. */
+      input[type='checkbox'],
+      input[type='radio'] {
+        appearance: none;
+        flex: none;
+        width: 17px;
+        height: 17px;
+        margin: 0;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-xs);
+        background: var(--surface);
+        cursor: pointer;
+        transition: border-color var(--transition), background var(--transition);
+      }
+
+      input[type='radio'] {
+        border-radius: 50%;
+      }
+
+      input[type='checkbox']:hover:not(:disabled),
+      input[type='radio']:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+
+      input[type='checkbox']:checked,
+      input[type='radio']:checked {
+        border-color: var(--accent);
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      }
+
+      input[type='checkbox']:checked::after {
+        content: '';
+        display: block;
+        width: 4px;
+        height: 8px;
+        margin: 2px auto 0;
+        border: solid var(--text);
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+
+      input[type='radio']:checked::after {
+        content: '';
+        display: block;
+        width: 7px;
+        height: 7px;
+        margin: 4px auto;
+        border-radius: 50%;
+        background: var(--text);
+      }
+
+      input[type='checkbox']:disabled,
+      input[type='radio']:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* Подпись рядом с чекбоксом — кликается целиком. */
+      .check {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        font-size: var(--fs-sm);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .check--off {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      /* Строка списка: профили, площадки рестрима, входящие потоки. */
+      .list-row {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        width: 100%;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        color: inherit;
+        text-align: left;
+        transition: border-color var(--transition), background var(--transition);
+      }
+
+      button.list-row {
+        cursor: pointer;
+      }
+
+      button.list-row:hover {
+        border-color: var(--border-strong);
+        background: var(--surface-3);
+      }
+
+      .list-row.is-selected {
+        border-color: var(--accent-line);
+        background: var(--accent-soft);
+      }
+
+      .list-row__main {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .list-row__title {
+        font-weight: 700;
+      }
+
+      .list-row__sub {
+        display: block;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+
+      .list-stack {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      /* Чип: хобби, черты характера, метки. */
+      .chip {
+        display: inline-block;
+        margin: 0 var(--sp-1) var(--sp-1) 0;
+        padding: 2px 10px;
+        border: 1px solid var(--accent-line);
+        border-radius: var(--radius-pill);
+        background: var(--accent-soft);
+        font-size: var(--fs-sm);
+      }
+
+      /* Статусная метка: «в эфире», «обрыв», «выкл». */
+      .badge {
+        flex: none;
+        padding: 2px 9px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-pill);
+        background: var(--surface);
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        white-space: nowrap;
+      }
+
+      .badge--live {
+        border-color: rgb(61 220 151 / 45%);
+        background: rgb(61 220 151 / 12%);
+        color: var(--green);
+      }
+
+      .badge--danger {
+        border-color: rgb(251 113 133 / 45%);
+        background: rgb(251 113 133 / 12%);
+        color: var(--danger);
+      }
+
+      /* Плитка с числом: статистика профиля и эфира. */
+      .stat-tile {
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+      }
+
+      .stat-tile__label {
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+
+      .stat-tile__value {
+        font-weight: 700;
+      }
+
+      .tile-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: var(--sp-2);
+      }
+
+      /* Пустое состояние вместо голой серой строки. */
+      .empty-state {
+        display: grid;
+        place-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-6) var(--sp-4);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius);
+        color: var(--muted);
+        font-size: var(--fs-md);
+        text-align: center;
+      }
+
+      /* Длинные пояснения — сворачиваемый блок, а не стена текста над полями. */
+      .help {
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-sm);
+        background: var(--bg-soft);
+        padding: var(--sp-2) var(--sp-3);
+        font-size: var(--fs-md);
+        color: var(--muted);
+      }
+
+      .help > summary {
+        cursor: pointer;
+        color: var(--text-2);
+        font-size: var(--fs-sm);
+      }
+
+      .help > summary::marker {
+        color: var(--muted);
+      }
+
+      .help p:first-of-type {
+        margin-top: var(--sp-2);
+      }
+
+      /* Подзаголовок внутри панели — был inline-стилем в каждой панели. */
+      .panel__subhead {
+        margin: var(--sp-4) 0 var(--sp-2);
+        font-size: var(--fs-lg);
+      }
+
+      .help + .list-stack,
+      .list-stack + .help {
+        margin-top: var(--sp-2);
+      }
+
+      .help .grid {
+        margin: var(--sp-3) 0;
+      }
+
+      .help .button {
+        margin-top: var(--sp-2);
+      }
+
+      .grid--relay {
+        grid-template-columns: 2fr 1fr 1fr;
+        gap: var(--sp-2);
+        align-items: end;
+      }
+
+      .grid--dest-add {
+        grid-template-columns: 0.8fr 1.6fr 1fr auto;
+        gap: var(--sp-2);
+        align-items: end;
+        margin-top: var(--sp-2);
+      }
+
+      .version-link {
+        border: 0;
+        background: none;
+        padding: 0;
+        font-size: var(--fs-md);
+        font-weight: 400;
+        cursor: pointer;
+        text-decoration: underline dotted;
+        text-underline-offset: 3px;
+      }
+
+      .topbar__actions {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+      }
+
+      /* ---- Профили зрителей ---- */
+      .profiles-layout {
+        display: grid;
+        grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+        gap: var(--sp-4);
+        align-items: start;
+        margin-top: var(--sp-3);
+      }
+
+      .profiles-add {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: var(--sp-2);
+        margin-bottom: var(--sp-2);
+      }
+
+      .profiles-add + .button {
+        width: 100%;
+      }
+
+      .profiles-list {
+        margin-top: var(--sp-3);
+      }
+
+      .profile-card__name {
+        flex: 1;
+        min-width: 0;
+        font-size: var(--fs-xl);
+      }
+
+      .profile-card__id {
+        margin: var(--sp-1) 0 var(--sp-3);
+        color: var(--muted);
+        font-size: var(--fs-sm);
+      }
+
+      .profile-card__stats {
+        margin-bottom: var(--sp-4);
+      }
+
+      .profile-card__head {
+        margin-bottom: var(--sp-2);
+      }
+
+      .profile-card__status {
+        min-height: 18px;
+        margin-bottom: var(--sp-2);
+        font-size: var(--fs-sm);
+      }
+
+      .profile-card__portrait {
+        margin-bottom: var(--sp-4);
+      }
+
+      .profile-card__legend {
+        margin: var(--sp-1) 0 var(--sp-2);
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+
+      .profile-row {
+        margin-bottom: var(--sp-2);
+      }
+
+      .profile-row__label {
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+
+      .timeline__row {
+        display: flex;
+        align-items: baseline;
+        gap: var(--sp-2);
+        padding: var(--sp-1) 0;
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .timeline__date {
+        min-width: 84px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+      }
+
+      .timeline__icon {
+        white-space: nowrap;
+      }
+
+      .timeline__ai {
+        font-size: 10px;
+      }
+
+      .timeline__text {
+        flex: 1;
+      }
+
+      .timeline__add {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        margin-top: var(--sp-3);
+      }
+
+      .timeline__add #pe-entry-date {
+        width: 160px;
+      }
+
+      .timeline__add #pe-entry-type {
+        width: 140px;
+      }
+
+      .timeline__add #pe-entry-text {
+        flex: 1;
+        min-width: 160px;
+      }
+
+      /* Разделы: строка с заголовком и кнопкой справа. */
+      .row-between {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
       }
 
       /* ---- Responsive ---- */
@@ -1827,39 +2348,39 @@
         </div>
 
         <nav class="tabs" aria-label="Разделы бэкоффиса">
-          <button class="tab" type="button" data-tab="connections">
+          <button class="tab" type="button" data-tab="connections" aria-label="Подключения">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7 7 9a5 5 0 0 0 0 7l1 1a5 5 0 0 0 7 0l2-2"/><path d="m15 17 2-2a5 5 0 0 0 0-7l-1-1a5 5 0 0 0-7 0L7 9"/><path d="m18 6 3-3M3 21l3-3"/></svg>
             <span>Подключения</span>
           </button>
-          <button class="tab is-active" type="button" data-tab="widgets">
+          <button class="tab is-active" type="button" data-tab="widgets" aria-label="Виджеты">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
             <span>Виджеты</span>
           </button>
-          <button class="tab" type="button" data-tab="alerts">
+          <button class="tab" type="button" data-tab="alerts" aria-label="Алерты">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
             <span>Алерты</span>
           </button>
-          <button class="tab" type="button" data-tab="stickers">
+          <button class="tab" type="button" data-tab="stickers" aria-label="Стикеры">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 0-9 9c1 0 2-.2 2-.2L21 14s.2-1 .2-2Z"/><path d="M14 21v-5a2 2 0 0 1 2-2h5"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="9" r="1"/></svg>
             <span>Стикеры</span>
           </button>
-          <button class="tab" type="button" data-tab="music">
+          <button class="tab" type="button" data-tab="music" aria-label="Музыка">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
             <span>Музыка</span>
           </button>
-          <button class="tab" type="button" data-tab="announce">
+          <button class="tab" type="button" data-tab="announce" aria-label="Рассылка">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
             <span>Рассылка</span>
           </button>
-          <button class="tab" type="button" data-tab="restream">
+          <button class="tab" type="button" data-tab="restream" aria-label="Рестрим">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1a10 10 0 0 1 0-14.2M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M16.2 7.8a6 6 0 0 1 0 8.4"/><circle cx="12" cy="12" r="2"/></svg>
             <span>Рестрим</span>
           </button>
-          <button class="tab" type="button" data-tab="incoming">
+          <button class="tab" type="button" data-tab="incoming" aria-label="Входящий поток">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m23 7-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             <span>Входящий поток</span>
           </button>
-          <button class="tab" type="button" data-tab="profiles">
+          <button class="tab" type="button" data-tab="profiles" aria-label="Профили">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             <span>Профили</span>
           </button>
@@ -1873,13 +2394,12 @@
     <main class="page">
       <header class="topbar">
         <div>
-          <h1>Панель управления
-            <button id="appVersion" class="muted" type="button" title="Показать список изменений"
-              style="font-size: 13px; font-weight: 400; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px;"></button>
+          <h1><span id="pageTitle">Панель управления</span>
+            <button id="appVersion" class="version-link muted" type="button" title="Показать список изменений"></button>
           </h1>
-          <p class="muted">Подключения, виджеты, алерты и музыка.</p>
+          <p id="pageSubtitle" class="muted">Подключения, виджеты, алерты и музыка.</p>
         </div>
-        <div class="topbar__actions" style="display: flex; gap: 8px; align-items: center;">
+        <div class="topbar__actions">
           <button id="patchnotesButton" class="button button--ghost" type="button">Что нового</button>
           <button id="checkUpdatesButton" class="button button--ghost" type="button">Проверить обновления</button>
         </div>
@@ -2490,18 +3010,21 @@
             <div id="restreamStats" class="status-grid"></div>
             <p id="restreamStatsHint" class="muted" style="margin-top: 6px; font-size: 12px;"></p>
 
-            <h3 style="margin: 16px 0 6px; font-size: 15px;">Площадки-приёмники</h3>
-            <p class="muted" style="margin: 0 0 8px; font-size: 12px;">
-              Поток раздаётся без перекодирования, поэтому битрейт у всех площадок в эфире одинаковый —
-              различаются статус, объём отправленного и ошибки. Площадка, отвалившаяся посреди эфира,
-              сама не вернётся: её счётчик замирает на моменте обрыва, а для переподключения нужно
-              выключить и включить рестрим.
-            </p>
-            <div id="restreamDestList" class="list"></div>
+            <h3 class="panel__subhead">Площадки-приёмники</h3>
+            <details class="help">
+              <summary>Как ведут себя площадки в эфире</summary>
+              <p>
+                Поток раздаётся без перекодирования, поэтому битрейт у всех площадок в эфире одинаковый —
+                различаются статус, объём отправленного и ошибки. Площадка, отвалившаяся посреди эфира,
+                сама не вернётся: её счётчик замирает на моменте обрыва, а для переподключения нужно
+                выключить и включить рестрим.
+              </p>
+            </details>
+            <div id="restreamDestList" class="list-stack"></div>
 
-            <details id="restreamRelayConfig" style="margin-top: 10px;">
-              <summary class="muted" style="cursor: pointer; font-size: 12px;">Ретрансляция через свой сервер · <span id="restreamRelayState">выключена у всех площадок</span></summary>
-              <p class="muted" style="margin: 8px 0; font-size: 12px;">
+            <details id="restreamRelayConfig" class="help">
+              <summary>Ретрансляция через свой сервер · <span id="restreamRelayState">выключена у всех площадок</span></summary>
+              <p>
                 Галочка «через мой сервер» у площадки отправляет её поток не напрямую, а на ваш сервер — он уже
                 кормит площадку сам. Помогает, когда прямой канал до площадки не держит 1080p: до сервера поток
                 идёт по толстому каналу, а он досылает без перекодирования. Ключ трансляции в этом режиме берётся
@@ -2510,27 +3033,30 @@
                 нём один раз настраивается пересылка с этого пути на площадку. Без адреса сервера галочка недоступна,
                 а поток идёт напрямую.
               </p>
-              <div class="grid" style="grid-template-columns: 2fr 1fr 1fr; gap: 8px; align-items: end;">
+              <div class="grid grid--relay">
                 <label class="field"><span>Адрес приёма на сервере</span><input id="restreamRelayUrl" type="text" placeholder="rtmps://ваш-сервер:2935/live" /></label>
                 <label class="field"><span>Логин публикации</span><input id="restreamRelayUser" type="text" placeholder="логин" /></label>
                 <label class="field"><span>Пароль публикации</span><input id="restreamRelayPassword" type="password" placeholder="••••••••" /></label>
               </div>
-              <button id="restreamRelaySave" class="button button--ghost" type="button" style="margin-top: 8px;">Сохранить сервер</button>
+              <button id="restreamRelaySave" class="button button--ghost" type="button">Сохранить сервер</button>
             </details>
-            <div class="grid" style="grid-template-columns: 0.8fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px;">
+            <div class="grid grid--dest-add">
               <label class="field"><span>Название</span><input id="restreamNewName" type="text" placeholder="YouTube" /></label>
               <label class="field"><span>RTMP-адрес</span><input id="restreamNewUrl" type="text" placeholder="rtmp://a.rtmp.youtube.com/live2" /></label>
               <label class="field"><span>Ключ трансляции</span><input id="restreamNewKey" type="password" placeholder="xxxx-xxxx-xxxx" /></label>
               <button id="restreamAddButton" class="button button--ghost" type="button">Добавить</button>
             </div>
-            <p class="muted" style="margin-top: 6px;">
-              Адреса: YouTube — <code>rtmp://a.rtmp.youtube.com/live2</code>, Twitch — <code>rtmp://live.twitch.tv/app</code>,
-              VK Видео — <code>rtmp://vsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
-              <br /><b>Важно, настройки OBS (Настройки → Вывод, режим «Расширенный»):</b>
-              управление битрейтом <b>CBR</b>, битрейт <b>4000–6000 kbps</b>, <b>интервал ключевого кадра = 2 с</b>.
-              Поток идёт без перекодирования — что задано в OBS, то и уходит на площадки. При VBR/CQP на статичной
-              сцене битрейт падает до ~50 kbps, и площадка пишет «технические проблемы».
-            </p>
+            <details class="help">
+              <summary>Адреса площадок и обязательные настройки OBS</summary>
+              <p>
+                Адреса: YouTube — <code>rtmp://a.rtmp.youtube.com/live2</code>, Twitch — <code>rtmp://live.twitch.tv/app</code>,
+                VK Видео — <code>rtmp://vsu.mycdn.me/input</code>. Ключ берётся в кабинете площадки.
+                <br /><b>Важно, настройки OBS (Настройки → Вывод, режим «Расширенный»):</b>
+                управление битрейтом <b>CBR</b>, битрейт <b>4000–6000 kbps</b>, <b>интервал ключевого кадра = 2 с</b>.
+                Поток идёт без перекодирования — что задано в OBS, то и уходит на площадки. При VBR/CQP на статичной
+                сцене битрейт падает до ~50 kbps, и площадка пишет «технические проблемы».
+              </p>
+            </details>
           </article>
         </section>
       </section>
@@ -2567,26 +3093,36 @@
         <section class="grid">
           <article class="panel panel--wide">
             <h2>Профили зрителей</h2>
-            <p class="muted">CRM по избранным зрителям. Портрет — био, профессию, хобби, черты, интересные факты и сводку общения — целиком пишет ИИ по переписке зрителя: заполнять руками ничего не нужно. Правый клик по нику в чате → «Профиль», либо добавьте ник здесь. Дальше портрет не собирается заново: ИИ дополняет его сообщениями, которые пришли с прошлого разбора. Ключ ИИ отдельно вводить не нужно — берётся из «Подключений»: polza.ai, а если он недоступен, локальная Ollama.</p>
+            <p class="muted">Досье на избранных зрителей: портрет целиком пишет ИИ по переписке. Правый клик по нику в чате → «Профиль» либо добавьте ник здесь.</p>
+            <details class="help">
+              <summary>Как это работает</summary>
+              <p>
+                Портрет — био, профессия, хобби, черты характера, интересные факты и сводка вашего общения —
+                составляется ИИ по сообщениям зрителя: заполнять руками ничего не нужно. При обновлении портрет
+                не собирается заново, ИИ дополняет прежний теми сообщениями, что пришли с прошлого разбора.
+                Отдельный ключ вводить не надо — берётся из «Подключений»: polza.ai, а если он недоступен,
+                локальная Ollama.
+              </p>
+            </details>
 
             <p id="profilesAiState" class="muted" style="margin: 10px 0 16px; font-size: 12px;"></p>
 
-            <div style="display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start;">
+            <div class="profiles-layout">
               <div>
-                <div style="display: flex; gap: 6px; margin-bottom: 8px;">
-                  <input id="profilesAddName" type="text" placeholder="Ник зрителя" style="flex: 1; min-width: 0;" />
-                  <select id="profilesAddPlatform" style="width: 90px;">
+                <div class="profiles-add">
+                  <input id="profilesAddName" type="text" placeholder="Ник зрителя" />
+                  <select id="profilesAddPlatform" aria-label="Площадка">
                     <option value="vk">VK</option>
                     <option value="twitch">Twitch</option>
                     <option value="youtube">YouTube</option>
                     <option value="rutube">Rutube</option>
                   </select>
                 </div>
-                <button id="profilesAddButton" class="button" type="button" style="width: 100%;">+ Добавить профиль</button>
-                <div id="profilesList" class="list" style="margin-top: 12px;"></div>
+                <button id="profilesAddButton" class="button" type="button">+ Добавить профиль</button>
+                <div id="profilesList" class="list-stack profiles-list"></div>
               </div>
               <div id="profileCard">
-                <p class="muted">Выберите профиль слева или добавьте нового.</p>
+                <p class="empty-state">Выберите профиль слева или добавьте нового.</p>
               </div>
             </div>
           </article>
@@ -2882,10 +3418,32 @@
         }
       }
 
+      // Заголовок страницы всегда говорил «Панель управления · Подключения,
+      // виджеты, алерты и музыка» — в каком ты разделе, было видно только по
+      // подсветке вкладки, а в узком окне подписи вкладок скрыты. Теперь шапка
+      // называет текущий раздел.
+      const TAB_TITLES = {
+        connections: ['Подключения', 'Каналы чата, DonationAlerts и обход YouTube.'],
+        widgets: ['Виджеты', 'Общий overlay для OBS: алерты, чат, музыка, таймеры.'],
+        alerts: ['Алерты', 'Оповещения о донатах, подписках и событиях.'],
+        stickers: ['Стикеры', 'Стикеры и реакции в overlay.'],
+        music: ['Музыка', 'Очередь треков и виджет «сейчас играет».'],
+        announce: ['Рассылка', 'Анонсы стрима в Telegram и MAX.'],
+        restream: ['Рестрим', 'Раздача одного потока OBS на все площадки.'],
+        incoming: ['Входящий поток', 'Телефоны и камеры как источники OBS.'],
+        profiles: ['Профили', 'Досье на зрителей: портрет пишет ИИ по переписке.'],
+      };
+
       function switchTab(tabName) {
         document.querySelectorAll('.tab').forEach((tab) => tab.classList.toggle('is-active', tab.dataset.tab === tabName));
         document.querySelectorAll('.section').forEach((section) => section.classList.remove('is-active'));
         document.querySelector(`#${tabName}Section`).classList.add('is-active');
+
+        const [title, subtitle] = TAB_TITLES[tabName] || [];
+        const titleEl = document.querySelector('#pageTitle');
+        const subtitleEl = document.querySelector('#pageSubtitle');
+        if (title && titleEl) titleEl.textContent = title;
+        if (subtitle && subtitleEl) subtitleEl.textContent = subtitle;
         if (tabName === 'announce' && typeof previewAnnounce === 'function') {
           previewAnnounce();
         }
@@ -6314,10 +6872,8 @@
           destList.innerHTML = '';
           for (const dest of list) {
             const row = document.createElement('div');
-            row.className = 'list__row';
-            row.style.cssText = 'display:grid; grid-template-columns:auto 1fr auto auto; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border-soft);';
+            row.className = 'list-row';
             const badge = state.running && dest.enabled ? (STATUS_LABEL[dest.status] || dest.status) : 'выкл';
-            const badgeColor = dest.status === 'error' ? '#f87171' : dest.status === 'live' ? '#4ade80' : '';
 
             // Вторая строка под площадкой: что именно на неё уходит прямо сейчас.
             let detail = '';
@@ -6336,21 +6892,22 @@
             // Пока адрес сервера не задан, включать нечего — галочка неактивна.
             const relayReady = Boolean(state?.relay?.configured);
             const relayBox = relayable
-              ? '<label class="muted" style="display:inline-flex; align-items:center; gap:4px; font-size:12px; margin-top:4px;' + (relayReady ? '' : ' opacity:0.6;') + '" title="' +
+              ? '<label class="check' + (relayReady ? '' : ' check--off') + '" title="' +
                 (relayReady
                   ? 'Поток пойдёт на ваш сервер (путь ' + escapeHtml(dest.relayPath || '') + '), а он отдаст его площадке'
                   : 'Сначала укажите адрес своего сервера ниже, в «Ретрансляция через свой сервер»') + '">' +
-                '<input type="checkbox" data-dest-relay="' + dest.id + '"' + (dest.viaRelay ? ' checked' : '') + (relayReady ? '' : ' disabled') + ' /> через мой сервер (1080p)' +
+                '<input type="checkbox" data-dest-relay="' + dest.id + '"' + (dest.viaRelay ? ' checked' : '') + (relayReady ? '' : ' disabled') + ' />через мой сервер (1080p)' +
                 (relayReady ? '' : ' — не задан адрес сервера') + '</label>'
               : '';
 
             row.innerHTML =
               '<button type="button" class="toggle-switch ' + (dest.enabled ? 'is-on' : '') + '" data-dest-toggle="' + dest.id + '" aria-pressed="' + (dest.enabled ? 'true' : 'false') + '" title="Включить/выключить"></button>' +
-              '<span><strong>' + escapeHtml(dest.name) + '</strong><br><span class="muted" style="font-size:12px;">' + escapeHtml(dest.viaRelay ? relayLabel(dest) : dest.url) + '</span>' +
-              (detail ? '<br><span class="muted" style="font-size:12px;">' + escapeHtml(detail) + '</span>' : '') +
+              '<span class="list-row__main"><span class="list-row__title">' + escapeHtml(dest.name) + '</span>' +
+              '<span class="list-row__sub">' + escapeHtml(dest.viaRelay ? relayLabel(dest) : dest.url) + '</span>' +
+              (detail ? '<span class="list-row__sub">' + escapeHtml(detail) + '</span>' : '') +
               (relayBox ? '<br>' + relayBox : '') +
               '</span>' +
-              '<span style="font-size:12px;' + (badgeColor ? 'color:' + badgeColor + ';' : '') + '">' + escapeHtml(badge) + '</span>' +
+              '<span class="badge' + (dest.status === 'error' ? ' badge--danger' : dest.status === 'live' ? ' badge--live' : '') + '">' + escapeHtml(badge) + '</span>' +
               '<button class="button button--ghost" type="button" data-dest-delete="' + dest.id + '">Удалить</button>';
             destList.appendChild(row);
           }
@@ -7047,15 +7604,15 @@
 
         function renderList() {
           if (!items.length) {
-            listEl.innerHTML = '<p class="muted" style="padding:8px; font-size:13px;">Пока никого. Добавьте зрителя выше.</p>';
+            listEl.innerHTML = '<p class="empty-state">Пока никого.<br>Добавьте зрителя выше или через правый клик в чате.</p>';
             return;
           }
           listEl.innerHTML = items.map((p) => `
-            <button type="button" data-profile-id="${esc(p.id)}"
-              style="display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; padding:8px 10px; margin-bottom:6px; border-radius:10px; cursor:pointer;
-                     background:${p.id === selectedId ? 'rgba(139,92,246,0.18)' : 'rgba(255,255,255,0.04)'};
-                     border:1px solid ${p.id === selectedId ? 'rgba(139,92,246,0.6)' : 'rgba(255,255,255,0.08)'}; color:inherit;">
-              <span style="min-width:0;"><strong>${esc(p.displayName)}</strong><br><span class="muted" style="font-size:11px;">${esc(p.platform)}${p.profession ? ' · ' + esc(p.profession) : ''}</span></span>
+            <button type="button" class="list-row${p.id === selectedId ? ' is-selected' : ''}" data-profile-id="${esc(p.id)}">
+              <span class="list-row__main">
+                <span class="list-row__title">${esc(p.displayName)}</span>
+                <span class="list-row__sub">${esc(p.platform)}${p.profession ? ' · ' + esc(p.profession) : ''}</span>
+              </span>
               ${p.pinned ? '<span title="Закреплён">📌</span>' : ''}
             </button>`).join('');
           listEl.querySelectorAll('[data-profile-id]').forEach((b) => b.addEventListener('click', () => selectProfile(b.dataset.profileId)));
@@ -7077,9 +7634,9 @@
         // можно закрепить профиль, добавить свою заметку в таймлайн и пересобрать портрет.
         function renderCard(p) {
           const s = p.stats || {};
-          const cell = (label, value) => `<div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:8px;"><div class="muted" style="font-size:11px;">${label}</div><strong>${value}</strong></div>`;
-          const chips = (values) => values.map((v) => `<span style="display:inline-block; background:rgba(139,92,246,0.16); border:1px solid rgba(139,92,246,0.35); border-radius:999px; padding:2px 10px; margin:0 4px 4px 0; font-size:12px;">${esc(v)}</span>`).join('');
-          const row = (label, html) => (html ? `<div style="margin-bottom:8px;"><span class="muted" style="font-size:11px; text-transform:uppercase;">${label}</span><div>${html}</div></div>` : '');
+          const cell = (label, value) => `<div class="stat-tile"><div class="stat-tile__label">${label}</div><div class="stat-tile__value">${value}</div></div>`;
+          const chips = (values) => values.map((v) => `<span class="chip">${esc(v)}</span>`).join('');
+          const row = (label, html) => (html ? `<div class="profile-row"><span class="profile-row__label">${label}</span><div>${html}</div></div>` : '');
 
           const busy = p.aiStatus === 'pending';
           const analyzed = Math.min(p.messagesAnalyzed || 0, s.messageCount || 0);
@@ -7090,9 +7647,9 @@
           } else if (p.aiStatus === 'error') {
             // Прежний портрет при неудаче остаётся на месте — так и пишем.
             status = p.aiUpdatedAt
-              ? `<span style="color:#f87171;">Не удалось обновить портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>` +
+              ? `<span style="color:var(--danger);">Не удалось обновить портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>` +
                 `<br><span class="muted">Показан прежний портрет от ${fmtDate(new Date(p.aiUpdatedAt).getTime())} · учтено ${analyzed} сообщ.</span>`
-              : `<span style="color:#f87171;">Не удалось собрать портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>`;
+              : `<span style="color:var(--danger);">Не удалось собрать портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>`;
           } else if (p.aiUpdatedAt) {
             status = `<span class="muted">Портрет от ${fmtDate(new Date(p.aiUpdatedAt).getTime())} · учтено ${analyzed} сообщ.${unread ? ` · новых с тех пор: ${unread}` : ''}</span>`;
           } else if (!aiStatus.canAnalyze) {
@@ -7111,47 +7668,47 @@
             : `<p class="muted" style="font-size:13px;">${busy ? 'Портрет собирается, это займёт несколько секунд.' : 'Нажмите «Собрать портрет» — ИИ прочитает переписку и заполнит карточку сам.'}</p>`;
 
           cardEl.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <strong style="font-size:18px; flex:1; min-width:0;">${esc(p.displayName)}</strong>
-              <label class="muted" style="font-size:12px; display:flex; align-items:center; gap:4px; white-space:nowrap;"><input id="pe-pin" type="checkbox" ${p.pinned ? 'checked' : ''}/> закрепить</label>
+            <div class="row-between">
+              <strong class="profile-card__name">${esc(p.displayName)}</strong>
+              <label class="check"><input id="pe-pin" type="checkbox" ${p.pinned ? 'checked' : ''}/>закрепить</label>
               <button id="pe-delete" class="button button--danger" type="button">Удалить</button>
             </div>
-            <p class="muted" style="font-size:12px; margin:4px 0 12px;">${esc(p.platform)} · ${esc(p.user)}</p>
-            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px;">
+            <p class="profile-card__id">${esc(p.platform)} · ${esc(p.user)}</p>
+            <div class="tile-grid profile-card__stats">
               ${cell('Сообщений', s.messageCount || 0)}
               ${cell('Первое', fmtDate(s.firstSeen))}
               ${cell('Последнее', fmtDate(s.lastSeen))}
               ${cell('Донаты', (s.donationCount || 0) + ' · ' + Math.round(s.donationTotal || 0) + ' ' + esc(s.donationCurrency || ''))}
             </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+            <div class="row-between profile-card__head">
               <strong>Портрет от ИИ</strong>
               <button id="pe-analyze" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze ? 'disabled' : ''}
                 title="${aiStatus.canAnalyze ? '' : 'Нужен ключ polza.ai во вкладке «Подключения» или запущенная локальная Ollama'}">${p.aiUpdatedAt ? '✨ Обновить портрет' : '✨ Собрать портрет'}</button>
             </div>
-            <div style="font-size:12px; min-height:16px; margin-bottom:8px;">${status}</div>
-            <div style="margin-bottom:14px;">${portrait}</div>
-            <div style="margin:14px 0;">
+            <div class="profile-card__status">${status}</div>
+            <div class="profile-card__portrait">${portrait}</div>
+            <div class="profile-card__timeline">
               <strong>Таймлайн общения</strong>
-              <div class="muted" style="font-size:11px; margin-top:2px;">🏥 болезнь · ✈️ поездка · 🛒 покупка · ⭐ событие · 📝 заметка. Значок ✨ — событие нашёл в переписке ИИ; ваши заметки уходят в контекст следующего портрета.</div>
-              <div style="margin:6px 0;">
+              <div class="profile-card__legend">🏥 болезнь · ✈️ поездка · 🛒 покупка · ⭐ событие · 📝 заметка. Значок ✨ — событие нашёл в переписке ИИ; ваши заметки уходят в контекст следующего портрета.</div>
+              <div class="timeline">
                 ${(p.timeline || []).slice().reverse().map((e) => `
-                  <div style="display:flex; gap:8px; align-items:baseline; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-                    <span class="muted" style="font-size:12px; min-width:84px;">${esc(e.date)}</span>
-                    <span title="${e.source === 'ai' ? 'Нашёл ИИ' : 'Ваша заметка'}" style="white-space:nowrap;">${typeIcon(e.type)}${e.source === 'ai' ? '<span style="font-size:10px;">✨</span>' : ''}</span>
-                    <span style="flex:1;">${esc(e.text)}</span>
-                    <button class="mini-button" type="button" data-remove-entry="${esc(e.id)}">✕</button>
-                  </div>`).join('') || '<p class="muted" style="font-size:13px;">Событий пока нет.</p>'}
+                  <div class="timeline__row">
+                    <span class="timeline__date">${esc(e.date)}</span>
+                    <span class="timeline__icon" title="${e.source === 'ai' ? 'Нашёл ИИ' : 'Ваша заметка'}">${typeIcon(e.type)}${e.source === 'ai' ? '<span class="timeline__ai">✨</span>' : ''}</span>
+                    <span class="timeline__text">${esc(e.text)}</span>
+                    <button class="mini-button" type="button" data-remove-entry="${esc(e.id)}" title="Убрать из таймлайна">✕</button>
+                  </div>`).join('') || '<p class="empty-state">Событий пока нет.</p>'}
               </div>
-              <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
-                <input id="pe-entry-date" type="date" style="width:150px;" />
-                <select id="pe-entry-type" style="width:130px;">
+              <div class="timeline__add">
+                <input id="pe-entry-date" type="date" />
+                <select id="pe-entry-type">
                   <option value="note">Заметка</option>
                   <option value="event">Событие</option>
                   <option value="health">Здоровье</option>
                   <option value="trip">Поездка</option>
                   <option value="purchase">Покупка</option>
                 </select>
-                <input id="pe-entry-text" type="text" placeholder="Что случилось…" style="flex:1; min-width:140px;" />
+                <input id="pe-entry-text" type="text" placeholder="Что случилось…" />
                 <button id="pe-entry-add" class="button button--ghost" type="button">+ В таймлайн</button>
               </div>
             </div>`;
@@ -7230,7 +7787,7 @@
           }
           aiStateEl.innerHTML = aiStatus.canAnalyze
             ? 'Портрет собирает: ' + parts.join(' · резерв: ')
-            : '<span style="color:#f87171;">Портрет собрать нечем.</span> Укажите ключ polza.ai во вкладке «Подключения» ' +
+            : '<span style="color:var(--danger);">Портрет собрать нечем.</span> Укажите ключ polza.ai во вкладке «Подключения» ' +
               '(поле «Ключ polza.ai») либо запустите локальную Ollama — профили используют те же настройки, что и текст анонсов.';
         }
 
