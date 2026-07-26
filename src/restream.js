@@ -30,7 +30,11 @@ const RESPAWN_DELAY = 1200;
 //
 // Ключ площадки в этом режиме живёт на сервере (в его настройке пересылки),
 // поэтому из приложения он не уходит: сюда отправляется только путь.
-const DEFAULT_RELAY_URL = 'rtmps://195.62.49.244.sslip.io:2935/live';
+//
+// Адреса по умолчанию нет: у каждого свой сервер, поэтому поле пустое, пока
+// стример не впишет его в бэкофисе. Пока адрес пуст, ретрансляция не работает
+// и площадка отдаётся напрямую — эфир из-за ненастроенного сервера не рвём.
+const DEFAULT_RELAY_URL = '';
 
 let configFile = '';
 let config = createDefaultConfig();
@@ -97,10 +101,16 @@ function createDefaultRelay() {
 
 function normalizeRelay(raw = {}) {
   return {
-    url: String(raw.url || '').trim() || DEFAULT_RELAY_URL,
+    // Пустой адрес — валидное состояние: сервер просто ещё не задан.
+    url: String(raw.url || DEFAULT_RELAY_URL).trim(),
     user: String(raw.user || '').trim(),
     password: String(raw.password || ''),
   };
+}
+
+// Ретрансляция возможна, только если стример указал адрес своего сервера.
+function relayConfigured() {
+  return Boolean((config.relay || createDefaultRelay()).url);
 }
 
 // Путь на своём сервере: латиница из названия площадки. Для Twitch получается
@@ -177,9 +187,9 @@ function enabledDestinations() {
 // Куда реально уходит поток этой площадки: напрямую на её RTMP или, если включена
 // ретрансляция, на свой сервер — логин и пароль публикации подставляем в адрес.
 function targetUrl(dest) {
-  if (dest.viaRelay) {
+  if (dest.viaRelay && relayConfigured()) {
     const relay = config.relay || createDefaultRelay();
-    const base = String(relay.url || DEFAULT_RELAY_URL).replace(/\/+$/, '');
+    const base = String(relay.url).replace(/\/+$/, '');
     const withAuth = relay.user
       ? base.replace(
           /^(rtmps?:\/\/)/i,
@@ -206,6 +216,7 @@ function getState() {
       url: (config.relay || createDefaultRelay()).url,
       user: (config.relay || createDefaultRelay()).user,
       hasPassword: Boolean((config.relay || createDefaultRelay()).password),
+      configured: relayConfigured(),
     },
     bitrateKbps: live ? bitrateKbps : 0,
     stats: {

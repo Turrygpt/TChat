@@ -5136,7 +5136,6 @@ app.whenReady().then(async () => {
     onStatus: (state) => mainWindow?.webContents.send('incoming:status', state),
   });
   profiles.init(path.join(app.getPath('userData'), 'settings'));
-  loadProfilesAiSettings();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -5289,38 +5288,68 @@ ipcMain.handle('incoming:remove', (_event, payload) => incoming.removeStream(pay
 
 // --- Профили зрителей ---------------------------------------------------------
 
-// Настройки анализа чата через Polza.ai (OpenAI-совместимый API, дешёвая DeepSeek).
-// Ключ вводит сам стример в бэкофисе; храним локально рядом с остальными настройками.
-let profilesAiSettings = { apiKey: '', baseUrl: 'https://api.polza.ai/v1', model: 'deepseek/deepseek-chat' };
-let profilesAiFile = '';
+// Отдельного коннектора у профилей нет: ключ polza.ai и адрес локальной Ollama
+// берутся из «Подключений» — те же, что генерируют текст анонсов. Заводить второй
+// ключ на то же самое незачем.
+//
+// Порядок как в анонсах: сначала polza.ai (если задан ключ), при отказе —
+// локальная Ollama, если она отвечает. Ollama без ключа, поэтому она же
+// выручает, когда polza.ai недоступна из сети.
+const PROFILE_POLZA_URL = 'https://polza.ai/api/v1/chat/completions';
+const PROFILE_POLZA_MODEL = 'deepseek/deepseek-chat';
 
-function loadProfilesAiSettings() {
-  profilesAiFile = path.join(app.getPath('userData'), 'settings', 'profiles-ai.json');
-  try {
-    const raw = JSON.parse(fs.readFileSync(profilesAiFile, 'utf8'));
-    profilesAiSettings = {
-      apiKey: String(raw.apiKey || ''),
-      baseUrl: String(raw.baseUrl || '').trim() || 'https://api.polza.ai/v1',
-      model: String(raw.model || '').trim() || 'deepseek/deepseek-chat',
-    };
-  } catch {
-    /* файла ещё нет — остаются значения по умолчанию */
-  }
+function profilesPolza() {
+  return {
+    apiKey: String(announceSettings?.polza?.apiKey || '').trim(),
+    // Модель анонсов рассчитана на длинный текст; для разбора чата берём дешёвую,
+    // но если стример выбрал свою — уважаем выбор.
+    model: String(announceSettings?.polza?.model || '').trim() || PROFILE_POLZA_MODEL,
+  };
 }
 
-function saveProfilesAiSettings(patch = {}) {
-  profilesAiSettings = {
-    // пустой ключ в патче не затирает сохранённый — так UI может не пересылать его
-    apiKey: patch.apiKey !== undefined && patch.apiKey !== '' ? String(patch.apiKey) : profilesAiSettings.apiKey,
-    baseUrl: String(patch.baseUrl || profilesAiSettings.baseUrl || '').trim() || 'https://api.polza.ai/v1',
-    model: String(patch.model || profilesAiSettings.model || '').trim() || 'deepseek/deepseek-chat',
+function profilesOllama() {
+  return {
+    baseUrl: String(announceSettings?.ollama?.baseUrl || '').trim(),
+    model: String(announceSettings?.ollama?.model || '').trim(),
   };
-  try {
-    fs.writeFileSync(profilesAiFile, JSON.stringify(profilesAiSettings, null, 2));
-  } catch (error) {
-    console.error(`[profiles] не удалось сохранить настройки ИИ: ${error.message}`);
+}
+
+// Жива ли локальная Ollama. Ответ короткоживуще кешируем: статус спрашивает
+// интерфейс при каждом открытии карточки, а поднимать пробу каждый раз незачем.
+let ollamaProbe = { at: 0, ready: false };
+
+async function isOllamaReady() {
+  const { baseUrl } = profilesOllama();
+  if (!baseUrl) {
+    return false;
   }
-  return { hasKey: Boolean(profilesAiSettings.apiKey), baseUrl: profilesAiSettings.baseUrl, model: profilesAiSettings.model };
+  if (Date.now() - ollamaProbe.at < 15000) {
+    return ollamaProbe.ready;
+  }
+  let ready = false;
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/tags`, { signal: AbortSignal.timeout(2000) });
+    ready = response.ok;
+  } catch {
+    ready = false;
+  }
+  ollamaProbe = { at: Date.now(), ready };
+  return ready;
+}
+
+// Чем интерфейс объясняет, можно ли вообще собирать портрет.
+async function getProfilesAiStatus() {
+  const polza = profilesPolza();
+  const ollama = profilesOllama();
+  const ollamaReady = await isOllamaReady();
+  return {
+    hasKey: Boolean(polza.apiKey),
+    model: polza.model,
+    ollamaUrl: ollama.baseUrl,
+    ollamaModel: ollama.model,
+    ollamaReady,
+    canAnalyze: Boolean(polza.apiKey) || ollamaReady,
+  };
 }
 
 // Разовое наполнение лога профиля: проходим общий архив chat.jsonl и достаём
@@ -5427,6 +5456,10 @@ const profileAnalysisInFlight = new Map();
 // но в промпт всё не влезет — да и портрет по свежему общению точнее.
 const PROFILE_PROMPT_MESSAGES = 200;
 
+// Потолок ожидания ответа модели: без него зависший запрос оставил бы карточку
+// в «собираю портрет…» навсегда.
+const PROFILE_REQUEST_TIMEOUT = 90000;
+
 // Формат портрета — один и для первого разбора, и для обновления.
 const PROFILE_JSON_SHAPE =
   '{"bio":"1-2 предложения о человеке","facts":["интересный факт", "..."],' +
@@ -5452,7 +5485,10 @@ const PROFILE_TIMELINE_RULES =
 async function runProfileAnalysis(id, { force = false } = {}) {
   const profile = profiles.get(id);
   if (!profile) return { ok: false, error: 'профиль не найден' };
-  if (!profilesAiSettings.apiKey) return { ok: false, error: 'не задан ключ Polza.ai в настройках профилей' };
+  const status = await getProfilesAiStatus();
+  if (!status.canAnalyze) {
+    return { ok: false, error: 'нет ни ключа polza.ai, ни запущенной Ollama — задайте их во вкладке «Подключения»' };
+  }
 
   await ensureProfileMessages(profile);
   const log = profiles.readMessages(id);
@@ -5514,38 +5550,115 @@ async function runProfileAnalysis(id, { force = false } = {}) {
     (shown.length ? shown.map((m) => `${m.date || '—'} — ${m.text}`).join('\n') : '— новых сообщений нет, уточни портрет по заметкам стримера');
 
   try {
-    const response = await fetch(`${profilesAiSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${profilesAiSettings.apiKey}` },
-      body: JSON.stringify({
-        model: profilesAiSettings.model,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.4,
-      }),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      return { ok: false, error: `Polza.ai HTTP ${response.status}: ${text.slice(0, 200)}` };
-    }
-    const data = await response.json();
-    let content = String(data?.choices?.[0]?.message?.content || '').trim();
-    content = content.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+    const { content, provider } = await requestProfileCompletion([
+      { role: 'system', content: system },
+      { role: 'user', content: userPrompt },
+    ]);
+    // Локальные модели любят обрамлять JSON в ```json — снимаем.
+    const cleaned = content.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
     let parsed;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(cleaned);
     } catch {
-      return { ok: false, error: 'модель вернула не JSON' };
+      return { ok: false, error: `${provider} вернул не JSON` };
     }
     // Отметку ставим по длине лога на момент чтения: сообщения, пришедшие
     // за время запроса, попадут в следующий разбор.
     profiles.applyAiResult(id, parsed, { mergeTimeline: incremental, analyzedCount: log.length });
-    return { ok: true, incremental, usedMessages: shown.length };
+    return { ok: true, incremental, usedMessages: shown.length, provider };
   } catch (error) {
-    return { ok: false, error: String(error?.message || error) };
+    return { ok: false, error: describeNetworkError(error) };
   }
+}
+
+// fetch в Node на любой сетевой сбой отвечает голым «fetch failed», а настоящая
+// причина (DNS, отказ соединения, сертификат) лежит в error.cause. Разворачиваем
+// цепочку — иначе в карточке нечего показать, кроме «fetch failed».
+function describeNetworkError(error) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return 'Polza.ai не ответила вовремя (таймаут)';
+  }
+  const parts = [];
+  let current = error;
+  const seen = new Set();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const code = current.code ? `${current.code}` : '';
+    const message = String(current.message || '').trim();
+    if (code && !parts.includes(code)) {
+      parts.push(code);
+    } else if (message && !parts.includes(message)) {
+      parts.push(message);
+    }
+    current = current.cause;
+  }
+  const detail = parts.filter(Boolean).join(' · ');
+  return detail ? `сеть: ${detail}` : String(error?.message || error);
+}
+
+// Один запрос к OpenAI-совместимому эндпоинту. Возвращает текст ответа модели
+// либо кидает ошибку с понятной причиной.
+async function askModel({ url, apiKey, model, messages }) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.4 }),
+    signal: AbortSignal.timeout(PROFILE_REQUEST_TIMEOUT),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  const content = String(data?.choices?.[0]?.message?.content || '').trim();
+  if (!content) {
+    throw new Error('пустой ответ модели');
+  }
+  return content;
+}
+
+// Цепочка источников: polza.ai → локальная Ollama. Возвращает { content, provider }
+// или кидает ошибку со списком того, что не получилось.
+async function requestProfileCompletion(messages) {
+  const polza = profilesPolza();
+  const ollama = profilesOllama();
+  const attempts = [];
+
+  if (polza.apiKey) {
+    attempts.push({
+      name: 'polza.ai',
+      run: () => askModel({ url: PROFILE_POLZA_URL, apiKey: polza.apiKey, model: polza.model, messages }),
+    });
+  }
+  if (ollama.baseUrl) {
+    attempts.push({
+      name: 'ollama',
+      run: () =>
+        askModel({
+          url: `${ollama.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`,
+          model: ollama.model,
+          messages,
+        }),
+    });
+  }
+  if (!attempts.length) {
+    throw new Error('не задан ключ polza.ai и не настроена локальная Ollama — см. вкладку «Подключения»');
+  }
+
+  const failures = [];
+  for (const attempt of attempts) {
+    try {
+      return { content: await attempt.run(), provider: attempt.name };
+    } catch (error) {
+      const reason = describeNetworkError(error);
+      failures.push(`${attempt.name} — ${reason}`);
+      console.error(`[profiles] ${attempt.name} не ответил: ${reason}`);
+    }
+  }
+  throw new Error(failures.join('; '));
 }
 
 // Обёртка вокруг разбора: держит статус профиля (pending → ready/error),
@@ -5655,7 +5768,7 @@ ipcMain.handle('profiles:add-timeline', async (_event, payload) => {
   const entry = profiles.addTimelineEntry(payload?.id, payload?.entry);
   // Заметка стримера — новый контекст для портрета, обновляем его даже если
   // новых сообщений в чате не было.
-  if (entry && profilesAiSettings.apiKey) {
+  if (entry && (await getProfilesAiStatus()).canAnalyze) {
     scheduleProfileAnalysis(payload.id, { force: true });
   }
   return entry;
@@ -5664,12 +5777,7 @@ ipcMain.handle('profiles:remove-timeline', (_event, payload) => ({ ok: profiles.
 // Кнопка «Обновить портрет» — обновляем даже без новых сообщений.
 ipcMain.handle('profiles:analyze', (_event, id) => analyzeProfileWithAI(id, { force: true }));
 ipcMain.handle('profiles:get-keys', () => profiles.list().map((p) => p.id));
-ipcMain.handle('profiles:get-ai-settings', () => ({
-  hasKey: Boolean(profilesAiSettings.apiKey),
-  baseUrl: profilesAiSettings.baseUrl,
-  model: profilesAiSettings.model,
-}));
-ipcMain.handle('profiles:save-ai-settings', (_event, payload) => saveProfilesAiSettings(payload || {}));
+ipcMain.handle('profiles:get-ai-settings', () => getProfilesAiStatus());
 
 ipcMain.handle('app:install-update', (_event, payload) => installDownloadedUpdate({ clean: Boolean(payload?.clean) }));
 

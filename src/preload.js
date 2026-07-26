@@ -30,7 +30,6 @@ contextBridge.exposeInMainWorld('tchat', {
   analyzeProfile: (id) => ipcRenderer.invoke('profiles:analyze', id),
   getProfileKeys: () => ipcRenderer.invoke('profiles:get-keys'),
   getProfilesAiSettings: () => ipcRenderer.invoke('profiles:get-ai-settings'),
-  saveProfilesAiSettings: (payload) => ipcRenderer.invoke('profiles:save-ai-settings', payload),
   onProfileKeys: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('profiles:keys', listener);

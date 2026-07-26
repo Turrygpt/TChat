@@ -1769,8 +1769,25 @@
           border-bottom: 1px solid var(--border-soft);
         }
 
+        /* Узкое окно: вкладки выстраиваются в ряд иконками. Раньше это была
+           grid-дорожка в одну строку — вместе с кнопкой справа она переставала
+           влезать, не сжималась и не переносилась, поэтому хвост вкладок
+           («Входящий поток», «Профили») уезжал за край окна. Теперь ряд гибкий:
+           переносится на вторую строку, а не обрезается. */
+        .sidebar {
+          flex-wrap: wrap;
+          min-width: 0;
+        }
+
         .tabs {
-          grid-auto-flow: column;
+          display: flex;
+          flex-flow: row wrap;
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+
+        .tab {
+          flex: 0 0 auto;
         }
 
         .tab span {
@@ -2485,15 +2502,17 @@
             <details id="restreamRelayConfig" style="margin-top: 10px;">
               <summary class="muted" style="cursor: pointer; font-size: 12px;">Ретрансляция через свой сервер · <span id="restreamRelayState">выключена у всех площадок</span></summary>
               <p class="muted" style="margin: 8px 0; font-size: 12px;">
-                Галочка «через мой сервер» у площадки отправляет её поток не напрямую, а на ваш VPS — сервер уже
+                Галочка «через мой сервер» у площадки отправляет её поток не напрямую, а на ваш сервер — он уже
                 кормит площадку сам. Помогает, когда прямой канал до площадки не держит 1080p: до сервера поток
                 идёт по толстому каналу, а он досылает без перекодирования. Ключ трансляции в этом режиме берётся
                 из настройки пересылки на сервере, из приложения он не уходит: сюда отправляется только путь
-                (у Twitch — <code>twitch</code>). Пересылку с этого пути на площадку нужно один раз настроить на сервере.
+                (у Twitch — <code>twitch</code>). Нужен свой сервер с приёмом RTMP/RTMPS (например, MediaMTX), и на
+                нём один раз настраивается пересылка с этого пути на площадку. Без адреса сервера галочка недоступна,
+                а поток идёт напрямую.
               </p>
               <div class="grid" style="grid-template-columns: 2fr 1fr 1fr; gap: 8px; align-items: end;">
-                <label class="field"><span>Адрес приёма на сервере</span><input id="restreamRelayUrl" type="text" placeholder="rtmps://195.62.49.244.sslip.io:2935/live" /></label>
-                <label class="field"><span>Логин публикации</span><input id="restreamRelayUser" type="text" placeholder="turry" /></label>
+                <label class="field"><span>Адрес приёма на сервере</span><input id="restreamRelayUrl" type="text" placeholder="rtmps://ваш-сервер:2935/live" /></label>
+                <label class="field"><span>Логин публикации</span><input id="restreamRelayUser" type="text" placeholder="логин" /></label>
                 <label class="field"><span>Пароль публикации</span><input id="restreamRelayPassword" type="password" placeholder="••••••••" /></label>
               </div>
               <button id="restreamRelaySave" class="button button--ghost" type="button" style="margin-top: 8px;">Сохранить сервер</button>
@@ -2536,7 +2555,7 @@
               </label>
             </div>
             <div id="incomingPullFields" hidden>
-              <label class="field"><span>Ссылка на поток</span><input id="incomingNewUrl" type="text" placeholder="rtmp://195.62.49.244:1935/cam1" /></label>
+              <label class="field"><span>Ссылка на поток</span><input id="incomingNewUrl" type="text" placeholder="rtmp://ваш-сервер:1935/cam1" /></label>
               <label class="field"><span>Пароль потока (если требуется)</span><input id="incomingNewPassword" type="password" placeholder="—" /></label>
             </div>
             <button id="incomingAddButton" class="button" type="button" style="margin-top: 10px;">Добавить</button>
@@ -2548,17 +2567,9 @@
         <section class="grid">
           <article class="panel panel--wide">
             <h2>Профили зрителей</h2>
-            <p class="muted">CRM по избранным зрителям. Портрет — био, профессию, хобби, черты, интересные факты и сводку общения — целиком пишет ИИ по переписке зрителя: заполнять руками ничего не нужно. Правый клик по нику в чате → «Профиль», либо добавьте ник здесь. Дальше портрет не собирается заново: ИИ дополняет его сообщениями, которые пришли с прошлого разбора. Анализ — через Polza.ai (модель DeepSeek).</p>
+            <p class="muted">CRM по избранным зрителям. Портрет — био, профессию, хобби, черты, интересные факты и сводку общения — целиком пишет ИИ по переписке зрителя: заполнять руками ничего не нужно. Правый клик по нику в чате → «Профиль», либо добавьте ник здесь. Дальше портрет не собирается заново: ИИ дополняет его сообщениями, которые пришли с прошлого разбора. Ключ ИИ отдельно вводить не нужно — берётся из «Подключений»: polza.ai, а если он недоступен, локальная Ollama.</p>
 
-            <details id="profilesAiConfig" style="margin: 10px 0 16px;">
-              <summary class="muted" style="cursor: pointer;">Настройки анализа (Polza.ai) · <span id="profilesAiState">ключ не задан</span></summary>
-              <div class="rule-grid" style="margin-top: 8px;">
-                <label class="field"><span>API-ключ Polza.ai</span><input id="profilesAiKey" type="password" placeholder="sk-..." /></label>
-                <label class="field"><span>Модель</span><input id="profilesAiModel" type="text" placeholder="deepseek/deepseek-chat" /></label>
-                <label class="field"><span>Базовый URL</span><input id="profilesAiBaseUrl" type="text" placeholder="https://api.polza.ai/v1" /></label>
-              </div>
-              <button id="profilesAiSaveButton" class="button button--ghost" type="button" style="margin-top: 8px;">Сохранить настройки</button>
-            </details>
+            <p id="profilesAiState" class="muted" style="margin: 10px 0 16px; font-size: 12px;"></p>
 
             <div style="display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start;">
               <div>
@@ -6210,9 +6221,11 @@
           if (relayPasswordInput && relay.hasPassword) relayPasswordInput.placeholder = '•••••••• (сохранён)';
           if (relayStateEl) {
             const via = (next.destinations || []).filter((d) => d.viaRelay);
-            relayStateEl.textContent = via.length
-              ? 'через сервер: ' + via.map((d) => d.name).join(', ')
-              : 'выключена у всех площадок';
+            relayStateEl.textContent = !relay.configured
+              ? 'сервер не задан'
+              : via.length
+                ? 'через сервер: ' + via.map((d) => d.name).join(', ')
+                : 'выключена у всех площадок';
           }
         }
 
@@ -6320,9 +6333,15 @@
             // Ретрансляция через свой сервер предлагается там, где она и нужна —
             // на Twitch: прямой канал до него чаще всего и не держит 1080p.
             const relayable = /twitch\.tv/i.test(dest.url) || dest.viaRelay;
+            // Пока адрес сервера не задан, включать нечего — галочка неактивна.
+            const relayReady = Boolean(state?.relay?.configured);
             const relayBox = relayable
-              ? '<label class="muted" style="display:inline-flex; align-items:center; gap:4px; font-size:12px; margin-top:4px;" title="Поток пойдёт на ваш сервер (путь ' + escapeHtml(dest.relayPath || '') + '), а он отдаст его площадке">' +
-                '<input type="checkbox" data-dest-relay="' + dest.id + '"' + (dest.viaRelay ? ' checked' : '') + ' /> через мой сервер (1080p)</label>'
+              ? '<label class="muted" style="display:inline-flex; align-items:center; gap:4px; font-size:12px; margin-top:4px;' + (relayReady ? '' : ' opacity:0.6;') + '" title="' +
+                (relayReady
+                  ? 'Поток пойдёт на ваш сервер (путь ' + escapeHtml(dest.relayPath || '') + '), а он отдаст его площадке'
+                  : 'Сначала укажите адрес своего сервера ниже, в «Ретрансляция через свой сервер»') + '">' +
+                '<input type="checkbox" data-dest-relay="' + dest.id + '"' + (dest.viaRelay ? ' checked' : '') + (relayReady ? '' : ' disabled') + ' /> через мой сервер (1080p)' +
+                (relayReady ? '' : ' — не задан адрес сервера') + '</label>'
               : '';
 
             row.innerHTML =
@@ -7009,10 +7028,6 @@
         const addNameEl = document.querySelector('#profilesAddName');
         const addPlatformEl = document.querySelector('#profilesAddPlatform');
         const addButton = document.querySelector('#profilesAddButton');
-        const aiKeyEl = document.querySelector('#profilesAiKey');
-        const aiModelEl = document.querySelector('#profilesAiModel');
-        const aiBaseUrlEl = document.querySelector('#profilesAiBaseUrl');
-        const aiSaveButton = document.querySelector('#profilesAiSaveButton');
         const aiStateEl = document.querySelector('#profilesAiState');
 
         const esc = (s) => escapeHtml(String(s ?? ''));
@@ -7022,6 +7037,8 @@
         let items = [];
         let selectedId = '';
         let loaded = false;
+        // Чем можно собрать портрет: ключ polza.ai и/или живая Ollama.
+        let aiStatus = { canAnalyze: false };
 
         async function loadList() {
           items = (await api.listProfiles().catch(() => [])) || [];
@@ -7047,6 +7064,10 @@
         async function selectProfile(id) {
           selectedId = id;
           renderList();
+          // Статус ИИ решает, активна ли кнопка сборки, — карточку без него не рисуем.
+          if (!aiStatus.loadedAt) {
+            await loadAiSettings();
+          }
           const p = await api.getProfile(id).catch(() => null);
           if (!p) { cardEl.innerHTML = '<p class="muted">Профиль не найден.</p>'; return; }
           renderCard(p);
@@ -7067,9 +7088,15 @@
           if (busy) {
             status = '<span class="muted">✨ Собираю портрет по переписке…</span>';
           } else if (p.aiStatus === 'error') {
-            status = `<span style="color:#f87171;">Не удалось собрать портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>`;
+            // Прежний портрет при неудаче остаётся на месте — так и пишем.
+            status = p.aiUpdatedAt
+              ? `<span style="color:#f87171;">Не удалось обновить портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>` +
+                `<br><span class="muted">Показан прежний портрет от ${fmtDate(new Date(p.aiUpdatedAt).getTime())} · учтено ${analyzed} сообщ.</span>`
+              : `<span style="color:#f87171;">Не удалось собрать портрет: ${esc(p.aiError || 'неизвестная ошибка')}</span>`;
           } else if (p.aiUpdatedAt) {
             status = `<span class="muted">Портрет от ${fmtDate(new Date(p.aiUpdatedAt).getTime())} · учтено ${analyzed} сообщ.${unread ? ` · новых с тех пор: ${unread}` : ''}</span>`;
+          } else if (!aiStatus.canAnalyze) {
+            status = '<span class="muted">Портрет ещё не собран: нет ключа polza.ai (вкладка «Подключения») и не отвечает локальная Ollama.</span>';
           } else {
             status = '<span class="muted">Портрет ещё не собран.</span>';
           }
@@ -7098,7 +7125,8 @@
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
               <strong>Портрет от ИИ</strong>
-              <button id="pe-analyze" class="button button--ghost" type="button" ${busy ? 'disabled' : ''}>${p.aiUpdatedAt ? '✨ Обновить портрет' : '✨ Собрать портрет'}</button>
+              <button id="pe-analyze" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze ? 'disabled' : ''}
+                title="${aiStatus.canAnalyze ? '' : 'Нужен ключ polza.ai во вкладке «Подключения» или запущенная локальная Ollama'}">${p.aiUpdatedAt ? '✨ Обновить портрет' : '✨ Собрать портрет'}</button>
             </div>
             <div style="font-size:12px; min-height:16px; margin-bottom:8px;">${status}</div>
             <div style="margin-bottom:14px;">${portrait}</div>
@@ -7185,25 +7213,26 @@
         addButton?.addEventListener('click', addProfile);
         addNameEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addProfile(); });
 
+        // Своего коннектора у профилей нет: ключ polza.ai и адрес Ollama берутся
+        // из «Подключений». Здесь только показываем, чем сейчас можно собрать портрет.
         async function loadAiSettings() {
-          const s = await api.getProfilesAiSettings().catch(() => null);
-          if (!s) return;
-          aiModelEl.value = s.model || '';
-          aiBaseUrlEl.value = s.baseUrl || '';
-          aiStateEl.textContent = s.hasKey ? 'ключ сохранён' : 'ключ не задан';
-          if (s.hasKey) aiKeyEl.placeholder = '•••••••• (сохранён)';
+          aiStatus = (await api.getProfilesAiSettings().catch(() => null)) || { canAnalyze: false };
+          aiStatus.loadedAt = Date.now();
+          if (!aiStateEl) return;
+          const parts = [];
+          if (aiStatus.hasKey) {
+            parts.push('ключ polza.ai из «Подключений» · модель ' + (aiStatus.model || '—'));
+          }
+          if (aiStatus.ollamaReady) {
+            parts.push('локальная Ollama на связи (' + (aiStatus.ollamaModel || 'модель по умолчанию') + ')');
+          } else if (aiStatus.ollamaUrl) {
+            parts.push('Ollama настроена, но не отвечает');
+          }
+          aiStateEl.innerHTML = aiStatus.canAnalyze
+            ? 'Портрет собирает: ' + parts.join(' · резерв: ')
+            : '<span style="color:#f87171;">Портрет собрать нечем.</span> Укажите ключ polza.ai во вкладке «Подключения» ' +
+              '(поле «Ключ polza.ai») либо запустите локальную Ollama — профили используют те же настройки, что и текст анонсов.';
         }
-
-        aiSaveButton?.addEventListener('click', async () => {
-          const res = await api.saveProfilesAiSettings({
-            apiKey: aiKeyEl.value,
-            model: aiModelEl.value.trim(),
-            baseUrl: aiBaseUrlEl.value.trim(),
-          });
-          aiKeyEl.value = '';
-          aiStateEl.textContent = res?.hasKey ? 'ключ сохранён' : 'ключ не задан';
-          if (res?.hasKey) aiKeyEl.placeholder = '•••••••• (сохранён)';
-        });
 
         function ensureLoaded() {
           if (loaded) return;
