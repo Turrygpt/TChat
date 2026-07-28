@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         maven { url 'https://jitpack.io' }
     }
 }
-rootProject.name = "TChat"
+rootProject.name = "TChatStream"
 include(":app")

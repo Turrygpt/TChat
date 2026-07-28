@@ -143,8 +143,11 @@ let windowStateFile = '';
 let chatUiSettingsFile = '';
 let goalStateFile = '';
 let streamWidgetsFile = '';
+let giveawayWinnersFile = '';
 let announceSettingsFile = '';
+let musicSettingsFile = '';
 let announceSettings = announce.createDefaultSettings();
+let musicSettings = { volume: 50 };
 let botConfigFile = '';
 let botConfigKey = '';
 let windowState = createDefaultWindowState();
@@ -159,6 +162,8 @@ let goalState = createDefaultGoalState();
 let streamWidgets = [];
 let activePoll = null;
 let pollFinishTimer = null;
+let giveawayFinishTimers = new Map();
+let giveawayWinnerLog = [];
 let countdownTickTimer = null;
 const DEFAULT_COUNTDOWN_SECONDS = 7200;
 const DEFAULT_TEXTS_FONT_SIZE = 32;
@@ -393,7 +398,9 @@ function setupDonationAlertsStorage() {
   chatUiSettingsFile = path.join(storageDir, 'chat-ui.json');
   goalStateFile = path.join(storageDir, 'goal-state.json');
   streamWidgetsFile = path.join(storageDir, 'stream-widgets.json');
+  giveawayWinnersFile = path.join(storageDir, 'giveaway-winners.jsonl');
   announceSettingsFile = path.join(storageDir, 'announce.json');
+  musicSettingsFile = path.join(storageDir, 'music.json');
   botConfigFile = path.join(storageDir, 'bot-config.json');
   channelsFile = path.join(storageDir, 'channels.json');
   loadDonationAlertsToken();
@@ -403,7 +410,10 @@ function setupDonationAlertsStorage() {
   loadChatUiSettings();
   loadGoalState();
   loadStreamWidgets();
+  loadGiveawayWinnerLog();
+  scheduleAllGiveawayFinishes();
   loadAnnounceSettings();
+  loadMusicSettings();
   loadChatChannels();
   writeBotConfig();
 }
@@ -720,6 +730,112 @@ function saveStreamWidgets(items = streamWidgets) {
   return streamWidgets;
 }
 
+function normalizeMusicSettings(settings = {}) {
+  const rawVolume = Number(settings.volume);
+  return {
+    volume: Number.isFinite(rawVolume) ? Math.min(Math.max(Math.round(rawVolume), 0), 100) : 50,
+  };
+}
+
+function loadMusicSettings() {
+  if (!musicSettingsFile || !fs.existsSync(musicSettingsFile)) {
+    saveMusicSettings(musicSettings, false);
+    return;
+  }
+
+  try {
+    musicSettings = normalizeMusicSettings(JSON.parse(fs.readFileSync(musicSettingsFile, 'utf8')));
+  } catch (error) {
+    console.error(`Не удалось прочитать настройки музыки: ${error.message}`);
+    musicSettings = { volume: 50 };
+  }
+}
+
+function saveMusicSettings(settings = {}, shouldBroadcast = true) {
+  musicSettings = normalizeMusicSettings({ ...musicSettings, ...settings });
+
+  if (musicSettingsFile) {
+    try {
+      fs.writeFileSync(musicSettingsFile, JSON.stringify(musicSettings, null, 2));
+    } catch (error) {
+      console.error(`Не удалось сохранить настройки музыки: ${error.message}`);
+    }
+  }
+
+  if (shouldBroadcast) {
+    broadcastMusicQueue();
+  }
+
+  return getMusicQueuePayload();
+}
+
+function loadGiveawayWinnerLog() {
+  giveawayWinnerLog = [];
+  if (!giveawayWinnersFile || !fs.existsSync(giveawayWinnersFile)) return;
+
+  try {
+    const rows = fs
+      .readFileSync(giveawayWinnersFile, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    giveawayWinnerLog = rows.filter((entry) => entry.type !== 'winner-nickname').slice(-200);
+    rows
+      .filter((entry) => entry.type === 'winner-nickname')
+      .forEach((event) => {
+        const draw = giveawayWinnerLog.find((entry) => entry.id === event.drawId);
+        if (!draw) return;
+        draw.winnerNicknames = {
+          ...(draw.winnerNicknames || {}),
+          [event.winnerKey]: {
+            nickname: event.nickname,
+            capturedAt: event.capturedAt,
+          },
+        };
+      });
+  } catch (error) {
+    console.error(`Не удалось прочитать журнал розыгрышей: ${error.message}`);
+  }
+}
+
+function appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt) {
+  giveawayWinnerLog = giveawayWinnerLog.map((entry) =>
+    entry.id === drawId
+      ? {
+          ...entry,
+          winnerNicknames: {
+            ...(entry.winnerNicknames || {}),
+            [winner.key]: { nickname, capturedAt },
+          },
+        }
+      : entry,
+  );
+  if (!giveawayWinnersFile) return;
+
+  const event = {
+    type: 'winner-nickname',
+    drawId,
+    widgetId,
+    winnerKey: winner.key,
+    winner,
+    nickname,
+    capturedAt,
+  };
+  fs.appendFile(giveawayWinnersFile, `${JSON.stringify(event)}\n`, (error) => {
+    if (error) console.error(`Не удалось записать ник победителя: ${error.message}`);
+  });
+}
+
+function appendGiveawayWinnerLog(entry) {
+  giveawayWinnerLog.push(entry);
+  giveawayWinnerLog = giveawayWinnerLog.slice(-200);
+  if (!giveawayWinnersFile) return;
+
+  fs.appendFile(giveawayWinnersFile, `${JSON.stringify(entry)}\n`, (error) => {
+    if (error) console.error(`Не удалось записать победителей розыгрыша: ${error.message}`);
+  });
+}
+
 function normalizeTextItem(item = {}, index = 0) {
   const id = String(item.id || `text-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`);
   return {
@@ -805,8 +921,60 @@ function normalizeWidgetHeight(value) {
   return Number.isFinite(num) && num > 0 ? Math.round(num * 100) / 100 : null;
 }
 
+function normalizeGiveawayParticipant(participant = {}) {
+  const platform = String(participant.platform || 'chat').trim().toLowerCase();
+  const user = String(participant.user || 'Зритель').trim() || 'Зритель';
+  return {
+    key: String(participant.key || `${platform}:${user}`).toLowerCase(),
+    platform,
+    user,
+    joinedAt: participant.joinedAt || new Date().toISOString(),
+  };
+}
+
+function normalizeGiveawayWidget(widget = {}) {
+  const participants = (Array.isArray(widget.participants) ? widget.participants : [])
+    .map(normalizeGiveawayParticipant)
+    .filter((participant, index, items) => items.findIndex((item) => item.key === participant.key) === index)
+    .slice(0, 10000);
+  const participantKeys = new Set(participants.map((participant) => participant.key));
+  const winners = (Array.isArray(widget.winners) ? widget.winners : [])
+    .map(normalizeGiveawayParticipant)
+    .filter((winner) => participantKeys.has(winner.key));
+  const winnerKeys = new Set(winners.map((winner) => winner.key));
+  const winnerNicknames = Object.fromEntries(
+    Object.entries(widget.winnerNicknames && typeof widget.winnerNicknames === 'object' ? widget.winnerNicknames : {})
+      .filter(([key, value]) => winnerKeys.has(key) && String(value?.nickname || '').trim())
+      .map(([key, value]) => [
+        key,
+        {
+          nickname: String(value.nickname).trim().slice(0, 120),
+          capturedAt: String(value.capturedAt || ''),
+        },
+      ]),
+  );
+
+  return {
+    ...widget,
+    title: String(widget.title || 'Розыгрыш').trim() || 'Розыгрыш',
+    prize: String(widget.prize || 'Приз').trim() || 'Приз',
+    prizeCount: Math.min(Math.max(Math.round(Number(widget.prizeCount || 1)), 1), 100),
+    keyword: String(widget.keyword || '!участвую').trim() || '!участвую',
+    durationSeconds: Math.min(Math.max(Math.round(Number(widget.durationSeconds || 0)), 0), 604800),
+    status: ['idle', 'running', 'finished'].includes(widget.status) ? widget.status : 'idle',
+    startedAt: String(widget.startedAt || ''),
+    endsAt: String(widget.endsAt || ''),
+    finishedAt: String(widget.finishedAt || ''),
+    participants,
+    winners,
+    collectNicknames: widget.collectNicknames !== false,
+    winnerNicknames,
+    revealId: String(widget.revealId || ''),
+  };
+}
+
 function normalizeStreamWidget(widget = {}) {
-  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'countdown', 'texts', 'tasks', 'custom']);
+  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'custom']);
   const type = knownTypes.has(widget.type) ? widget.type : 'goal';
   const id = String(widget.id || `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const minWidgetWidth = ['countdown', 'texts'].includes(type) ? 5 : 14;
@@ -872,6 +1040,16 @@ function normalizeStreamWidget(widget = {}) {
       id: base.id,
       type: 'tasks',
       title: String(widget.title || 'Задачи на стрим').trim() || 'Задачи на стрим',
+      createdAt: widget.createdAt || base.createdAt,
+    });
+  }
+
+  if (type === 'giveaway') {
+    return normalizeGiveawayWidget({
+      ...base,
+      ...widgetSource,
+      id: base.id,
+      type: 'giveaway',
       createdAt: widget.createdAt || base.createdAt,
     });
   }
@@ -1228,6 +1406,7 @@ function widgetTitleByType(type) {
     music: 'Музыка',
     goal: 'Сбор',
     poll: 'Голосование',
+    giveaway: 'Розыгрыш',
     countdown: 'Обратный отсчёт',
     texts: 'Тексты',
     tasks: 'Задачи на стрим',
@@ -1242,6 +1421,7 @@ function defaultWidgetPosition(type) {
     music: { x: 68, y: 10, width: 28 },
     goal: { x: 18, y: 6, width: 64 },
     poll: { x: 60, y: 56, width: 34 },
+    giveaway: { x: 28, y: 20, width: 44 },
     countdown: { x: 72, y: 4, width: 18 },
     texts: { x: 8, y: 18, width: 44 },
     tasks: { x: 4, y: 8, width: 26 },
@@ -1253,6 +1433,7 @@ function getStreamWidgetsPayload() {
   return {
     items: streamWidgets,
     poll: activePoll,
+    giveawayLog: giveawayWinnerLog.slice(-50).reverse(),
     urls: {
       stream: `http://localhost:${SERVER_PORT}/widgets/stream.html`,
       alerts: `http://localhost:${SERVER_PORT}/widgets/alerts.html`,
@@ -1260,6 +1441,7 @@ function getStreamWidgetsPayload() {
       chat: `http://localhost:${SERVER_PORT}/widgets/chat.html`,
       goal: `http://localhost:${SERVER_PORT}/widgets/goal.html`,
       music: `http://localhost:${SERVER_PORT}/widgets/music.html`,
+      giveaway: `http://localhost:${SERVER_PORT}/widgets/giveaway.html`,
       countdown: `http://localhost:${SERVER_PORT}/widgets/countdown.html`,
       texts: `http://localhost:${SERVER_PORT}/widgets/texts.html`,
       tasks: `http://localhost:${SERVER_PORT}/widgets/tasks.html`,
@@ -1305,10 +1487,196 @@ function updateStreamWidget(id, payload = {}) {
 
 function deleteStreamWidget(id) {
   const widgetId = String(id || '');
+  clearTimeout(giveawayFinishTimers.get(widgetId));
+  giveawayFinishTimers.delete(widgetId);
   streamWidgets = streamWidgets.filter((widget) => widget.id !== widgetId);
   saveStreamWidgets(streamWidgets);
   broadcastStreamWidgets();
   return getStreamWidgetsPayload();
+}
+
+function getGiveawayWidget(id) {
+  return streamWidgets.find((widget) => widget.id === String(id || '') && widget.type === 'giveaway');
+}
+
+function scheduleGiveawayFinish(widget) {
+  clearTimeout(giveawayFinishTimers.get(widget?.id));
+  giveawayFinishTimers.delete(widget?.id);
+  if (!widget || widget.status !== 'running' || !widget.endsAt) return;
+
+  const delay = Math.max(new Date(widget.endsAt).getTime() - Date.now(), 0);
+  giveawayFinishTimers.set(widget.id, setTimeout(() => finishGiveaway(widget.id), delay));
+}
+
+function scheduleAllGiveawayFinishes() {
+  streamWidgets.filter((widget) => widget.type === 'giveaway').forEach((widget) => {
+    if (widget.status === 'running' && widget.endsAt && new Date(widget.endsAt).getTime() <= Date.now()) {
+      finishGiveaway(widget.id);
+    } else {
+      scheduleGiveawayFinish(widget);
+    }
+  });
+}
+
+function startGiveaway(id, payload = {}) {
+  const current = getGiveawayWidget(id);
+  if (!current) throw new Error('Виджет розыгрыша не найден.');
+
+  const configured = normalizeGiveawayWidget({ ...current, ...payload });
+  const startedAt = new Date().toISOString();
+  const next = normalizeStreamWidget({
+    ...configured,
+    enabled: true,
+    status: 'running',
+    participants: [],
+    winners: [],
+    winnerNicknames: {},
+    startedAt,
+    endsAt: configured.durationSeconds > 0 ? new Date(Date.now() + configured.durationSeconds * 1000).toISOString() : '',
+    finishedAt: '',
+    revealId: '',
+  });
+  streamWidgets = streamWidgets.map((widget) => (widget.id === current.id ? next : widget));
+  saveStreamWidgets(streamWidgets);
+  scheduleGiveawayFinish(next);
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function chooseGiveawayWinners(participants, count) {
+  const pool = [...participants];
+  const winners = [];
+  while (pool.length && winners.length < count) {
+    winners.push(pool.splice(crypto.randomInt(pool.length), 1)[0]);
+  }
+  return winners;
+}
+
+function finishGiveaway(id) {
+  const current = getGiveawayWidget(id);
+  if (!current || current.status !== 'running') return getStreamWidgetsPayload();
+
+  clearTimeout(giveawayFinishTimers.get(current.id));
+  giveawayFinishTimers.delete(current.id);
+  const winners = chooseGiveawayWinners(current.participants, current.prizeCount);
+  const finishedAt = new Date().toISOString();
+  const revealId = `giveaway-reveal-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const next = normalizeStreamWidget({
+    ...current,
+    status: 'finished',
+    endsAt: '',
+    finishedAt,
+    winners,
+    winnerNicknames: {},
+    revealId,
+  });
+  streamWidgets = streamWidgets.map((widget) => (widget.id === current.id ? next : widget));
+  saveStreamWidgets(streamWidgets);
+  appendGiveawayWinnerLog({
+    id: revealId,
+    widgetId: current.id,
+    title: current.title,
+    prize: current.prize,
+    prizeCount: current.prizeCount,
+    keyword: current.keyword,
+    participantCount: current.participants.length,
+    winners,
+    collectNicknames: current.collectNicknames,
+    winnerNicknames: {},
+    startedAt: current.startedAt,
+    finishedAt,
+  });
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function resetGiveaway(id) {
+  const current = getGiveawayWidget(id);
+  if (!current) throw new Error('Виджет розыгрыша не найден.');
+  clearTimeout(giveawayFinishTimers.get(current.id));
+  giveawayFinishTimers.delete(current.id);
+  streamWidgets = streamWidgets.map((widget) =>
+    widget.id === current.id
+      ? normalizeStreamWidget({
+          ...current,
+          status: 'idle',
+          participants: [],
+          winners: [],
+          winnerNicknames: {},
+          startedAt: '',
+          endsAt: '',
+          finishedAt: '',
+          revealId: '',
+        })
+      : widget,
+  );
+  saveStreamWidgets(streamWidgets);
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+function registerGiveawayParticipant(message = {}) {
+  const text = String(message.text || '').trim().toLocaleLowerCase('ru-RU');
+  let changed = false;
+  streamWidgets = streamWidgets.map((widget) => {
+    if (
+      widget.type !== 'giveaway' ||
+      widget.status !== 'running' ||
+      text !== String(widget.keyword || '').trim().toLocaleLowerCase('ru-RU')
+    ) {
+      return widget;
+    }
+
+    const participant = normalizeGiveawayParticipant({
+      platform: message.platform,
+      user: message.user,
+      joinedAt: message.createdAt || new Date().toISOString(),
+    });
+    if (widget.participants.some((item) => item.key === participant.key)) return widget;
+    changed = true;
+    return normalizeStreamWidget({ ...widget, participants: [...widget.participants, participant] });
+  });
+
+  if (changed) {
+    saveStreamWidgets(streamWidgets);
+    broadcastStreamWidgets();
+  }
+}
+
+function registerGiveawayWinnerNickname(message = {}) {
+  const nickname = String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!nickname) return;
+
+  const participant = normalizeGiveawayParticipant({
+    platform: message.platform,
+    user: message.user,
+  });
+  const capturedAt = message.createdAt || new Date().toISOString();
+  const captured = [];
+
+  streamWidgets = streamWidgets.map((widget) => {
+    if (widget.type !== 'giveaway' || widget.status !== 'finished' || widget.collectNicknames !== true) {
+      return widget;
+    }
+    const winner = widget.winners.find((item) => item.key === participant.key);
+    if (!winner || widget.winnerNicknames?.[winner.key]) return widget;
+
+    captured.push({ drawId: widget.revealId, widgetId: widget.id, winner });
+    return normalizeStreamWidget({
+      ...widget,
+      winnerNicknames: {
+        ...(widget.winnerNicknames || {}),
+        [winner.key]: { nickname, capturedAt },
+      },
+    });
+  });
+
+  if (!captured.length) return;
+  saveStreamWidgets(streamWidgets);
+  captured.forEach(({ drawId, widgetId, winner }) => {
+    appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt);
+  });
+  broadcastStreamWidgets();
 }
 
 function normalizePoll(payload = {}) {
@@ -2244,6 +2612,15 @@ function createLocalServer() {
     }
     next();
   });
+  expressApp.get([
+    '/widget/chat',
+    '/widget/chat/',
+    '/widget/chat.html',
+    '/widget/chat/widgets/chat.html',
+    '/widgets/chat',
+  ], (_request, response) => {
+    response.redirect(302, '/widgets/chat.html');
+  });
   expressApp.use('/widgets', (request, response, next) => {
     if (/\.(?:js|css|html)$/.test(request.path)) {
       response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -2556,6 +2933,7 @@ function createLocalServer() {
     socket.emit('chat:ui-settings', chatUiSettings);
     socket.emit('chat:filters', chatHiddenFilters);
     socket.emit('chat:status', getChatStatusPayload());
+    socket.emit('chat:history', getRecentChatMessages(20));
     socket.emit('widgets:state', getStreamWidgetsPayload());
     socket.emit('stickers:settings', stickerSettings);
 
@@ -2573,6 +2951,10 @@ function createLocalServer() {
 
     socket.on('music:played', (payload) => {
       markMusicPlayed(payload?.id);
+    });
+
+    socket.on('music:title', (payload) => {
+      updateMusicTitle(payload?.id, payload?.title);
     });
 
     socket.on('music:bootstrap', (callback) => {
@@ -2893,6 +3275,8 @@ function broadcastChatMessage(message) {
   chatStats.messages += 1;
   chatStats.users.add(`${message.platform}:${message.user}`.toLowerCase());
   registerPollVote(message);
+  registerGiveawayParticipant(message);
+  registerGiveawayWinnerNickname(message);
   maybeEnqueueFirstMessageAlert(message);
   maybeEnqueuePortalAlert(message);
   socketServer?.emit('chat:message', message);
@@ -2956,6 +3340,7 @@ function getMusicQueuePayload() {
       .filter((item) => item.status !== 'played' && !item.played)
       .slice(0, 50),
     minViews: 5000,
+    settings: musicSettings,
   };
 }
 
@@ -3412,6 +3797,27 @@ function markMusicPlayed(id) {
   musicQueue = nextQueue;
   startedMusicIds.delete(id);
   broadcastMusicQueue();
+}
+
+function updateMusicTitle(id, title) {
+  const normalizedTitle = cleanupTitle(title).slice(0, 300);
+  if (!id || !isUsableMusicTitle(normalizedTitle)) {
+    return;
+  }
+
+  let changed = false;
+  musicQueue = musicQueue.map((item) => {
+    if (item.id !== id || item.title === normalizedTitle) {
+      return item;
+    }
+
+    changed = true;
+    return { ...item, title: normalizedTitle };
+  });
+
+  if (changed) {
+    broadcastMusicQueue();
+  }
 }
 
 function finalizePlayingMusicOnWidgetBootstrap() {
@@ -4860,10 +5266,12 @@ async function fetchVkState(channelUrl) {
   }
 
   const streamPath = `/blog/${encodeURIComponent(slug)}/public_video_stream`;
-  const chatQuery = vkConnectionState.lastChatMessageId > 0 ? `?limit=30&from_id=${vkConnectionState.lastChatMessageId}` : '?limit=30';
   const [streamResult, chatResult] = await Promise.allSettled([
     fetchJsonWithRetry(`${VK_API_BASE}${streamPath}`),
-    fetchJsonWithRetry(`${VK_API_BASE}${streamPath}/chat${chatQuery}`),
+    // VK's from_id paginates backwards (the response includes that ID and
+    // older messages). Poll the newest page and deduplicate by message ID
+    // instead, otherwise every message posted after startup is skipped.
+    fetchJsonWithRetry(`${VK_API_BASE}${streamPath}/chat?limit=30`),
   ]);
 
   if (streamResult.status === 'rejected') {
@@ -4877,9 +5285,6 @@ async function fetchVkState(channelUrl) {
   let chatData = [];
   if (chatResult.status === 'fulfilled') {
     chatData = Array.isArray(chatResult.value?.data) ? chatResult.value.data : [];
-    if (vkConnectionState.lastChatMessageId > 0) {
-      chatData = chatData.filter((item) => Number(item.id) > vkConnectionState.lastChatMessageId);
-    }
   }
 
   const messages = (await mapVkChatItems(chatData)).filter((item) => item.text || item.parts.length || item.rewardEvent);
@@ -6065,6 +6470,8 @@ ipcMain.handle('stickers:clear', () => {
 
 ipcMain.handle('music:get-queue', () => getMusicQueuePayload());
 
+ipcMain.handle('music:save-settings', (_event, payload) => saveMusicSettings(payload));
+
 ipcMain.handle('music:add-url', (_event, payload) => addManualMusicUrl(payload));
 
 ipcMain.handle('music:remove-item', (_event, payload) => removeMusicItem(payload?.id));
@@ -6107,6 +6514,12 @@ ipcMain.handle('poll:hide', () => hidePoll());
 ipcMain.handle('poll:show', () => showPoll());
 
 ipcMain.handle('poll:clear', () => clearPoll());
+
+ipcMain.handle('giveaway:start', (_event, payload) => startGiveaway(payload?.id, payload));
+
+ipcMain.handle('giveaway:finish', (_event, payload) => finishGiveaway(payload?.id));
+
+ipcMain.handle('giveaway:reset', (_event, payload) => resetGiveaway(payload?.id));
 
 ipcMain.handle('countdown:adjust', (_event, payload) => adjustCountdownWidget(payload?.id, payload?.deltaSeconds));
 

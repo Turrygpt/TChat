@@ -149,6 +149,9 @@
     getMusicQueue: function () {
       return invoke('music:get-queue');
     },
+    saveMusicSettings: function (p) {
+      return invoke('music:save-settings', p);
+    },
     addMusicUrl: function (p) {
       return invoke('music:add-url', p);
     },
@@ -193,6 +196,17 @@
     },
     clearPoll: function () {
       return invoke('poll:clear');
+    },
+
+    // giveaway
+    startGiveaway: function (p) {
+      return invoke('giveaway:start', p);
+    },
+    finishGiveaway: function (p) {
+      return invoke('giveaway:finish', p);
+    },
+    resetGiveaway: function (p) {
+      return invoke('giveaway:reset', p);
     },
 
     // countdown

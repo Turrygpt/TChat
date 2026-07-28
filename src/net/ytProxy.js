@@ -139,6 +139,9 @@ function installFetchProxy(proxyUrl) {
     const { ProxyAgent } = require('undici');
     const dispatcher = new ProxyAgent(proxyUrl);
     const origFetch = globalThis.fetch;
+    const proxyHost = new URL(proxyUrl).hostname.toLowerCase();
+    const canFallbackDirect = ['127.0.0.1', 'localhost', '::1'].includes(proxyHost);
+    let warnedAboutFallback = false;
     if (typeof origFetch !== 'function') return;
 
     globalThis.fetch = function patchedFetch(input, init) {
@@ -146,7 +149,21 @@ function installFetchProxy(proxyUrl) {
       try {
         const host = hostFromUrl(input);
         if (host && isYouTubeHost(host) && !init.dispatcher) {
-          return origFetch(input, Object.assign({}, init, { dispatcher }));
+          const proxiedRequest = origFetch(input, Object.assign({}, init, { dispatcher }));
+          if (!canFallbackDirect) {
+            return proxiedRequest;
+          }
+
+          return proxiedRequest.catch((error) => {
+            if (init.signal?.aborted) {
+              throw error;
+            }
+            if (!warnedAboutFallback) {
+              warnedAboutFallback = true;
+              console.warn('[ytProxy] локальный прокси недоступен, метаданные YouTube запрашиваются напрямую');
+            }
+            return origFetch(input, init);
+          });
         }
       } catch {
         /* fall through */

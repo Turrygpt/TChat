@@ -29,16 +29,13 @@
         height: 100%;
       }
       #chatFrame {
-        bottom: 3%;
+        /* Положение и размер задаёт телефон через параметры chatX/Y/W/H.
+           Значения по умолчанию — правый столбец, как раньше. */
+        left: 64%;
+        top: 6%;
         width: 34%;
         height: 56%;
         display: none;
-      }
-      body.chat-left #chatFrame {
-        left: 2%;
-      }
-      body.chat-right #chatFrame {
-        right: 2%;
       }
     </style>
   </head>
@@ -62,14 +59,28 @@
 
         const chatFrame = document.getElementById('chatFrame');
         if (on('chat')) {
-          chatFrame.src = './chat.html';
+          // Положение и размер в процентах кадра приходят с телефона.
+          const num = (name, fallback) => {
+            const v = parseFloat(params.get(name));
+            return Number.isFinite(v) ? v : fallback;
+          };
+          const x = num('chatX', 64);
+          const y = num('chatY', 6);
+          const w = num('chatW', 34);
+          const h = num('chatH', 56);
+          const font = num('chatFont', 1);
+          chatFrame.style.left = x + '%';
+          chatFrame.style.top = y + '%';
+          chatFrame.style.right = 'auto';
+          chatFrame.style.bottom = 'auto';
+          chatFrame.style.width = w + '%';
+          chatFrame.style.height = h + '%';
+          // Масштаб шрифта чата — пробрасываем в chat.html.
+          chatFrame.src = './chat.html?font=' + encodeURIComponent(font);
           chatFrame.style.display = 'block';
         } else {
           chatFrame.remove();
         }
-
-        document.body.classList.toggle('chat-right', params.get('chatPos') === 'right');
-        document.body.classList.toggle('chat-left', params.get('chatPos') !== 'right');
       })();
     </script>
   </body>

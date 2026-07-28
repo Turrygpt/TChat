@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Приложение работает с TChat на ПК в локальной сети по HTTP/RTMP,
-         адрес задаёт пользователь — поэтому cleartext разрешён глобально. -->
     <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

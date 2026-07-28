@@ -1,9 +1,37 @@
 const socket = io();
 const chatMessages = document.querySelector('#chatMessages');
-const maxMessages = 8;
+const query = new URLSearchParams(window.location.search);
+const isAndroidClient = query.get('client') === 'android';
+const maxMessages = isAndroidClient ? 20 : 8;
 let chatSettings = {
   direction: 'top-down',
 };
+
+// Масштаб шрифта чата приходит из mobile-overlay.html (?font=1.4 и т.п.).
+(() => {
+  const font = parseFloat(query.get('font'));
+  if (Number.isFinite(font) && font > 0) {
+    document.documentElement.style.setProperty('--chat-font-scale', String(font));
+  }
+})();
+
+let connectionNotice = null;
+
+function setConnectionNotice(text = '') {
+  if (!isAndroidClient) return;
+  if (!connectionNotice) {
+    connectionNotice = document.createElement('div');
+    connectionNotice.className = 'chat-connection-notice';
+    document.body.append(connectionNotice);
+  }
+  connectionNotice.textContent = text;
+  connectionNotice.hidden = !text;
+}
+
+setConnectionNotice('Подключение к чату…');
+socket.on('connect', () => setConnectionNotice(''));
+socket.on('disconnect', () => setConnectionNotice('Связь с сервером чата потеряна'));
+socket.on('connect_error', () => setConnectionNotice('Не удалось подключиться к серверу чата'));
 
 socket.on('system:ready', (payload) => {
   addMessage({
@@ -15,6 +43,11 @@ socket.on('system:ready', (payload) => {
 });
 
 socket.on('chat:message', addMessage);
+socket.on('chat:history', (messages = []) => {
+  if (!isAndroidClient || !Array.isArray(messages)) return;
+  chatMessages.replaceChildren();
+  messages.slice(0, maxMessages).reverse().forEach(addMessage);
+});
 socket.on('chat:ui-settings', applyChatSettings);
 socket.on('chat:music-request', addMusicRequestMessage);
 
@@ -96,19 +129,22 @@ function addMessage(message) {
     <p>${escapeHtml(message.text)}</p>
   `;
 
-  chatMessages.append(item);
+  // Новые сообщения — сверху.
+  chatMessages.prepend(item);
 
   while (chatMessages.children.length > maxMessages) {
-    chatMessages.firstElementChild.remove();
+    chatMessages.lastElementChild.remove();
   }
 
-  window.setTimeout(() => {
-    item.classList.add('chat-message--old');
-  }, 14000);
+  if (!isAndroidClient) {
+    window.setTimeout(() => {
+      item.classList.add('chat-message--old');
+    }, 14000);
 
-  window.setTimeout(() => {
-    item.remove();
-  }, 18000);
+    window.setTimeout(() => {
+      item.remove();
+    }, 18000);
+  }
 }
 
 applyChatSettings(chatSettings);

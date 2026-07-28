@@ -2633,6 +2633,7 @@
               <div class="button-row">
                 <button id="quickCreateGoalButton" class="mini-button" type="button">+ Полоска</button>
                 <button id="quickCreatePollButton" class="mini-button" type="button">+ Голосование</button>
+                <button id="quickCreateGiveawayButton" class="mini-button" type="button">+ Розыгрыш</button>
                 <button id="quickCreateCountdownButton" class="mini-button" type="button">+ Таймер</button>
                 <button id="quickCreateTextsButton" class="mini-button" type="button">+ Тексты</button>
                 <button id="quickCreateTasksButton" class="mini-button" type="button">+ Задачи</button>
@@ -2677,6 +2678,10 @@
                     <strong>Голосование</strong>
                     <span>Вопрос, варианты и управление на стриме.</span>
                   </button>
+                  <button class="widget-type-card" type="button" data-widget-type="giveaway">
+                    <strong>Розыгрыш</strong>
+                    <span>Ключевое слово, участники и выбор победителей.</span>
+                  </button>
                   <button class="widget-type-card" type="button" data-widget-type="music">
                     <strong>Музыка</strong>
                     <span>Плеер и очередь в общем overlay.</span>
@@ -2716,6 +2721,10 @@
                 <div id="pollWidgetHint" hidden>
                   <p class="muted">Голосование появится в общем overlay. Зрители голосуют цифрами в чате.</p>
                   <button id="createPollWidgetButton" class="button" type="button">Добавить голосование</button>
+                </div>
+                <div id="giveawayWidgetHint" hidden>
+                  <p class="muted">Зрители входят по ключевому слову из чата. Завершите по таймеру или кнопкой.</p>
+                  <button id="createGiveawayWidgetButton" class="button" type="button">Добавить розыгрыш</button>
                 </div>
                 <div id="musicWidgetHint" hidden>
                   <p class="muted">Музыкальный виджет появится в общем overlay. Очередь и плеер берутся из раздела “Музыка”.</p>
@@ -2983,6 +2992,11 @@
               <button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/music.html">Открыть</button>
             </div>
             <p class="muted">Добавьте ссылку в OBS как Browser Source. Новые треки запускаются автоматически.</p>
+            <label class="field volume-field">
+              <span>Громкость музыки: <output id="musicVolumeValue">50%</output></span>
+              <input id="musicVolumeInput" type="range" min="0" max="100" step="1" value="50" />
+            </label>
+            <p id="musicVolumeState" class="muted">Настройка применяется к текущему и следующим трекам.</p>
           </article>
 
           <article class="panel panel--wide">
@@ -3382,6 +3396,9 @@
       const musicQueueList = document.querySelector('#musicQueueList');
       const manualMusicUrlInput = document.querySelector('#manualMusicUrlInput');
       const manualMusicState = document.querySelector('#manualMusicState');
+      const musicVolumeInput = document.querySelector('#musicVolumeInput');
+      const musicVolumeValue = document.querySelector('#musicVolumeValue');
+      const musicVolumeState = document.querySelector('#musicVolumeState');
       const chatDirectionSelect = document.querySelector('#chatDirectionSelect');
       const chatUiSettingsState = document.querySelector('#chatUiSettingsState');
       const alertDisplaySecondsInput = document.querySelector('#alertDisplaySecondsInput');
@@ -3987,6 +4004,11 @@
       }
 
       function renderMusicQueue(payload) {
+        const volume = Math.min(Math.max(Number(payload?.settings?.volume ?? 50), 0), 100);
+        if (document.activeElement !== musicVolumeInput) {
+          musicVolumeInput.value = volume;
+          musicVolumeValue.textContent = `${volume}%`;
+        }
         const queue = (Array.isArray(payload?.queue) ? payload.queue : []).filter(
           (item) => item.status !== 'played' && !item.played,
         );
@@ -4024,6 +4046,22 @@
             `;
           })
           .join('') || '<li>Музыкальная очередь пуста.</li>';
+      }
+
+      let musicVolumeSaveTimer = null;
+
+      async function saveMusicVolume() {
+        window.clearTimeout(musicVolumeSaveTimer);
+        const volume = Math.min(Math.max(Number(musicVolumeInput.value || 0), 0), 100);
+        musicVolumeValue.textContent = `${volume}%`;
+
+        try {
+          const payload = await window.tchat.saveMusicSettings({ volume });
+          musicVolumeState.textContent = volume === 0 ? 'Музыка выключена.' : `Громкость сохранена: ${volume}%.`;
+          renderMusicQueue(payload);
+        } catch (error) {
+          musicVolumeState.textContent = error.message || 'Не удалось сохранить громкость.';
+        }
       }
 
       async function addManualMusic() {
@@ -4129,6 +4167,7 @@
           music: 'Музыка',
           goal: 'Полоска сбора',
           poll: 'Голосование',
+          giveaway: 'Розыгрыш',
           countdown: 'Обратный отсчёт',
           texts: 'Тексты',
           tasks: 'Задачи',
@@ -4585,6 +4624,12 @@
           if (widgetsState.poll.visible === false) return 'Голосование скрыто на стриме';
           return widgetsState.poll.status === 'finished' ? 'Показ результатов' : 'Идёт голосование';
         }
+        if (widget.type === 'giveaway') {
+          const count = Array.isArray(widget.participants) ? widget.participants.length : 0;
+          if (widget.status === 'finished') return `Завершён · ${count} участников`;
+          if (widget.status === 'running') return `Идёт · ${count} участников`;
+          return 'Готов к запуску';
+        }
         if (widget.type === 'countdown') {
           if (widget.enabled === false) return 'Таймер скрыт в overlay';
           if (widget.status === 'finished') return 'Время вышло';
@@ -4824,6 +4869,20 @@
           return renderPreviewPollHtml(widgetsState.poll);
         }
 
+        if (widget.type === 'giveaway') {
+          const people = Array.isArray(widget.participants) ? widget.participants : [];
+          const winners = Array.isArray(widget.winners) ? widget.winners : [];
+          return `
+            <article class="stream-goal">
+              <div class="stream-goal__top">
+                <strong>🎁 ${escapeHtml(widget.prize || 'Приз')}</strong>
+                <span>${people.length} участников</span>
+              </div>
+              <div class="stream-goal__value">${widget.status === 'finished' ? escapeHtml(winners.map((item) => item.user).join(', ') || 'Нет участников') : escapeHtml(widget.keyword || '!участвую')}</div>
+            </article>
+          `;
+        }
+
         if (widget.type === 'countdown') {
           return renderPreviewCountdownHtml(widget);
         }
@@ -4959,6 +5018,89 @@
             <div class="button-row">
               <button class="button" type="button" data-save-config>Сохранить позицию</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
+            </div>
+          `;
+          return;
+        }
+
+        if (widget.type === 'giveaway') {
+          const participants = Array.isArray(widget.participants) ? widget.participants : [];
+          const winners = Array.isArray(widget.winners) ? widget.winners : [];
+          const log = Array.isArray(widgetsState.giveawayLog)
+            ? widgetsState.giveawayLog.filter((entry) => entry.widgetId === widget.id).slice(0, 8)
+            : [];
+          workspaceConfigurator.innerHTML = `
+            <div class="workspace-poll-status">${escapeHtml(widgetStatusText(widget))}</div>
+            <label class="field">Название
+              <input data-giveaway-field="title" type="text" value="${escapeHtml(widget.title || 'Розыгрыш')}" />
+            </label>
+            <div class="compact-grid">
+              <label class="field">Приз
+                <input data-giveaway-field="prize" type="text" value="${escapeHtml(widget.prize || 'Приз')}" />
+              </label>
+              <label class="field">Количество призов
+                <input data-giveaway-field="prizeCount" type="number" min="1" max="100" value="${escapeHtml(widget.prizeCount || 1)}" />
+              </label>
+            </div>
+            <div class="compact-grid">
+              <label class="field">Ключевое слово
+                <input data-giveaway-field="keyword" type="text" value="${escapeHtml(widget.keyword || '!участвую')}" />
+              </label>
+              <label class="field">Время, секунд (0 — вручную)
+                <input data-giveaway-field="durationSeconds" type="number" min="0" max="604800" value="${escapeHtml(widget.durationSeconds || 0)}" />
+              </label>
+            </div>
+            <label class="rule-toggle">
+              <input data-giveaway-field="collectNicknames" type="checkbox" ${widget.collectNicknames !== false ? 'checked' : ''} />
+              После розыгрыша собирать ники победителей из чата
+            </label>
+            <div class="button-row">
+              <button class="button" type="button" data-giveaway-save>Обновить данные</button>
+              <button class="button" type="button" data-giveaway-start>${widget.status === 'running' ? 'Перезапустить' : 'Старт'}</button>
+              <button class="button button--ghost" type="button" data-giveaway-finish ${widget.status !== 'running' ? 'disabled' : ''}>Завершить и выбрать</button>
+              <button class="button button--danger" type="button" data-giveaway-reset>Сбросить</button>
+            </div>
+            <p class="muted"><strong>Участники (${participants.length}):</strong> ${participants.length ? participants.map((item) => escapeHtml(item.user)).join(', ') : 'пока нет'}</p>
+            ${
+              winners.length
+                ? `<p class="muted"><strong>Победители:</strong> ${winners
+                    .map((item) => {
+                      const claim = widget.winnerNicknames?.[item.key];
+                      return `${escapeHtml(item.user)}${claim ? ` → ${escapeHtml(claim.nickname)}` : widget.collectNicknames !== false ? ' → ждём ник' : ''}`;
+                    })
+                    .join(', ')}</p>`
+                : ''
+            }
+            <div class="compact-grid">
+              <label class="field">X, %
+                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 28)}" />
+              </label>
+              <label class="field">Y, %
+                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 20)}" />
+              </label>
+            </div>
+            ${renderWorkspaceSizeFields(widget, { defaultWidth: 44 })}
+            <div class="button-row">
+              <button class="button" type="button" data-save-config>Сохранить позицию</button>
+              <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
+            </div>
+            <div class="workspace-poll-status">
+              <strong>Журнал победителей</strong>
+              ${log.length
+                ? log
+                    .map(
+                      (entry) =>
+                        `<div>${escapeHtml(new Date(entry.finishedAt).toLocaleString('ru-RU'))}: ${
+                          entry.winners
+                            .map((item) => {
+                              const claim = entry.winnerNicknames?.[item.key];
+                              return `${escapeHtml(item.user)}${claim ? ` → ${escapeHtml(claim.nickname)}` : ''}`;
+                            })
+                            .join(', ') || 'нет победителей'
+                        }</div>`,
+                    )
+                    .join('')
+                : '<div>Завершённых розыгрышей пока нет.</div>'}
             </div>
           `;
           return;
@@ -5304,6 +5446,7 @@
         widgetsState = {
           items: Array.isArray(state.items) ? state.items : [],
           poll: state.poll || null,
+          giveawayLog: Array.isArray(state.giveawayLog) ? state.giveawayLog : [],
           urls: state.urls || {},
         };
 
@@ -5324,6 +5467,7 @@
             const widgetUrlByType = {
               goal: `${widgetsState.urls.goal || 'http://localhost:3000/widgets/goal.html'}?id=${encodeURIComponent(widget.id)}`,
               music: widgetsState.urls.music || 'http://localhost:3000/widgets/music.html',
+              giveaway: `${widgetsState.urls.giveaway || 'http://localhost:3000/widgets/giveaway.html'}?id=${encodeURIComponent(widget.id)}`,
               countdown: `${widgetsState.urls.countdown || 'http://localhost:3000/widgets/countdown.html'}?id=${encodeURIComponent(widget.id)}`,
               texts: `${widgetsState.urls.texts || 'http://localhost:3000/widgets/texts.html'}?id=${encodeURIComponent(widget.id)}`,
               tasks: `${widgetsState.urls.tasks || 'http://localhost:3000/widgets/tasks.html'}?id=${encodeURIComponent(widget.id)}`,
@@ -5514,6 +5658,35 @@
         if (widgetsStudioState) {
           widgetsStudioState.textContent = 'Виджет голосования добавлен в overlay.';
         }
+        renderWidgetsState(payload);
+      }
+
+      async function createGiveawayWidget() {
+        const existing = widgetsState.items.find((item) => item.type === 'giveaway');
+        if (existing) {
+          selectedWorkspaceWidgetId = existing.id;
+          renderWorkspace();
+          widgetsStudioState.textContent = 'Виджет розыгрыша уже в списке.';
+          return;
+        }
+
+        const payload = await window.tchat.createWidget({
+          type: 'giveaway',
+          title: 'Розыгрыш',
+          prize: 'Приз',
+          prizeCount: 1,
+          keyword: '!участвую',
+          collectNicknames: true,
+          durationSeconds: 300,
+          status: 'idle',
+          enabled: true,
+          x: 28,
+          y: 20,
+          width: 44,
+        });
+        const giveaway = payload.items.find((item) => item.type === 'giveaway');
+        selectedWorkspaceWidgetId = giveaway?.id || selectedWorkspaceWidgetId;
+        widgetsStudioState.textContent = 'Розыгрыш добавлен. Настройте его и нажмите «Старт».';
         renderWidgetsState(payload);
       }
 
@@ -5771,12 +5944,13 @@
       }
 
       function selectWidgetType(type) {
-        selectedWidgetType = ['poll', 'music', 'countdown', 'texts', 'tasks'].includes(type) ? type : 'goal';
+        selectedWidgetType = ['poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks'].includes(type) ? type : 'goal';
         document.querySelectorAll('[data-widget-type]').forEach((button) => {
           button.classList.toggle('is-active', button.dataset.widgetType === selectedWidgetType);
         });
         goalWidgetForm.hidden = selectedWidgetType !== 'goal';
         pollWidgetHint.hidden = selectedWidgetType !== 'poll';
+        document.querySelector('#giveawayWidgetHint').hidden = selectedWidgetType !== 'giveaway';
         musicWidgetHint.hidden = selectedWidgetType !== 'music';
         if (document.querySelector('#countdownWidgetHint')) {
           document.querySelector('#countdownWidgetHint').hidden = selectedWidgetType !== 'countdown';
@@ -5815,9 +5989,47 @@
         }
       }
 
+      function collectGiveawayFields(widgetId) {
+        return {
+          id: widgetId,
+          title: workspaceConfigurator?.querySelector('[data-giveaway-field="title"]')?.value.trim() || 'Розыгрыш',
+          prize: workspaceConfigurator?.querySelector('[data-giveaway-field="prize"]')?.value.trim() || 'Приз',
+          prizeCount: Number(workspaceConfigurator?.querySelector('[data-giveaway-field="prizeCount"]')?.value || 1),
+          keyword: workspaceConfigurator?.querySelector('[data-giveaway-field="keyword"]')?.value.trim() || '!участвую',
+          durationSeconds: Number(workspaceConfigurator?.querySelector('[data-giveaway-field="durationSeconds"]')?.value || 0),
+          collectNicknames: workspaceConfigurator?.querySelector('[data-giveaway-field="collectNicknames"]')?.checked !== false,
+        };
+      }
+
+      async function startGiveawayFromWorkspace(widgetId) {
+        try {
+          const payload = await window.tchat.startGiveaway(collectGiveawayFields(widgetId));
+          widgetsStudioState.textContent = 'Розыгрыш запущен. Участники входят по ключевому слову.';
+          renderWidgetsState(payload);
+        } catch (error) {
+          widgetsStudioState.textContent = error.message || 'Не удалось запустить розыгрыш.';
+        }
+      }
+
+      async function saveGiveawayFromWorkspace(widgetId, options = {}) {
+        try {
+          const payload = await window.tchat.updateWidget(collectGiveawayFields(widgetId));
+          if (!options.silent) {
+            widgetsStudioState.textContent = 'Данные розыгрыша обновлены в OBS.';
+          }
+          renderWidgetsState(payload);
+        } catch (error) {
+          widgetsStudioState.textContent = error.message || 'Не удалось обновить данные розыгрыша.';
+        }
+      }
+
       workspaceConfigurator?.addEventListener('change', (event) => {
         if (!selectedWorkspaceWidgetId) return;
         const widget = widgetsState.items.find((item) => item.id === selectedWorkspaceWidgetId);
+        if (widget?.type === 'giveaway' && event.target.matches('[data-giveaway-field]')) {
+          void saveGiveawayFromWorkspace(selectedWorkspaceWidgetId, { silent: true });
+          return;
+        }
         if (widget?.type !== 'tasks') return;
 
         if (event.target.matches('[data-tasks-field="skin"]')) {
@@ -5842,6 +6054,12 @@
       document.querySelector('#saveGoalButton').addEventListener('click', saveGoal);
       document.querySelector('#addGoalDonationButton').addEventListener('click', addGoalDonation);
       document.querySelector('#addManualMusicButton').addEventListener('click', addManualMusic);
+      musicVolumeInput.addEventListener('input', () => {
+        musicVolumeValue.textContent = `${musicVolumeInput.value}%`;
+        window.clearTimeout(musicVolumeSaveTimer);
+        musicVolumeSaveTimer = window.setTimeout(saveMusicVolume, 150);
+      });
+      musicVolumeInput.addEventListener('change', saveMusicVolume);
       document.querySelector('#authorizeDonationAlertsButton').addEventListener('click', authorizeDonationAlerts);
       document.querySelector('#connectDonationAlertsButton').addEventListener('click', connectDonationAlerts);
       document.querySelector('#clearDonationAlertsButton').addEventListener('click', clearDonationAlerts);
@@ -5852,11 +6070,13 @@
       document.querySelector('#createGoalWidgetButton').addEventListener('click', createGoalWidget);
       document.querySelector('#quickCreateGoalButton').addEventListener('click', createGoalWidget);
       document.querySelector('#quickCreatePollButton').addEventListener('click', createPollWidget);
+      document.querySelector('#quickCreateGiveawayButton').addEventListener('click', createGiveawayWidget);
       document.querySelector('#quickCreateCountdownButton').addEventListener('click', createCountdownWidget);
       document.querySelector('#quickCreateTextsButton').addEventListener('click', createTextsWidget);
       document.querySelector('#quickCreateTasksButton').addEventListener('click', createTasksWidget);
       document.querySelector('#createMusicWidgetButton').addEventListener('click', createMusicWidget);
       document.querySelector('#createPollWidgetButton')?.addEventListener('click', createPollWidget);
+      document.querySelector('#createGiveawayWidgetButton')?.addEventListener('click', createGiveawayWidget);
       document.querySelector('#createCountdownWidgetButton')?.addEventListener('click', createCountdownWidget);
       document.querySelector('#createTextsWidgetButton')?.addEventListener('click', createTextsWidget);
       document.querySelector('#createTasksWidgetButton')?.addEventListener('click', createTasksWidget);
@@ -5891,6 +6111,10 @@
         const workspacePollClear = event.target.closest('[data-workspace-poll-clear]');
         const workspacePollAddOption = event.target.closest('[data-workspace-poll-add-option]');
         const workspacePollRemove = event.target.closest('[data-workspace-poll-remove]');
+        const giveawayStartButton = event.target.closest('[data-giveaway-start]');
+        const giveawaySaveButton = event.target.closest('[data-giveaway-save]');
+        const giveawayFinishButton = event.target.closest('[data-giveaway-finish]');
+        const giveawayResetButton = event.target.closest('[data-giveaway-reset]');
         const countdownSetButton = event.target.closest('[data-countdown-set]');
         const countdownStartButton = event.target.closest('[data-countdown-start]');
         const countdownPauseButton = event.target.closest('[data-countdown-pause]');
@@ -5901,6 +6125,26 @@
         const tasksAddButton = event.target.closest('[data-tasks-add]');
         const tasksMoveButton = event.target.closest('[data-tasks-move]');
         const taskDeleteButton = event.target.closest('[data-task-delete]');
+
+        if (giveawaySaveButton && selectedWorkspaceWidgetId) {
+          saveGiveawayFromWorkspace(selectedWorkspaceWidgetId);
+          return;
+        }
+
+        if (giveawayStartButton && selectedWorkspaceWidgetId) {
+          startGiveawayFromWorkspace(selectedWorkspaceWidgetId);
+          return;
+        }
+
+        if (giveawayFinishButton && selectedWorkspaceWidgetId) {
+          window.tchat.finishGiveaway({ id: selectedWorkspaceWidgetId }).then(renderWidgetsState);
+          return;
+        }
+
+        if (giveawayResetButton && selectedWorkspaceWidgetId) {
+          window.tchat.resetGiveaway({ id: selectedWorkspaceWidgetId }).then(renderWidgetsState);
+          return;
+        }
 
         if (countdownModeButton) {
           setCountdownSetupModeInDom(countdownModeButton.dataset.countdownMode);

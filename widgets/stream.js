@@ -600,7 +600,7 @@ function renderTasks(items) {
 function renderEmbeddedWidgets(items) {
   if (!streamEmbeddedWidgets) return;
 
-  const widgets = items.filter((item) => ['music'].includes(item.type) && item.enabled !== false);
+  const widgets = items.filter((item) => ['music', 'giveaway'].includes(item.type) && item.enabled !== false);
   const activeIds = new Set(widgets.map((widget) => widget.id));
 
   streamEmbeddedWidgets.querySelectorAll('[data-embedded-widget-id]').forEach((node) => {
@@ -613,7 +613,10 @@ function renderEmbeddedWidgets(items) {
     const x = Number(widget.x ?? 68);
     const y = Number(widget.y ?? 10);
     const width = Number(widget.width ?? 28);
-    const src = widget.type === 'music' ? '/widgets/music.html?embedded=1' : '';
+    const src =
+      widget.type === 'music'
+        ? '/widgets/music.html?embedded=1'
+        : `/widgets/giveaway.html?embedded=1&id=${encodeURIComponent(widget.id)}`;
     const style = `left: ${x}%; top: ${y}%; width: ${width}%; ${widgetHeightCss(widget)}`;
     let node = streamEmbeddedWidgets.querySelector(`[data-embedded-widget-id="${widget.id}"]`);
 
@@ -633,10 +636,34 @@ function renderEmbeddedWidgets(items) {
     node.src = src;
     node.style.cssText = style;
     node.allow = 'clipboard-write; autoplay; encrypted-media; fullscreen';
+    node.setAttribute('allowtransparency', 'true');
     node.allowFullscreen = true;
+    node.addEventListener('load', () => syncObsPlaybackState(node));
     streamEmbeddedWidgets.appendChild(node);
   });
 }
+
+let obsSourceVisible = true;
+let obsSourceActive = true;
+
+function syncObsPlaybackState(target) {
+  const frames = target ? [target] : [...(streamEmbeddedWidgets?.querySelectorAll('.stream-embedded-widget--music') || [])];
+  const allowed = obsSourceVisible && obsSourceActive;
+
+  frames.forEach((frame) => {
+    frame.contentWindow?.postMessage({ type: 'tchat:obs-playback', allowed }, window.location.origin);
+  });
+}
+
+window.addEventListener('obsSourceVisibleChanged', (event) => {
+  obsSourceVisible = event.detail?.visible !== false;
+  syncObsPlaybackState();
+});
+
+window.addEventListener('obsSourceActiveChanged', (event) => {
+  obsSourceActive = event.detail?.active !== false;
+  syncObsPlaybackState();
+});
 
 function isWidgetEnabled(type) {
   const widget = latestState.items.find((item) => item.type === type || item.id === `builtin-${type}`);

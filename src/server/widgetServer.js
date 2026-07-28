@@ -21,6 +21,15 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   const releasesPath = path.join(__dirname, '../../releases');
 
   app.use(express.json());
+  app.get([
+    '/widget/chat',
+    '/widget/chat/',
+    '/widget/chat.html',
+    '/widget/chat/widgets/chat.html',
+    '/widgets/chat',
+  ], (_request, response) => {
+    response.redirect(302, '/widgets/chat.html');
+  });
   app.use('/widgets', express.static(widgetsPath));
   app.use('/assets', express.static(assetsPath));
   // Стабильная ссылка на свежий установщик: URL не меняется от версии к версии,
@@ -57,6 +66,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         chat: '/widgets/chat.html',
         goal: '/widgets/goal.html',
         music: '/widgets/music.html',
+        giveaway: '/widgets/giveaway.html',
         countdown: '/widgets/countdown.html',
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
@@ -93,6 +103,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         chat: `http://localhost:${port}/widgets/chat.html`,
         goal: `http://localhost:${port}/widgets/goal.html`,
         music: `http://localhost:${port}/widgets/music.html`,
+        giveaway: `http://localhost:${port}/widgets/giveaway.html`,
         countdown: `http://localhost:${port}/widgets/countdown.html`,
         texts: `http://localhost:${port}/widgets/texts.html`,
         tasks: `http://localhost:${port}/widgets/tasks.html`,
@@ -304,6 +315,7 @@ function renderLandingPage() {
     ['chat', 'Чат', 'Агрегированный чат'],
     ['goal', 'Цель сбора', 'Прогресс-бар цели'],
     ['music', 'Музыка', 'Текущий трек / заявки'],
+    ['giveaway', 'Розыгрыш', 'Участники и победители'],
     ['countdown', 'Таймер', 'Обратный отсчёт'],
     ['texts', 'Тексты', 'Бегущие сообщения'],
     ['tasks', 'Задачи', 'План на эфир'],

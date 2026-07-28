@@ -19,8 +19,7 @@ let rutubeSoundRetryTimers = [];
 let playbackStartedAt = 0;
 let lastKnownDuration = 0;
 const knownReadyIds = new Set();
-const MUSIC_VOLUME_PERCENT = 50;
-const STARTED_TRACKS_KEY = 'tchat.music.startedTracks';
+let musicVolumePercent = 50;
 const MUSIC_LEADER_KEY = 'tchat.music.leader';
 const TRACK_END_GUARD_MS = 3000;
 const DEFAULT_PLAYBACK_FALLBACK_MS = 15 * 60 * 1000;
@@ -28,42 +27,12 @@ const LEADER_TTL_MS = 5000;
 const isEmbeddedPlayer = new URLSearchParams(window.location.search).get('embedded') === '1';
 const playerInstanceId = `music-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 let canPlayAudio = false;
+let obsPlaybackAllowed = true;
 let leaderHeartbeatTimer = null;
 let startingTrackId = '';
 let youtubeSoundConfirmed = false; // плеер сам подтвердил, что звук включён
 let youtubeSoundRetryTimers = [];
-
-function readStartedTracks() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STARTED_TRACKS_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberStartedTrack(id) {
-  if (!id) {
-    return;
-  }
-
-  const startedTracks = new Set(readStartedTracks());
-  startedTracks.add(id);
-  localStorage.setItem(STARTED_TRACKS_KEY, JSON.stringify([...startedTracks].slice(-100)));
-}
-
-function hasStartedTrack(id) {
-  return readStartedTracks().includes(id);
-}
-
-function forgetStartedTrack(id) {
-  if (!id) {
-    return;
-  }
-
-  const startedTracks = readStartedTracks().filter((trackId) => trackId !== id);
-  localStorage.setItem(STARTED_TRACKS_KEY, JSON.stringify(startedTracks));
-}
+let lastReportedTitle = '';
 
 function readPlaybackLeader() {
   try {
@@ -85,6 +54,10 @@ function writePlaybackLeader(record) {
 // встроенный вытесняет только отдельное окно виджета, но не другой встроенный:
 // кто занял место первым, тот и играет.
 function claimPlaybackLeadership() {
+  if (!obsPlaybackAllowed) {
+    return false;
+  }
+
   const now = Date.now();
   const current = readPlaybackLeader();
   const leaderAlive = Boolean(current?.id) && now - Number(current.at || 0) < LEADER_TTL_MS;
@@ -137,12 +110,10 @@ function initPlaybackLeader() {
 
 function loadInitialState() {
   const bootstrap = () => {
-    socket.emit('music:bootstrap', () => {
-      fetch('/music/state')
-        .then((response) => response.json())
-        .then(renderMusicState)
-        .catch(() => {});
-    });
+    fetch('/music/state')
+      .then((response) => response.json())
+      .then(renderMusicState)
+      .catch(() => {});
   };
 
   if (socket.connected) {
@@ -156,6 +127,34 @@ initPlaybackLeader();
 loadInitialState();
 
 window.addEventListener('message', handlePlayerMessage);
+window.addEventListener('message', handleObsPlaybackMessage);
+window.addEventListener('obsSourceVisibleChanged', (event) => {
+  setObsPlaybackAllowed(event.detail?.visible !== false);
+});
+window.addEventListener('obsSourceActiveChanged', (event) => {
+  setObsPlaybackAllowed(event.detail?.active !== false);
+});
+
+function handleObsPlaybackMessage(event) {
+  if (event.source !== window.parent || event.data?.type !== 'tchat:obs-playback') {
+    return;
+  }
+
+  setObsPlaybackAllowed(event.data.allowed !== false);
+}
+
+function setObsPlaybackAllowed(allowed) {
+  const nextAllowed = allowed !== false;
+  if (obsPlaybackAllowed === nextAllowed) {
+    return;
+  }
+
+  obsPlaybackAllowed = nextAllowed;
+  if (!obsPlaybackAllowed) {
+    releasePlaybackLeadership();
+  }
+  refreshPlaybackLeadership();
+}
 
 socket.on('music:queue', renderMusicState);
 socket.on('music:play', (item) => {
@@ -181,6 +180,12 @@ function upsertQueueItem(item) {
 }
 
 function renderMusicState(state) {
+  const nextVolume = Number(state?.settings?.volume);
+  if (Number.isFinite(nextVolume)) {
+    musicVolumePercent = Math.min(Math.max(Math.round(nextVolume), 0), 100);
+    applyMusicVolume();
+  }
+
   queue = Array.isArray(state?.queue) ? state.queue : [];
 
   if (currentId && !queue.some((item) => item.id === currentId && (item.status === 'ready' || item.status === 'playing') && !item.played)) {
@@ -195,7 +200,11 @@ function renderMusicState(state) {
 
   renderQueue();
 
-  if (canPlayAudio && !currentId && queue.some((item) => item.status === 'ready' && !item.played && item.embedUrl)) {
+  if (
+    canPlayAudio &&
+    !currentId &&
+    queue.some((item) => ['ready', 'playing'].includes(item.status) && !item.played && item.embedUrl)
+  ) {
     playNextReady();
   }
 }
@@ -205,19 +214,13 @@ function playNextReady() {
     return;
   }
 
-  const next = queue.find((item) => item.status === 'ready' && !item.played && item.embedUrl);
+  const next = queue.find((item) => ['ready', 'playing'].includes(item.status) && !item.played && item.embedUrl);
 
   if (!next) {
     setNowTitle('');
     musicPlayer.hidden = true;
     musicPlayer.removeAttribute('src');
     musicPlayer.src = '';
-    return;
-  }
-
-  if (hasStartedTrack(next.id)) {
-    socket.emit('music:played', { id: next.id });
-    window.setTimeout(playNextReady, 0);
     return;
   }
 
@@ -247,13 +250,13 @@ function startPlayback(item) {
   vkSoundEnabled = false;
   rutubeSoundEnabled = false;
   youtubeSoundConfirmed = false;
+  lastReportedTitle = '';
   clearRutubeSoundRetries();
   clearYouTubeSoundRetries();
 
   currentId = item.id;
   playbackStartedAt = Date.now();
   lastKnownDuration = Number(item.duration) || 0;
-  rememberStartedTrack(item.id);
   socket.emit('music:started', { id: item.id });
   setNowTitle(decodeHtml(item.title || 'Музыкальная заявка'));
 
@@ -298,7 +301,6 @@ function finishCurrentTrack() {
   playTimer = null;
   finalizeTimer = null;
   socket.emit('music:played', { id: itemId });
-  forgetStartedTrack(itemId);
   stopPlayback(true);
   finishingTrackId = '';
 }
@@ -456,8 +458,16 @@ function initVkVideoPlayer(item) {
 // одной попытки звук появлялся с задержкой в несколько секунд. Поэтому шлём
 // серию попыток и прекращаем, только когда плеер сам отчитается, что не в муте.
 function enableYouTubeSound() {
-  sendYouTubeCommand('unMute');
-  sendYouTubeCommand('setVolume', [MUSIC_VOLUME_PERCENT]);
+  if (musicVolumePercent === 0) {
+    sendYouTubeCommand('setVolume', [0]);
+    sendYouTubeCommand('mute');
+    youtubeSoundConfirmed = true;
+    clearYouTubeSoundRetries();
+  } else {
+    sendYouTubeCommand('unMute');
+    sendYouTubeCommand('setVolume', [musicVolumePercent]);
+  }
+  sendYouTubeCommand('getVideoData');
 }
 
 function clearYouTubeSoundRetries() {
@@ -555,9 +565,21 @@ function handlePlayerMessage(event) {
   if (data.event === 'infoDelivery' && data.info) {
     const currentTime = Number(data.info.currentTime);
     const duration = Number(data.info.duration ?? data.info.videoDuration ?? data.info.length);
+    const reportedTitle = decodeHtml(data.info.videoData?.title || data.info.title || '').trim();
 
     if (Number.isFinite(currentTime) && Number.isFinite(duration) && duration > 0) {
       trackPlaybackProgress(currentTime, duration);
+    }
+
+    if (isUsableReportedTitle(reportedTitle) && reportedTitle !== lastReportedTitle) {
+      lastReportedTitle = reportedTitle;
+      const currentItem = queue.find((item) => item.id === currentId);
+      if (currentItem) {
+        currentItem.title = reportedTitle;
+      }
+      setNowTitle(reportedTitle);
+      renderQueue();
+      socket.emit('music:title', { id: currentId, title: reportedTitle });
     }
   }
 
@@ -622,6 +644,7 @@ function stopPlayback(continueQueue) {
   vkSoundEnabled = false;
   rutubeSoundEnabled = false;
   youtubeSoundConfirmed = false;
+  lastReportedTitle = '';
   clearRutubeSoundRetries();
   clearYouTubeSoundRetries();
   playbackStartedAt = 0;
@@ -674,8 +697,8 @@ function enableRutubeSound(force = false) {
   }
 
   rutubeSoundEnabled = true;
-  sendRutubeCommand('player:unMute');
-  sendRutubeCommand('player:setVolume', { volume: MUSIC_VOLUME_PERCENT / 100 });
+  sendRutubeCommand(musicVolumePercent === 0 ? 'player:mute' : 'player:unMute');
+  sendRutubeCommand('player:setVolume', { volume: musicVolumePercent / 100 });
 }
 
 function scheduleRutubeSoundRetries() {
@@ -711,8 +734,25 @@ function enableVkSound() {
   }
 
   vkSoundEnabled = true;
-  sendVkCommand('unmute');
-  sendVkCommand('set_volume', { volume: MUSIC_VOLUME_PERCENT / 100 });
+  sendVkCommand(musicVolumePercent === 0 ? 'mute' : 'unmute');
+  sendVkCommand('set_volume', { volume: musicVolumePercent / 100 });
+}
+
+function applyMusicVolume() {
+  if (!currentId || !musicPlayer.contentWindow) {
+    return;
+  }
+
+  if (isYouTubeItem({ embedUrl: musicPlayer.src })) {
+    youtubeSoundConfirmed = false;
+    enableYouTubeSound();
+  } else if (isRutubeItem({ embedUrl: musicPlayer.src })) {
+    rutubeSoundEnabled = false;
+    enableRutubeSound(true);
+  } else if (isVkItem({ embedUrl: musicPlayer.src })) {
+    vkSoundEnabled = false;
+    enableVkSound();
+  }
 }
 
 function startVkPlayback() {
@@ -817,6 +857,11 @@ function decodeHtml(value = '') {
   return node.value;
 }
 
+function isUsableReportedTitle(title = '') {
+  const value = String(title || '').trim();
+  return Boolean(value) && value.length <= 300 && !/^https?:\/\//i.test(value) && !/^(YouTube|Rutube|VK Видео)$/i.test(value);
+}
+
 function escapeHtml(value = '') {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -828,11 +873,4 @@ function escapeHtml(value = '') {
 
 window.addEventListener('beforeunload', () => {
   releasePlaybackLeadership();
-
-  if (!currentId) {
-    return;
-  }
-
-  socket.emit('music:played', { id: currentId });
-  forgetStartedTrack(currentId);
 });

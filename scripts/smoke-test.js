@@ -104,7 +104,7 @@ check('health endpoint', async () => {
 });
 
 check('widget pages are served', async () => {
-  const pages = ['/widgets/music.html', '/widgets/alerts.html', '/widgets/chat.html', '/widgets/goal.html', '/widgets/tasks.html', '/widgets/stream.html'];
+  const pages = ['/widgets/music.html', '/widgets/alerts.html', '/widgets/chat.html', '/widgets/goal.html', '/widgets/giveaway.html', '/widgets/tasks.html', '/widgets/stream.html'];
   for (const page of pages) {
     const { response, body } = await request(page, { method: 'GET', headers: {} });
     if (!response.ok || typeof body !== 'string' || !body.includes('<html')) {
@@ -190,6 +190,14 @@ check('chat widget applies direction settings', async () => {
   }
   if (!scriptResponse.body.includes("socket.on('chat:music-request'")) {
     throw new Error('chat widget music request listener missing');
+  }
+  if (!scriptResponse.body.includes("socket.on('chat:history'") || !scriptResponse.body.includes('isAndroidClient')) {
+    throw new Error('Android chat history support missing');
+  }
+
+  const mainSource = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  if (!mainSource.includes("socket.emit('chat:history'")) {
+    throw new Error('chat history is not sent to newly connected widgets');
   }
 
   if (!styleResponse.response.ok || !styleResponse.body.includes('widget-page--chat-top-down')) {
@@ -464,6 +472,100 @@ check('music builds rutube and vk embed fallbacks', () => {
   }
 });
 
+check('backoffice exposes giveaway in the active widget toolbar', async () => {
+  const body = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (
+    !body.includes('id="quickCreateGiveawayButton"') ||
+    !body.includes("addEventListener('click', createGiveawayWidget)")
+  ) {
+    throw new Error('giveaway quick-create control missing');
+  }
+});
+
+check('giveaway widget has live state, reveal animation and sound', async () => {
+  const [scriptResponse, styleResponse, streamResponse] = await Promise.all([
+    request('/widgets/giveaway.js', { method: 'GET', headers: {} }),
+    request('/widgets/giveaway.css', { method: 'GET', headers: {} }),
+    request('/widgets/stream.js', { method: 'GET', headers: {} }),
+  ]);
+  if (
+    !scriptResponse.response.ok ||
+    !scriptResponse.body.includes("socket.on('widgets:state'") ||
+    !scriptResponse.body.includes('playFanfare') ||
+    !scriptResponse.body.includes('отправьте свой игровой ник в чат')
+  ) {
+    throw new Error('giveaway live reveal script missing');
+  }
+  if (!styleResponse.response.ok || !styleResponse.body.includes('@keyframes confetti-fall')) {
+    throw new Error('giveaway animation missing');
+  }
+  if (
+    !styleResponse.body.includes('zoom: 0.7') ||
+    !styleResponse.body.includes('background-color: rgb(0 0 0 / 0%)')
+  ) {
+    throw new Error('giveaway scaling or transparent canvas missing');
+  }
+  if (!streamResponse.response.ok || !streamResponse.body.includes('/widgets/giveaway.html?embedded=1')) {
+    throw new Error('giveaway is not embedded in stream overlay');
+  }
+});
+
+check('giveaway prize settings update from backoffice', async () => {
+  const body = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (
+    !body.includes('data-giveaway-save') ||
+    !body.includes('data-giveaway-field="collectNicknames"') ||
+    !body.includes("event.target.matches('[data-giveaway-field]')") ||
+    !body.includes('saveGiveawayFromWorkspace')
+  ) {
+    throw new Error('giveaway prize update controls missing');
+  }
+});
+
+check('legacy Android chat URL redirects to the chat widget', async () => {
+  const paths = ['/widget/chat', '/widget/chat/widgets/chat.html', '/widgets/chat'];
+  for (const path of paths) {
+    const { response } = await request(path, { method: 'GET', headers: {}, redirect: 'manual' });
+    if (response.status !== 302 || response.headers.get('location') !== '/widgets/chat.html') {
+      throw new Error(`unexpected ${path} response: ${response.status} ${response.headers.get('location') || ''}`);
+    }
+  }
+});
+
+check('music survives OBS source handoff', () => {
+  const musicBody = fs.readFileSync(path.join(projectRoot, 'widgets', 'music.js'), 'utf8');
+  const streamBody = fs.readFileSync(path.join(projectRoot, 'widgets', 'stream.js'), 'utf8');
+
+  if (musicBody.includes("socket.emit('music:bootstrap'")) {
+    throw new Error('music widget still removes a playing track while bootstrapping');
+  }
+  if (!musicBody.includes("['ready', 'playing'].includes(item.status)")) {
+    throw new Error('a refreshed OBS source cannot resume the playing track');
+  }
+  if (!streamBody.includes('obsSourceVisibleChanged') || !streamBody.includes('obsSourceActiveChanged')) {
+    throw new Error('embedded music does not follow OBS source visibility');
+  }
+  if (!streamBody.includes("type: 'tchat:obs-playback'")) {
+    throw new Error('OBS source state is not forwarded to the embedded music player');
+  }
+});
+
+check('music uses the title reported by the OBS player', () => {
+  const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const musicBody = fs.readFileSync(path.join(projectRoot, 'widgets', 'music.js'), 'utf8');
+  const proxyBody = fs.readFileSync(path.join(projectRoot, 'src', 'net', 'ytProxy.js'), 'utf8');
+
+  if (!musicBody.includes('data.info.videoData?.title') || !musicBody.includes("socket.emit('music:title'")) {
+    throw new Error('music widget ignores the title reported by the embedded player');
+  }
+  if (!mainBody.includes("socket.on('music:title'") || !mainBody.includes('function updateMusicTitle')) {
+    throw new Error('player-reported music titles are not saved in the shared queue');
+  }
+  if (!proxyBody.includes('canFallbackDirect') || !proxyBody.includes('return origFetch(input, init)')) {
+    throw new Error('YouTube metadata has no direct fallback when the local proxy is offline');
+  }
+});
+
 check('music state after enqueue', async () => {
   const { response, body } = await request('/music/state', { method: 'GET', headers: {} });
   if (!response.ok) {
@@ -507,6 +609,16 @@ check('vk subscriber parser', () => {
 
   if (parseVkSubscriberEvent(renewalSample)) {
     throw new Error('vk renewal must not trigger subscriber alert');
+  }
+});
+
+check('VK polling reads the newest chat page', () => {
+  const body = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  if (!body.includes('`${VK_API_BASE}${streamPath}/chat?limit=30`')) {
+    throw new Error('VK chat polling does not request the newest page');
+  }
+  if (body.includes('`?limit=30&from_id=${vkConnectionState.lastChatMessageId}`')) {
+    throw new Error('VK chat polling still paginates backwards with from_id');
   }
 });
 
