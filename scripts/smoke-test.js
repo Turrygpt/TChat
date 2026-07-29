@@ -543,6 +543,24 @@ check('giveaway nicknames require an explicit command and persist in profiles', 
   }
 });
 
+check('profiles support full rebuild and incremental extension', () => {
+  const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const preloadBody = fs.readFileSync(path.join(projectRoot, 'src', 'preload.js'), 'utf8');
+  const backofficeBody = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (
+    !backofficeBody.includes('id="pe-rebuild"') ||
+    !backofficeBody.includes('id="pe-extend"') ||
+    !backofficeBody.includes("analyzeProfile(p.id, 'rebuild')") ||
+    !backofficeBody.includes("analyzeProfile(p.id, 'extend')") ||
+    !preloadBody.includes('{ id, mode }') ||
+    !mainBody.includes("payload?.mode === 'rebuild'") ||
+    !mainBody.includes('Текущее саммари профиля') ||
+    !mainBody.includes('const shown = fresh.map')
+  ) {
+    throw new Error('profile rebuild/extend modes missing');
+  }
+});
+
 check('legacy Android chat URL redirects to the chat widget', async () => {
   const paths = ['/widget/chat', '/widget/chat/widgets/chat.html', '/widgets/chat'];
   for (const path of paths) {

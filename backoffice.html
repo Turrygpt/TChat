@@ -8098,8 +8098,12 @@
             </div>
             <div class="row-between profile-card__head">
               <strong>Портрет от ИИ</strong>
-              <button id="pe-analyze" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze ? 'disabled' : ''}
-                title="${aiStatus.canAnalyze ? '' : 'Нужен ключ polza.ai во вкладке «Подключения» или запущенная локальная Ollama'}">${p.aiUpdatedAt ? '✨ Обновить портрет' : '✨ Собрать портрет'}</button>
+              <div class="button-row">
+                <button id="pe-extend" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze || !p.aiUpdatedAt || !unread ? 'disabled' : ''}
+                  title="${!aiStatus.canAnalyze ? 'Нужен ключ polza.ai или Ollama' : !p.aiUpdatedAt ? 'Сначала обновите профиль по всей переписке' : !unread ? 'Новых сообщений нет' : 'Текущее саммари и только новые сообщения'}">✨ Дополнить профиль${unread ? ` (${unread})` : ''}</button>
+                <button id="pe-rebuild" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze ? 'disabled' : ''}
+                  title="${aiStatus.canAnalyze ? 'Полностью пересобрать профиль по всем сообщениям' : 'Нужен ключ polza.ai во вкладке «Подключения» или запущенная локальная Ollama'}">✨ Обновить профиль</button>
+              </div>
             </div>
             <div class="profile-card__status">${status}</div>
             <div class="profile-card__portrait">${portrait}</div>
@@ -8135,7 +8139,8 @@
             if (event.key === 'Enter') saveNickname(p.id);
           });
           cardEl.querySelector('#pe-delete').addEventListener('click', () => deleteProfile(p.id));
-          cardEl.querySelector('#pe-analyze').addEventListener('click', () => analyzeProfile(p.id));
+          cardEl.querySelector('#pe-extend').addEventListener('click', () => analyzeProfile(p.id, 'extend'));
+          cardEl.querySelector('#pe-rebuild').addEventListener('click', () => analyzeProfile(p.id, 'rebuild'));
           cardEl.querySelector('#pe-entry-add').addEventListener('click', () => addEntry(p.id));
           cardEl.querySelectorAll('[data-remove-entry]').forEach((b) => b.addEventListener('click', () => removeEntry(p.id, b.dataset.removeEntry)));
           cardEl.querySelectorAll('[data-wrong]').forEach((b) => b.addEventListener('click', () => markWrong(p.id, b.dataset.wrong)));
@@ -8192,8 +8197,8 @@
 
         // Пересборка идёт в главном процессе: он сам пришлёт profiles:changed
         // с pending, а потом с готовым портретом.
-        async function analyzeProfile(id) {
-          const result = await api.analyzeProfile(id).catch((e) => ({ ok: false, error: e.message }));
+        async function analyzeProfile(id, mode) {
+          const result = await api.analyzeProfile(id, mode).catch((e) => ({ ok: false, error: e.message }));
           if (result?.profile && result.profile.id === selectedId) {
             renderCard(result.profile);
           }

@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('tchat', {
   removeProfileTimeline: (id, entryId) => ipcRenderer.invoke('profiles:remove-timeline', { id, entryId }),
   markProfileClaimWrong: (id, text) => ipcRenderer.invoke('profiles:mark-wrong', { id, text }),
   unmarkProfileClaim: (id, correctionId) => ipcRenderer.invoke('profiles:unmark-wrong', { id, correctionId }),
-  analyzeProfile: (id) => ipcRenderer.invoke('profiles:analyze', id),
+  analyzeProfile: (id, mode = 'extend') => ipcRenderer.invoke('profiles:analyze', { id, mode }),
   getProfileKeys: () => ipcRenderer.invoke('profiles:get-keys'),
   getProfilesAiSettings: () => ipcRenderer.invoke('profiles:get-ai-settings'),
   onProfileKeys: (callback) => {

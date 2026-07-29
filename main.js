@@ -6035,8 +6035,6 @@ const profileAnalysisInFlight = new Map();
 
 // Сколько последних сообщений зрителя уходит в модель. Лог хранится целиком,
 // но в промпт всё не влезет — да и портрет по свежему общению точнее.
-const PROFILE_PROMPT_MESSAGES = 200;
-
 // Потолок ожидания ответа модели: без него зависший запрос оставил бы карточку
 // в «собираю портрет…» навсегда.
 const PROFILE_REQUEST_TIMEOUT = 90000;
@@ -6063,7 +6061,7 @@ const PROFILE_TIMELINE_RULES =
 // модель получает прежний портрет и только те сообщения, что пришли после
 // прошлого разбора, и обновляет им портрет. Отметка — profile.messagesAnalyzed,
 // поэтому промпт не растёт вместе с логом, а старые выводы никуда не деваются.
-async function runProfileAnalysis(id, { force = false } = {}) {
+async function runProfileAnalysis(id, { rebuild = false, allowWithoutNew = false } = {}) {
   const profile = profiles.get(id);
   if (!profile) return { ok: false, error: 'профиль не найден' };
   const status = await getProfilesAiStatus();
@@ -6076,13 +6074,14 @@ async function runProfileAnalysis(id, { force = false } = {}) {
   if (!log.length) return { ok: false, error: 'нет сообщений этого зрителя для анализа' };
 
   const analyzed = Math.min(profile.messagesAnalyzed || 0, log.length);
-  const incremental = Boolean(profile.aiUpdatedAt) && analyzed > 0;
+  const incremental = !rebuild && Boolean(profile.aiUpdatedAt) && analyzed > 0;
   const fresh = incremental ? log.slice(analyzed) : log;
-  if (incremental && !fresh.length && !force) {
+  if (incremental && !fresh.length && !allowWithoutNew) {
     return { ok: true, skipped: true };
   }
 
-  const shown = fresh.slice(-PROFILE_PROMPT_MESSAGES).map((m) => ({
+  // Полная пересборка получает всю переписку, дополнение — весь новый хвост.
+  const shown = fresh.map((m) => ({
     text: m.text,
     date: m.createdAt ? String(m.createdAt).slice(0, 10) : '',
   }));
@@ -6130,7 +6129,8 @@ async function runProfileAnalysis(id, { force = false } = {}) {
       `ни в каком виде:\n${profile.corrections.map((c) => `- ${c.text}`).join('\n')}`
     : '';
   const portraitBlock = incremental
-    ? `\nТекущий портрет (JSON):\n${JSON.stringify({
+    ? `\nТекущее саммари профиля:\n${profile.aiSummary || '—'}\n` +
+      `Текущий портрет (JSON):\n${JSON.stringify({
         bio: profile.bio,
         profession: profile.profession,
         hobbies: profile.hobbies,
@@ -6140,8 +6140,8 @@ async function runProfileAnalysis(id, { force = false } = {}) {
       })}\n`
     : '';
   const messagesTitle = incremental
-    ? `Новые сообщения с прошлого разбора${fresh.length > shown.length ? `, последние ${shown.length} из ${fresh.length}` : ` (${shown.length})`}`
-    : `Его сообщения в чате${log.length > shown.length ? `, последние ${shown.length} из ${log.length}` : ''}`;
+    ? `Новые сообщения с прошлого разбора (${shown.length})`
+    : `Все сообщения в чате (${shown.length})`;
   const userPrompt =
     `${profile.role === 'streamer' ? 'Стример' : 'Зритель'}: ${profile.displayName} (${profile.platform})\n` +
     `Всего сообщений: ${log.length}. ${donationsLine}.${identityBlock}${correctionsBlock}${notesBlock}${portraitBlock}\n` +
@@ -6269,7 +6269,7 @@ async function requestProfileCompletion(messages) {
 
 // Обёртка вокруг разбора: держит статус профиля (pending → ready/error),
 // не даёт запустить два разбора одного зрителя и сообщает интерфейсу результат.
-function analyzeProfileWithAI(id, { force = false } = {}) {
+function analyzeProfileWithAI(id, options = {}) {
   const running = profileAnalysisInFlight.get(id);
   if (running) {
     return running;
@@ -6279,7 +6279,7 @@ function analyzeProfileWithAI(id, { force = false } = {}) {
     notifyProfileChanged(id);
     let result;
     try {
-      result = await runProfileAnalysis(id, { force });
+      result = await runProfileAnalysis(id, options);
     } catch (error) {
       result = { ok: false, error: String(error?.message || error) };
     }
@@ -6375,7 +6375,7 @@ ipcMain.handle('profiles:add-timeline', async (_event, payload) => {
   // Заметка стримера — новый контекст для портрета, обновляем его даже если
   // новых сообщений в чате не было.
   if (entry && (await getProfilesAiStatus()).canAnalyze) {
-    scheduleProfileAnalysis(payload.id, { force: true });
+    scheduleProfileAnalysis(payload.id, { allowWithoutNew: true });
   }
   return entry;
 });
@@ -6386,7 +6386,7 @@ ipcMain.handle('profiles:remove-timeline', (_event, payload) => ({ ok: profiles.
 ipcMain.handle('profiles:mark-wrong', async (_event, payload) => {
   const updated = profiles.addCorrection(payload?.id, payload?.text);
   if (updated && (await getProfilesAiStatus()).canAnalyze) {
-    scheduleProfileAnalysis(payload.id, { force: true });
+    scheduleProfileAnalysis(payload.id, { allowWithoutNew: true });
   }
   return getProfilePayload(payload?.id);
 });
@@ -6396,7 +6396,11 @@ ipcMain.handle('profiles:unmark-wrong', async (_event, payload) => {
   return getProfilePayload(payload?.id);
 });
 // Кнопка «Обновить портрет» — обновляем даже без новых сообщений.
-ipcMain.handle('profiles:analyze', (_event, id) => analyzeProfileWithAI(id, { force: true }));
+ipcMain.handle('profiles:analyze', (_event, payload) => {
+  const id = typeof payload === 'string' ? payload : payload?.id;
+  const mode = typeof payload === 'object' && payload?.mode === 'rebuild' ? 'rebuild' : 'extend';
+  return analyzeProfileWithAI(id, { rebuild: mode === 'rebuild', allowWithoutNew: mode === 'rebuild' });
+});
 ipcMain.handle('profiles:get-keys', () => profiles.list().map((p) => p.id));
 ipcMain.handle('profiles:get-ai-settings', () => getProfilesAiStatus());
 
