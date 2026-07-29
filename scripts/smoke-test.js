@@ -492,7 +492,9 @@ check('giveaway widget has live state, reveal animation and sound', async () => 
     !scriptResponse.response.ok ||
     !scriptResponse.body.includes("socket.on('widgets:state'") ||
     !scriptResponse.body.includes('playFanfare') ||
-    !scriptResponse.body.includes('Ник: [ваш ник]')
+    !scriptResponse.body.includes('Ник: ваш_ник') ||
+    !scriptResponse.body.includes('Ник ваш_ник') ||
+    !scriptResponse.body.includes('Обычные сообщения не учитываются')
   ) {
     throw new Error('giveaway live reveal script missing');
   }

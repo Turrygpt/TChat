@@ -5067,7 +5067,7 @@
                 ? `<p class="muted"><strong>Победители:</strong> ${winners
                     .map((item) => {
                       const claim = widget.winnerNicknames?.[item.key];
-                      return `${escapeHtml(item.user)}${claim ? ` → ${escapeHtml(claim.nickname)}` : widget.collectNicknames !== false ? ' → ждём ник' : ''}`;
+                      return `${escapeHtml(item.user)}${claim ? ` → ${escapeHtml(claim.nickname)}` : widget.collectNicknames !== false ? ' → ждём «Ник: nickname»' : ''}`;
                     })
                     .join(', ')}</p>`
                 : ''
