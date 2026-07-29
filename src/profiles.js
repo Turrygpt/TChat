@@ -67,6 +67,9 @@ function normalizeProfile(profile = {}) {
     platform,
     user,
     displayName: String(profile.displayName || user || 'Зритель'),
+    // Игровой ник может отличаться от имени пользователя в чате. Его задаёт
+    // стример вручную или сам зритель командой «Ник: ...» после розыгрыша.
+    nickname: String(profile.nickname || '').replace(/\s+/g, ' ').trim().slice(0, 120),
     bio: String(profile.bio || ''),
     profession: String(profile.profession || ''),
     hobbies: asArray(profile.hobbies),
@@ -380,6 +383,17 @@ function ensureForUser({ platform, user, displayName } = {}) {
   return upsert({ platform, user, displayName: displayName || user });
 }
 
+// Запоминает игровой ник у существующего зрителя или создаёт для него
+// минимальный профиль. Это единая точка записи для профилей и розыгрышей.
+function setNicknameForUser({ platform, user, displayName, nickname } = {}) {
+  const value = String(nickname || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!value) {
+    return null;
+  }
+  const profile = ensureForUser({ platform, user, displayName: displayName || user });
+  return upsert({ id: profile.id, nickname: value });
+}
+
 function remove(id) {
   const before = profiles.length;
   profiles = profiles.filter((p) => p.id !== id);
@@ -537,6 +551,7 @@ module.exports = {
   findByUser,
   upsert,
   ensureForUser,
+  setNicknameForUser,
   remove,
   addTimelineEntry,
   removeTimelineEntry,

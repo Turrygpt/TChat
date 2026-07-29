@@ -88,7 +88,7 @@ function render() {
               : '<div class="giveaway__winner">Нет участников</div>'
           }</section>${
             widget.collectNicknames && pendingNicknames.length
-              ? `<p class="giveaway__nickname-prompt">🏆 Победители, отправьте свой игровой ник в чат</p>`
+              ? `<p class="giveaway__nickname-prompt">🏆 Победители, напишите в чат: Ник: [ваш ник]</p>`
               : widget.collectNicknames && winners.length
                 ? '<p class="giveaway__nickname-prompt giveaway__nickname-prompt--done">✓ Ники победителей получены</p>'
                 : ''

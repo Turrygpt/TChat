@@ -13,6 +13,7 @@ const announce = require('./src/announce');
 const restream = require('./src/restream');
 const incoming = require('./src/incoming');
 const profiles = require('./src/profiles');
+const { parseNicknameCommand } = require('./src/giveawayNicknames');
 const donatepay = require('./src/donatepay');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
@@ -790,6 +791,7 @@ function loadGiveawayWinnerLog() {
           [event.winnerKey]: {
             nickname: event.nickname,
             capturedAt: event.capturedAt,
+            source: event.source || '',
           },
         };
       });
@@ -798,14 +800,14 @@ function loadGiveawayWinnerLog() {
   }
 }
 
-function appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt) {
+function appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt, source = 'chat-command') {
   giveawayWinnerLog = giveawayWinnerLog.map((entry) =>
     entry.id === drawId
       ? {
           ...entry,
           winnerNicknames: {
             ...(entry.winnerNicknames || {}),
-            [winner.key]: { nickname, capturedAt },
+            [winner.key]: { nickname, capturedAt, source },
           },
         }
       : entry,
@@ -820,6 +822,7 @@ function appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedA
     winner,
     nickname,
     capturedAt,
+    source,
   };
   fs.appendFile(giveawayWinnersFile, `${JSON.stringify(event)}\n`, (error) => {
     if (error) console.error(`Не удалось записать ник победителя: ${error.message}`);
@@ -950,6 +953,7 @@ function normalizeGiveawayWidget(widget = {}) {
         {
           nickname: String(value.nickname).trim().slice(0, 120),
           capturedAt: String(value.capturedAt || ''),
+          source: ['chat-command', 'profile', 'manual-repair'].includes(value.source) ? value.source : '',
         },
       ]),
   );
@@ -1561,13 +1565,22 @@ function finishGiveaway(id) {
   const winners = chooseGiveawayWinners(current.participants, current.prizeCount);
   const finishedAt = new Date().toISOString();
   const revealId = `giveaway-reveal-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const winnerNicknames = Object.fromEntries(
+    winners
+      .map((winner) => {
+        const profile = profiles.findByUser(winner.platform, winner.user);
+        const nickname = String(profile?.nickname || '').trim();
+        return nickname ? [winner.key, { nickname, capturedAt: finishedAt, source: 'profile' }] : null;
+      })
+      .filter(Boolean),
+  );
   const next = normalizeStreamWidget({
     ...current,
     status: 'finished',
     endsAt: '',
     finishedAt,
     winners,
-    winnerNicknames: {},
+    winnerNicknames,
     revealId,
   });
   streamWidgets = streamWidgets.map((widget) => (widget.id === current.id ? next : widget));
@@ -1582,7 +1595,7 @@ function finishGiveaway(id) {
     participantCount: current.participants.length,
     winners,
     collectNicknames: current.collectNicknames,
-    winnerNicknames: {},
+    winnerNicknames,
     startedAt: current.startedAt,
     finishedAt,
   });
@@ -1610,6 +1623,39 @@ function resetGiveaway(id) {
         })
       : widget,
   );
+  saveStreamWidgets(streamWidgets);
+  broadcastStreamWidgets();
+  return getStreamWidgetsPayload();
+}
+
+// Полный сброс оставляет настройки и расположение виджетов, но удаляет все
+// запуски, участников, победителей, собранные ники и журнал розыгрышей.
+function resetAllGiveaways() {
+  giveawayFinishTimers.forEach((timer) => clearTimeout(timer));
+  giveawayFinishTimers.clear();
+  streamWidgets = streamWidgets.map((widget) =>
+    widget.type === 'giveaway'
+      ? normalizeStreamWidget({
+          ...widget,
+          status: 'idle',
+          participants: [],
+          winners: [],
+          winnerNicknames: {},
+          startedAt: '',
+          endsAt: '',
+          finishedAt: '',
+          revealId: '',
+        })
+      : widget,
+  );
+  giveawayWinnerLog = [];
+  if (giveawayWinnersFile) {
+    try {
+      fs.writeFileSync(giveawayWinnersFile, '');
+    } catch (error) {
+      console.error(`Не удалось очистить журнал розыгрышей: ${error.message}`);
+    }
+  }
   saveStreamWidgets(streamWidgets);
   broadcastStreamWidgets();
   return getStreamWidgetsPayload();
@@ -1644,7 +1690,7 @@ function registerGiveawayParticipant(message = {}) {
 }
 
 function registerGiveawayWinnerNickname(message = {}) {
-  const nickname = String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const nickname = parseNicknameCommand(message.text);
   if (!nickname) return;
 
   const participant = normalizeGiveawayParticipant({
@@ -1666,17 +1712,85 @@ function registerGiveawayWinnerNickname(message = {}) {
       ...widget,
       winnerNicknames: {
         ...(widget.winnerNicknames || {}),
-        [winner.key]: { nickname, capturedAt },
+        [winner.key]: { nickname, capturedAt, source: 'chat-command' },
       },
     });
   });
 
   if (!captured.length) return;
+  const wasKnown = Boolean(profiles.findByUser(message.platform, message.user));
+  const savedProfile = profiles.setNicknameForUser({
+    platform: message.platform,
+    user: message.user,
+    displayName: message.user,
+    nickname,
+  });
   saveStreamWidgets(streamWidgets);
   captured.forEach(({ drawId, widgetId, winner }) => {
-    appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt);
+    appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt, 'chat-command');
   });
+  if (savedProfile) {
+    void notifyProfileChanged(savedProfile.id);
+    if (!wasKnown) broadcastProfileKeys();
+  }
   broadcastStreamWidgets();
+}
+
+// В старой версии первое сообщение победителя ошибочно считалось ником. Для
+// текущего legacy-розыгрыша один раз пересматриваем сообщения после финала:
+// явная команда имеет приоритет, затем берём отдельное nickname-подобное слово.
+// После записи source повторная миграция этот розыгрыш больше не трогает.
+function repairLegacyCurrentGiveawayNicknames() {
+  let changed = false;
+  const repaired = [];
+
+  streamWidgets = streamWidgets.map((widget) => {
+    if (widget.type !== 'giveaway' || widget.status !== 'finished' || !widget.finishedAt || !widget.winners.length) {
+      return widget;
+    }
+    const claims = widget.winnerNicknames || {};
+    const hasLegacyClaims = widget.winners.some((winner) => claims[winner.key] && !claims[winner.key].source);
+    if (!hasLegacyClaims) return widget;
+
+    const nextClaims = { ...claims };
+    for (const winner of widget.winners) {
+      const messages = chatHistory.filter((message) => {
+        const key = `${String(message.platform || '').toLowerCase()}:${String(message.user || '').trim().toLowerCase()}`;
+        return key === winner.key && new Date(message.createdAt || 0).getTime() >= new Date(widget.finishedAt).getTime();
+      });
+      const commandNickname = messages.map((message) => parseNicknameCommand(message.text)).find(Boolean) || '';
+      const standaloneNickname = messages
+        .map((message) => String(message.text || '').trim())
+        .find((text) => /^(?=.*[a-zа-яё])[a-zа-яё0-9_.-]{2,120}$/iu.test(text)) || '';
+      const profile = profiles.findByUser(winner.platform, winner.user);
+      const nickname = commandNickname || String(profile?.nickname || '').trim() || standaloneNickname;
+      if (!nickname) {
+        delete nextClaims[winner.key];
+        continue;
+      }
+      const matchingMessage = messages.find(
+        (message) => parseNicknameCommand(message.text) === nickname || String(message.text || '').trim() === nickname,
+      );
+      const capturedAt = matchingMessage?.createdAt || widget.finishedAt;
+      const source = commandNickname ? 'chat-command' : profile?.nickname ? 'profile' : 'manual-repair';
+      nextClaims[winner.key] = { nickname, capturedAt, source };
+      const saved = profiles.setNicknameForUser({
+        platform: winner.platform,
+        user: winner.user,
+        displayName: winner.user,
+        nickname,
+      });
+      repaired.push({ drawId: widget.revealId, widgetId: widget.id, winner, nickname, capturedAt, source, profileId: saved?.id });
+    }
+    changed = true;
+    return normalizeStreamWidget({ ...widget, winnerNicknames: nextClaims });
+  });
+
+  if (!changed) return;
+  saveStreamWidgets(streamWidgets);
+  repaired.forEach(({ drawId, widgetId, winner, nickname, capturedAt, source }) => {
+    appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt, source);
+  });
 }
 
 function normalizePoll(payload = {}) {
@@ -5564,7 +5678,9 @@ app.whenReady().then(async () => {
   // Строго до чтения любых настроек: иначе сотрём то, что уже загружено в память.
   applyPendingCleanInstall();
   setupChatStorage();
+  profiles.init(path.join(app.getPath('userData'), 'settings'));
   setupDonationAlertsStorage();
+  repairLegacyCurrentGiveawayNicknames();
   await startLocalServer();
   purgeTestAlerts();
   broadcastGoalState();
@@ -5592,7 +5708,6 @@ app.whenReady().then(async () => {
     storageDir: path.join(app.getPath('userData'), 'settings'),
     onStatus: (state) => mainWindow?.webContents.send('incoming:status', state),
   });
-  profiles.init(path.join(app.getPath('userData'), 'settings'));
   donatepay.init({
     storageDir: path.join(app.getPath('userData'), 'settings'),
     // Донат из любого источника идёт в общую воронку: алерты, сбор, музыка, чат.
@@ -6520,6 +6635,8 @@ ipcMain.handle('giveaway:start', (_event, payload) => startGiveaway(payload?.id,
 ipcMain.handle('giveaway:finish', (_event, payload) => finishGiveaway(payload?.id));
 
 ipcMain.handle('giveaway:reset', (_event, payload) => resetGiveaway(payload?.id));
+
+ipcMain.handle('giveaway:reset-all', () => resetAllGiveaways());
 
 ipcMain.handle('countdown:adjust', (_event, payload) => adjustCountdownWidget(payload?.id, payload?.deltaSeconds));
 

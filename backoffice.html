@@ -5052,13 +5052,14 @@
             </div>
             <label class="rule-toggle">
               <input data-giveaway-field="collectNicknames" type="checkbox" ${widget.collectNicknames !== false ? 'checked' : ''} />
-              После розыгрыша собирать ники победителей из чата
+              После розыгрыша собирать ники командой «Ник: nickname» или «Ник nickname»
             </label>
             <div class="button-row">
               <button class="button" type="button" data-giveaway-save>Обновить данные</button>
               <button class="button" type="button" data-giveaway-start>${widget.status === 'running' ? 'Перезапустить' : 'Старт'}</button>
               <button class="button button--ghost" type="button" data-giveaway-finish ${widget.status !== 'running' ? 'disabled' : ''}>Завершить и выбрать</button>
               <button class="button button--danger" type="button" data-giveaway-reset>Сбросить</button>
+              <button class="button button--danger" type="button" data-giveaway-reset-all>Сбросить все розыгрыши</button>
             </div>
             <p class="muted"><strong>Участники (${participants.length}):</strong> ${participants.length ? participants.map((item) => escapeHtml(item.user)).join(', ') : 'пока нет'}</p>
             ${
@@ -6115,6 +6116,7 @@
         const giveawaySaveButton = event.target.closest('[data-giveaway-save]');
         const giveawayFinishButton = event.target.closest('[data-giveaway-finish]');
         const giveawayResetButton = event.target.closest('[data-giveaway-reset]');
+        const giveawayResetAllButton = event.target.closest('[data-giveaway-reset-all]');
         const countdownSetButton = event.target.closest('[data-countdown-set]');
         const countdownStartButton = event.target.closest('[data-countdown-start]');
         const countdownPauseButton = event.target.closest('[data-countdown-pause]');
@@ -6143,6 +6145,12 @@
 
         if (giveawayResetButton && selectedWorkspaceWidgetId) {
           window.tchat.resetGiveaway({ id: selectedWorkspaceWidgetId }).then(renderWidgetsState);
+          return;
+        }
+
+        if (giveawayResetAllButton) {
+          if (!window.confirm('Сбросить все розыгрыши? Участники, победители, собранные ники и журнал будут удалены.')) return;
+          window.tchat.resetAllGiveaways().then(renderWidgetsState);
           return;
         }
 
@@ -7992,7 +8000,7 @@
             <button type="button" class="list-row${p.id === selectedId ? ' is-selected' : ''}" data-profile-id="${esc(p.id)}">
               <span class="list-row__main">
                 <span class="list-row__title">${esc(p.displayName)}</span>
-                <span class="list-row__sub">${esc(p.platform)}${p.profession ? ' · ' + esc(p.profession) : ''}</span>
+                <span class="list-row__sub">${esc(p.platform)}${p.nickname ? ' · Ник: ' + esc(p.nickname) : ''}${p.profession ? ' · ' + esc(p.profession) : ''}</span>
               </span>
               ${p.pinned ? '<span title="Закреплён">📌</span>' : ''}
             </button>`).join('');
@@ -8076,6 +8084,12 @@
               <button id="pe-delete" class="button button--danger" type="button">Удалить</button>
             </div>
             <p class="profile-card__id">${esc(p.platform)} · ${esc(p.user)}</p>
+            <div class="timeline__add">
+              <label class="field" style="flex:1;">Ник
+                <input id="pe-nickname" type="text" maxlength="120" value="${esc(p.nickname || '')}" placeholder="Игровой ник" />
+              </label>
+              <button id="pe-nickname-save" class="button button--ghost" type="button">Сохранить ник</button>
+            </div>
             <div class="tile-grid profile-card__stats">
               ${cell('Сообщений', s.messageCount || 0)}
               ${cell('Первое', fmtDate(s.firstSeen))}
@@ -8116,6 +8130,10 @@
             </div>`;
 
           cardEl.querySelector('#pe-pin').addEventListener('change', (event) => togglePin(p.id, event.target.checked));
+          cardEl.querySelector('#pe-nickname-save').addEventListener('click', () => saveNickname(p.id));
+          cardEl.querySelector('#pe-nickname').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') saveNickname(p.id);
+          });
           cardEl.querySelector('#pe-delete').addEventListener('click', () => deleteProfile(p.id));
           cardEl.querySelector('#pe-analyze').addEventListener('click', () => analyzeProfile(p.id));
           cardEl.querySelector('#pe-entry-add').addEventListener('click', () => addEntry(p.id));
@@ -8139,6 +8157,13 @@
         async function togglePin(id, pinned) {
           await api.upsertProfile({ id, pinned });
           await loadList();
+        }
+
+        async function saveNickname(id) {
+          const nickname = cardEl.querySelector('#pe-nickname')?.value.replace(/\s+/g, ' ').trim() || '';
+          const saved = await api.upsertProfile({ id, nickname });
+          await loadList();
+          if (saved?.id === selectedId) renderCard(saved);
         }
 
         async function deleteProfile(id) {

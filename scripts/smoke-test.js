@@ -492,7 +492,7 @@ check('giveaway widget has live state, reveal animation and sound', async () => 
     !scriptResponse.response.ok ||
     !scriptResponse.body.includes("socket.on('widgets:state'") ||
     !scriptResponse.body.includes('playFanfare') ||
-    !scriptResponse.body.includes('отправьте свой игровой ник в чат')
+    !scriptResponse.body.includes('Ник: [ваш ник]')
   ) {
     throw new Error('giveaway live reveal script missing');
   }
@@ -519,6 +519,24 @@ check('giveaway prize settings update from backoffice', async () => {
     !body.includes('saveGiveawayFromWorkspace')
   ) {
     throw new Error('giveaway prize update controls missing');
+  }
+});
+
+check('giveaway nicknames require an explicit command and persist in profiles', async () => {
+  const { parseNicknameCommand } = require(path.join(projectRoot, 'src', 'giveawayNicknames'));
+  const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const profilesBody = fs.readFileSync(path.join(projectRoot, 'src', 'profiles.js'), 'utf8');
+  const backofficeBody = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (
+    parseNicknameCommand('Ник: [Impich]') !== 'Impich' ||
+    parseNicknameCommand('ник sea_gek') !== 'sea_gek' ||
+    parseNicknameCommand('это ты кому?') !== '' ||
+    !mainBody.includes('profiles.setNicknameForUser') ||
+    !profilesBody.includes('nickname: String(profile.nickname') ||
+    !backofficeBody.includes('id="pe-nickname"') ||
+    !backofficeBody.includes('data-giveaway-reset-all')
+  ) {
+    throw new Error('strict giveaway nickname/profile/reset integration missing');
   }
 });
 
