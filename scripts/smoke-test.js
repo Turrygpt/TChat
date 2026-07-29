@@ -534,6 +534,7 @@ check('giveaway nicknames require an explicit command and persist in profiles', 
     parseNicknameCommand('ник sea_gek') !== 'sea_gek' ||
     parseNicknameCommand('это ты кому?') !== '' ||
     !mainBody.includes('profiles.setNicknameForUser') ||
+    mainBody.includes('!winner || widget.winnerNicknames?.[winner.key]') ||
     !profilesBody.includes('nickname: String(profile.nickname') ||
     !backofficeBody.includes('id="pe-nickname"') ||
     !backofficeBody.includes('data-giveaway-reset-all')

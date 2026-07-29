@@ -1705,7 +1705,7 @@ function registerGiveawayWinnerNickname(message = {}) {
       return widget;
     }
     const winner = widget.winners.find((item) => item.key === participant.key);
-    if (!winner || widget.winnerNicknames?.[winner.key]) return widget;
+    if (!winner) return widget;
 
     captured.push({ drawId: widget.revealId, widgetId: widget.id, winner });
     return normalizeStreamWidget({

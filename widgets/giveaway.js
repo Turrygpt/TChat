@@ -88,9 +88,9 @@ function render() {
               : '<div class="giveaway__winner">Нет участников</div>'
           }</section>${
             widget.collectNicknames && pendingNicknames.length
-              ? `<p class="giveaway__nickname-prompt">🏆 Победители, отправьте в чат: <strong>Ник: ваш_ник</strong> или <strong>Ник ваш_ник</strong><br><small>Обычные сообщения не учитываются</small></p>`
+              ? `<p class="giveaway__nickname-prompt">🏆 Победители, отправьте в чат: <strong>Ник: ваш_ник</strong> или <strong>Ник ваш_ник</strong><br><small>Обычные сообщения не учитываются · повторная команда изменит ник</small></p>`
               : widget.collectNicknames && winners.length
-                ? '<p class="giveaway__nickname-prompt giveaway__nickname-prompt--done">✓ Ники победителей получены</p>'
+                ? '<p class="giveaway__nickname-prompt giveaway__nickname-prompt--done">✓ Ники получены · для изменения отправьте новую команду «Ник: ваш_ник»</p>'
                 : ''
           }`
         : `
