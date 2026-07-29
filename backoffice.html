@@ -4271,7 +4271,7 @@
         const skins = [
           { id: 'farming-simulator-25', name: 'Farming Simulator 25', description: 'Иконка FS' },
           { id: 'cities', name: 'Классический', description: 'Иконка ◆' },
-          { id: 'mir-korabley', name: 'Мир кораблей', description: 'Иконка MK' },
+          { id: 'mir-korabley', name: 'Мир Кораблей', description: 'Иконка MK' },
         ];
         const tasksHtml = taskItems.map((item, index) => renderTaskEditorRow(item, index + 1)).join('');
 
@@ -7999,8 +7999,8 @@
           listEl.innerHTML = items.map((p) => `
             <button type="button" class="list-row${p.id === selectedId ? ' is-selected' : ''}" data-profile-id="${esc(p.id)}">
               <span class="list-row__main">
-                <span class="list-row__title">${esc(p.displayName)}</span>
-                <span class="list-row__sub">${esc(p.platform)}${p.nickname ? ' · Ник: ' + esc(p.nickname) : ''}${p.profession ? ' · ' + esc(p.profession) : ''}</span>
+                <span class="list-row__title">${esc(p.nickname || p.displayName)}</span>
+                <span class="list-row__sub">${(p.accounts || [{ platform: p.platform, user: p.user }]).map((account) => `${esc(account.platform)}: ${esc(account.user)}`).join(' · ')}${p.profession ? ' · ' + esc(p.profession) : ''}</span>
               </span>
               ${p.pinned ? '<span title="Закреплён">📌</span>' : ''}
             </button>`).join('');
@@ -8083,7 +8083,7 @@
               <label class="check"><input id="pe-pin" type="checkbox" ${p.pinned ? 'checked' : ''}/>закрепить</label>
               <button id="pe-delete" class="button button--danger" type="button">Удалить</button>
             </div>
-            <p class="profile-card__id">${esc(p.platform)} · ${esc(p.user)}</p>
+            <p class="profile-card__id">${(p.accounts || [{ platform: p.platform, user: p.user }]).map((account) => `${esc(account.platform)}: ${esc(account.user)}`).join(' · ')}</p>
             <div class="timeline__add">
               <label class="field" style="flex:1;">Ник
                 <input id="pe-nickname" type="text" maxlength="120" value="${esc(p.nickname || '')}" placeholder="Игровой ник" />
@@ -8101,8 +8101,8 @@
               <div class="button-row">
                 <button id="pe-extend" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze || !p.aiUpdatedAt || !unread ? 'disabled' : ''}
                   title="${!aiStatus.canAnalyze ? 'Нужен ключ polza.ai или Ollama' : !p.aiUpdatedAt ? 'Сначала обновите профиль по всей переписке' : !unread ? 'Новых сообщений нет' : 'Текущее саммари и только новые сообщения'}">✨ Дополнить профиль${unread ? ` (${unread})` : ''}</button>
-                <button id="pe-rebuild" class="button button--ghost" type="button" ${busy || !aiStatus.canAnalyze ? 'disabled' : ''}
-                  title="${aiStatus.canAnalyze ? 'Полностью пересобрать профиль по всем сообщениям' : 'Нужен ключ polza.ai во вкладке «Подключения» или запущенная локальная Ollama'}">✨ Обновить профиль</button>
+                <button id="pe-rebuild" class="button button--ghost" type="button" ${busy || !aiStatus.canRebuild ? 'disabled' : ''}
+                  title="${aiStatus.canRebuild ? `Полностью пересобрать профиль по всем сообщениям · ${esc(aiStatus.rebuildModel || 'anthropic/claude-sonnet-4.6')}` : 'Для полного обновления нужен ключ polza.ai во вкладке «Подключения»'}">✨ Обновить профиль</button>
               </div>
             </div>
             <div class="profile-card__status">${status}</div>
@@ -8167,8 +8167,9 @@
         async function saveNickname(id) {
           const nickname = cardEl.querySelector('#pe-nickname')?.value.replace(/\s+/g, ' ').trim() || '';
           const saved = await api.upsertProfile({ id, nickname });
+          if (saved?.id) selectedId = saved.id;
           await loadList();
-          if (saved?.id === selectedId) renderCard(saved);
+          if (saved?.id) renderCard(saved);
         }
 
         async function deleteProfile(id) {
@@ -8224,7 +8225,10 @@
           if (!aiStateEl) return;
           const parts = [];
           if (aiStatus.hasKey) {
-            parts.push('ключ polza.ai из «Подключений» · модель ' + (aiStatus.model || '—'));
+            parts.push(
+              'ключ polza.ai из «Подключений» · дополнение: ' + (aiStatus.model || '—') +
+              ' · полное обновление: ' + (aiStatus.rebuildModel || 'anthropic/claude-sonnet-4.6'),
+            );
           }
           if (aiStatus.ollamaReady) {
             parts.push('локальная Ollama на связи (' + (aiStatus.ollamaModel || 'модель по умолчанию') + ')');

@@ -5875,6 +5875,7 @@ ipcMain.handle('incoming:remove', (_event, payload) => incoming.removeStream(pay
 // выручает, когда polza.ai недоступна из сети.
 const PROFILE_POLZA_URL = 'https://polza.ai/api/v1/chat/completions';
 const PROFILE_POLZA_MODEL = 'deepseek/deepseek-chat';
+const PROFILE_REBUILD_POLZA_MODEL = 'anthropic/claude-sonnet-4.6';
 
 function profilesPolza() {
   return {
@@ -5923,10 +5924,12 @@ async function getProfilesAiStatus() {
   return {
     hasKey: Boolean(polza.apiKey),
     model: polza.model,
+    rebuildModel: PROFILE_REBUILD_POLZA_MODEL,
     ollamaUrl: ollama.baseUrl,
     ollamaModel: ollama.model,
     ollamaReady,
     canAnalyze: Boolean(polza.apiKey) || ollamaReady,
+    canRebuild: Boolean(polza.apiKey),
   };
 }
 
@@ -5997,12 +6000,12 @@ function ensureProfileMessages(profile) {
 // Донаты — только те, что отдал DonationAlerts за сессию: полной истории у нас
 // нет, поэтому статистика по ним помечена как неполная.
 function computeDonationStats(profile) {
-  const userNorm = String(profile.user || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const userNicks = new Set(profiles.nicksOf(profile));
   let donationCount = 0;
   let donationTotal = 0;
   let donationCurrency = '';
   for (const d of donationAlertsState.donations || []) {
-    if (String(d.username || '').replace(/\s+/g, ' ').trim().toLowerCase() !== userNorm) continue;
+    if (!userNicks.has(String(d.username || '').replace(/\s+/g, ' ').trim().toLowerCase())) continue;
     donationCount += 1;
     donationTotal += Number(d.amount || 0);
     donationCurrency = d.currency || donationCurrency;
@@ -6023,7 +6026,7 @@ async function getProfilePayload(id) {
 
 // Ники с профилем — чтобы чат ставил метку и предлагал «Открыть», а не «Создать».
 function broadcastProfileKeys() {
-  const keys = profiles.list().map((p) => p.id);
+  const keys = profiles.accountKeys();
   socketServer?.emit('profiles:keys', keys);
   chatWindow?.webContents.send('profiles:keys', keys);
   mainWindow?.webContents.send('profiles:keys', keys);
@@ -6054,6 +6057,9 @@ const PROFILE_TIMELINE_RULES =
   'переезд (type "trip"); что-то купил — машина, техника, животное, крупная покупка (type "purchase"); ' +
   'сменил работу, экзамены, свадьба, ребёнок, новая учёба и прочие важные новости (type "event"). ' +
   'Дату бери из того сообщения, где он об этом сказал. Мелкую болтовню и шутки в события не записывай.';
+const PROFILE_GAME_NAMING_RULE =
+  'Для российской версии корабельной игры всегда используй название «Мир Кораблей». ' +
+  'Не называй её World of Warships и не используй сокращение WoWS.';
 
 // Анализ переписки через Polza.ai.
 //
@@ -6065,6 +6071,12 @@ async function runProfileAnalysis(id, { rebuild = false, allowWithoutNew = false
   const profile = profiles.get(id);
   if (!profile) return { ok: false, error: 'профиль не найден' };
   const status = await getProfilesAiStatus();
+  if (rebuild && !status.canRebuild) {
+    return {
+      ok: false,
+      error: `для полного обновления нужен ключ polza.ai — используется модель ${PROFILE_REBUILD_POLZA_MODEL}`,
+    };
+  }
   if (!status.canAnalyze) {
     return { ok: false, error: 'нет ни ключа polza.ai, ни запущенной Ollama — задайте их во вкладке «Подключения»' };
   }
@@ -6094,14 +6106,14 @@ async function runProfileAnalysis(id, { rebuild = false, allowWithoutNew = false
       'сообщения в чате. Обнови портрет: сохрани то, что осталось верным, добавь новое, убери то, что новые ' +
       'сообщения опровергают. Ответь СТРОГО валидным JSON без markdown и пояснений, портретом целиком: ' +
       `${PROFILE_JSON_SHAPE}. ` +
-      `${PROFILE_TIMELINE_RULES} ` +
+      `${PROFILE_TIMELINE_RULES} ${PROFILE_GAME_NAMING_RULE} ` +
       'При этом клади в timeline ТОЛЬКО новые события из новых сообщений — прежние уже сохранены, повторять их не нужно. ' +
       'Остальные поля возвращай полностью, включая факты из прежнего портрета, которые остаются в силе. ' +
       'Не выдумывай того, чего нет ни в портрете, ни в сообщениях.'
     : 'Ты помощник стримера и ведёшь досье на зрителей. По сообщениям зрителя в чате составь ' +
       'портрет на русском языке. Ответь СТРОГО валидным JSON без markdown и пояснений: ' +
       `${PROFILE_JSON_SHAPE}. ` +
-      `${PROFILE_TIMELINE_RULES} Если таких событий нет — пустой массив. ` +
+      `${PROFILE_TIMELINE_RULES} ${PROFILE_GAME_NAMING_RULE} Если таких событий нет — пустой массив. ` +
       'Не выдумывай фактов, которых нет в сообщениях: лучше пустая строка или пустой массив.';
 
   const donationsLine = stats?.donationCount
@@ -6114,13 +6126,15 @@ async function runProfileAnalysis(id, { rebuild = false, allowWithoutNew = false
   // Кто это для канала. Для стримера портрет пишется про него самого, а не про
   // то, как он общается со стримером, — иначе получается дичь вроде «активный
   // зритель» про хозяина канала.
+  const accountLabels = (profile.accounts || []).map((account) => `${account.platform}: ${account.user}`);
   const identityBlock =
     (profile.role === 'streamer'
       ? '\nВАЖНО: это не зритель, а стример этого канала. Пиши портрет про самого человека, ' +
         'а в summary опиши, как он ведёт эфир и общается с чатом.'
       : '') +
     (profile.note ? `\nЧто стример знает про него точно (считай это фактом): ${profile.note}` : '') +
-    (profile.aliases.length ? `\nОн же пишет под никами: ${profile.aliases.join(', ')}.` : '');
+    (accountLabels.length > 1 ? `\nЕго аккаунты на платформах: ${accountLabels.join('; ')}.` : '') +
+    (profile.aliases.length ? `\nДругие известные имена: ${profile.aliases.join(', ')}.` : '');
 
   // Утверждения, помеченные стримером как неверные. Модель их выдумала или
   // переврала — повторять нельзя, даже если в переписке есть намёк.
@@ -6149,10 +6163,16 @@ async function runProfileAnalysis(id, { rebuild = false, allowWithoutNew = false
     (shown.length ? shown.map((m) => `${m.date || '—'} — ${m.text}`).join('\n') : '— новых сообщений нет, уточни портрет по заметкам стримера');
 
   try {
-    const { content, provider } = await requestProfileCompletion([
-      { role: 'system', content: system },
-      { role: 'user', content: userPrompt },
-    ]);
+    const { content, provider } = await requestProfileCompletion(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: userPrompt },
+      ],
+      {
+        polzaModel: rebuild ? PROFILE_REBUILD_POLZA_MODEL : '',
+        polzaOnly: rebuild,
+      },
+    );
     // Локальные модели любят обрамлять JSON в ```json — снимаем.
     const cleaned = content.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
     let parsed;
@@ -6224,18 +6244,19 @@ async function askModel({ url, apiKey, model, messages }) {
 
 // Цепочка источников: polza.ai → локальная Ollama. Возвращает { content, provider }
 // или кидает ошибку со списком того, что не получилось.
-async function requestProfileCompletion(messages) {
+async function requestProfileCompletion(messages, { polzaModel = '', polzaOnly = false } = {}) {
   const polza = profilesPolza();
   const ollama = profilesOllama();
   const attempts = [];
 
   if (polza.apiKey) {
+    const model = String(polzaModel || polza.model).trim();
     attempts.push({
       name: 'polza.ai',
-      run: () => askModel({ url: PROFILE_POLZA_URL, apiKey: polza.apiKey, model: polza.model, messages }),
+      run: () => askModel({ url: PROFILE_POLZA_URL, apiKey: polza.apiKey, model, messages }),
     });
   }
-  if (ollama.baseUrl) {
+  if (ollama.baseUrl && !polzaOnly) {
     attempts.push({
       name: 'ollama',
       run: () =>
@@ -6401,7 +6422,7 @@ ipcMain.handle('profiles:analyze', (_event, payload) => {
   const mode = typeof payload === 'object' && payload?.mode === 'rebuild' ? 'rebuild' : 'extend';
   return analyzeProfileWithAI(id, { rebuild: mode === 'rebuild', allowWithoutNew: mode === 'rebuild' });
 });
-ipcMain.handle('profiles:get-keys', () => profiles.list().map((p) => p.id));
+ipcMain.handle('profiles:get-keys', () => profiles.accountKeys());
 ipcMain.handle('profiles:get-ai-settings', () => getProfilesAiStatus());
 
 ipcMain.handle('app:install-update', (_event, payload) => installDownloadedUpdate({ clean: Boolean(payload?.clean) }));

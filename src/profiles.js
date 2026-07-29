@@ -62,6 +62,22 @@ function normalizeProfile(profile = {}) {
   const platform = String(profile.platform || '').toLowerCase();
   const user = String(profile.user || '').trim();
   const asArray = (v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
+  const accounts = [];
+  const seenAccounts = new Set();
+  const addAccount = (account = {}) => {
+    const accountPlatform = String(account.platform || '').toLowerCase();
+    const accountUser = String(account.user || '').trim();
+    const key = makeId(accountPlatform, accountUser);
+    if (!accountPlatform || !accountUser || seenAccounts.has(key)) return;
+    seenAccounts.add(key);
+    accounts.push({
+      platform: accountPlatform,
+      user: accountUser,
+      displayName: String(account.displayName || accountUser),
+    });
+  };
+  addAccount({ platform, user, displayName: profile.displayName || user });
+  (Array.isArray(profile.accounts) ? profile.accounts : []).forEach(addAccount);
   return {
     id: String(profile.id || makeId(platform, user)),
     platform,
@@ -70,6 +86,8 @@ function normalizeProfile(profile = {}) {
     // Игровой ник может отличаться от имени пользователя в чате. Его задаёт
     // стример вручную или сам зритель командой «Ник: ...» после розыгрыша.
     nickname: String(profile.nickname || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    // Один игровой ник объединяет несколько аккаунтов чата в общий профиль.
+    accounts,
     bio: String(profile.bio || ''),
     profession: String(profile.profession || ''),
     hobbies: asArray(profile.hobbies),
@@ -131,6 +149,9 @@ function load() {
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     profiles = Array.isArray(raw?.profiles) ? raw.profiles.map(normalizeProfile) : [];
+    if (mergeDuplicateNicknameProfiles()) {
+      save();
+    }
   } catch (error) {
     console.error(`[profiles] не удалось прочитать: ${error.message}`);
     profiles = [];
@@ -320,7 +341,9 @@ function get(id) {
 // и из Twitch под тем же именем.
 function findByUser(platform, user) {
   const id = makeId(platform, user);
-  const exact = profiles.find((p) => p.id === id);
+  const exact = profiles.find(
+    (p) => p.id === id || (p.accounts || []).some((account) => makeId(account.platform, account.user) === id),
+  );
   if (exact) {
     return exact;
   }
@@ -336,7 +359,27 @@ function nicksOf(profile) {
   if (!profile) {
     return [];
   }
-  return [...new Set([normalizeUser(profile.user), ...profile.aliases].filter(Boolean))];
+  return [
+    ...new Set(
+      [
+        normalizeUser(profile.user),
+        ...(profile.accounts || []).map((account) => normalizeUser(account.user)),
+        ...profile.aliases,
+      ].filter(Boolean),
+    ),
+  ];
+}
+
+function accountKeys() {
+  return [
+    ...new Set(
+      profiles.flatMap((profile) =>
+        (profile.accounts || [{ platform: profile.platform, user: profile.user }]).map((account) =>
+          makeId(account.platform, account.user),
+        ),
+      ),
+    ),
+  ];
 }
 
 // Поля, которые пишет только анализ переписки (applyAiResult). Из патчей
@@ -370,17 +413,130 @@ function upsert(patch = {}) {
   } else {
     profiles.push(merged);
   }
+  const sameNickname = normalizeUser(merged.nickname)
+    ? profiles.find((profile) => profile.id !== merged.id && normalizeUser(profile.nickname) === normalizeUser(merged.nickname))
+    : null;
+  const saved = sameNickname ? mergeProfiles(merged, sameNickname) : merged;
   save();
-  return merged;
+  return saved;
 }
 
 // Заводит минимальный профиль для ника из чата, если его ещё нет.
 function ensureForUser({ platform, user, displayName } = {}) {
   const existing = findByUser(platform, user);
   if (existing) {
+    const key = makeId(platform, user);
+    const hasAccount = existing.accounts.some((account) => makeId(account.platform, account.user) === key);
+    if (!hasAccount) {
+      return upsert({
+        id: existing.id,
+        accounts: [
+          ...existing.accounts,
+          { platform, user, displayName: displayName || user },
+        ],
+      });
+    }
     return existing;
   }
   return upsert({ platform, user, displayName: displayName || user });
+}
+
+function uniqueStrings(values = []) {
+  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+function uniqueObjects(values = [], keyOf) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = keyOf(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeMessageLogs(targetId, sourceId) {
+  if (!messagesDir || targetId === sourceId) return;
+  const combined = uniqueObjects(
+    [...readMessages(targetId), ...readMessages(sourceId)],
+    (message) => `${message.createdAt || ''}|${message.text || ''}`,
+  ).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  try {
+    const payload = combined.map((message) => JSON.stringify(message)).join('\n');
+    fs.writeFileSync(messagesFile(targetId), payload ? `${payload}\n` : '');
+    fs.rmSync(messagesFile(sourceId), { force: true });
+  } catch (error) {
+    console.error(`[profiles] не удалось объединить сообщения: ${error.message}`);
+  }
+}
+
+function mergeProfiles(target, source) {
+  if (!target || !source || target.id === source.id) return target;
+  const targetPortraitTime = new Date(target.aiUpdatedAt || 0).getTime();
+  const sourcePortraitTime = new Date(source.aiUpdatedAt || 0).getTime();
+  const portrait = sourcePortraitTime > targetPortraitTime ? source : target;
+  const accounts = uniqueObjects(
+    [...(target.accounts || []), ...(source.accounts || [])],
+    (account) => makeId(account.platform, account.user),
+  );
+  const timeline = uniqueObjects(
+    [...target.timeline, ...source.timeline],
+    (entry) => `${entry.date}|${entry.type}|${entry.text.toLowerCase()}`,
+  );
+  const corrections = uniqueObjects(
+    [...target.corrections, ...source.corrections],
+    (entry) => entry.text.toLowerCase(),
+  );
+  const merged = normalizeProfile({
+    ...target,
+    bio: portrait.bio,
+    profession: portrait.profession,
+    hobbies: uniqueStrings([...target.hobbies, ...source.hobbies]),
+    traits: uniqueStrings([...target.traits, ...source.traits]),
+    facts: uniqueStrings([...target.facts, ...source.facts]),
+    aiSummary: portrait.aiSummary,
+    aiUpdatedAt: portrait.aiUpdatedAt,
+    aiStatus: portrait.aiStatus,
+    aiError: portrait.aiError,
+    nickname: target.nickname || source.nickname,
+    displayName: target.displayName,
+    accounts,
+    aliases: uniqueStrings([...target.aliases, ...source.aliases]),
+    timeline,
+    corrections,
+    note: uniqueStrings([target.note, source.note]).join('\n'),
+    role: target.role === 'streamer' || source.role === 'streamer' ? 'streamer' : 'viewer',
+    pinned: target.pinned || source.pinned,
+    messagesSeeded: target.messagesSeeded && source.messagesSeeded,
+    // После объединения у профиля появился общий лог: следующий анализ должен учесть его целиком.
+    messagesAnalyzed: 0,
+    createdAt: [target.createdAt, source.createdAt].filter(Boolean).sort()[0],
+    updatedAt: new Date().toISOString(),
+  });
+  mergeMessageLogs(target.id, source.id);
+  const pending = [...(pendingMessages.get(target.id) || []), ...(pendingMessages.get(source.id) || [])];
+  pendingMessages.delete(source.id);
+  if (pending.length) pendingMessages.set(target.id, pending);
+  profiles = profiles.filter((profile) => profile.id !== source.id).map((profile) => (profile.id === target.id ? merged : profile));
+  return merged;
+}
+
+function mergeDuplicateNicknameProfiles() {
+  let changed = false;
+  const byNickname = new Map();
+  for (const profile of [...profiles]) {
+    const nickname = normalizeUser(profile.nickname);
+    if (!nickname) continue;
+    const existing = byNickname.get(nickname);
+    if (!existing) {
+      byNickname.set(nickname, profile);
+      continue;
+    }
+    const merged = mergeProfiles(existing, profile);
+    byNickname.set(nickname, merged);
+    changed = true;
+  }
+  return changed;
 }
 
 // Запоминает игровой ник у существующего зрителя или создаёт для него
@@ -549,6 +705,7 @@ module.exports = {
   list,
   get,
   findByUser,
+  accountKeys,
   upsert,
   ensureForUser,
   setNicknameForUser,

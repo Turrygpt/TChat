@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const baseUrl = process.env.TCHAT_URL || 'http://localhost:3000';
@@ -554,10 +555,38 @@ check('profiles support full rebuild and incremental extension', () => {
     !backofficeBody.includes("analyzeProfile(p.id, 'extend')") ||
     !preloadBody.includes('{ id, mode }') ||
     !mainBody.includes("payload?.mode === 'rebuild'") ||
+    !mainBody.includes("PROFILE_REBUILD_POLZA_MODEL = 'anthropic/claude-sonnet-4.6'") ||
+    !mainBody.includes('polzaOnly: rebuild') ||
+    !mainBody.includes('PROFILE_GAME_NAMING_RULE') ||
+    !mainBody.includes('Не называй её World of Warships') ||
     !mainBody.includes('Текущее саммари профиля') ||
     !mainBody.includes('const shown = fresh.map')
   ) {
     throw new Error('profile rebuild/extend modes missing');
+  }
+});
+
+check('profiles merge platform accounts by game nickname', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tchat-profile-merge-'));
+  try {
+    const profileStore = require(path.join(projectRoot, 'src', 'profiles'));
+    profileStore.init(dir);
+    profileStore.setNicknameForUser({ platform: 'twitch', user: 'sea_gek', nickname: 'sea_gek' });
+    profileStore.setNicknameForUser({ platform: 'vk', user: 'sea_gek_vk', nickname: 'sea_gek' });
+    const items = profileStore.list();
+    const twitch = profileStore.findByUser('twitch', 'sea_gek');
+    const vk = profileStore.findByUser('vk', 'sea_gek_vk');
+    if (
+      items.length !== 1 ||
+      items[0].accounts.length !== 2 ||
+      twitch?.id !== vk?.id ||
+      !profileStore.accountKeys().includes('twitch:sea_gek') ||
+      !profileStore.accountKeys().includes('vk:sea_gek_vk')
+    ) {
+      throw new Error('same game nickname did not merge platform accounts');
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
