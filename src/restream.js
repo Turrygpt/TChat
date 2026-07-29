@@ -356,6 +356,11 @@ function buildListenerArgs() {
     '-i', listenUrl,
     '-c', 'copy',
     '-map', '0',
+    // A destination can reconnect in the middle of a broadcast. Repeat H.264
+    // SPS/PPS and MPEG-TS tables at keyframes so a fresh FFmpeg process can
+    // discover the frame dimensions without waiting for OBS to reconnect.
+    '-bsf:v', 'h264_mp4toannexb,dump_extra=freq=keyframe',
+    '-mpegts_flags', '+resend_headers',
     '-f', 'mpegts', 'pipe:1',
   ];
 }
@@ -417,8 +422,11 @@ const destProcs = new Map();
 // Сколько байт разрешаем накопить в трубе площадки, прежде чем считать её
 // затыком. Площадка, которая не успевает принимать, иначе утащила бы в память
 // весь эфир: пишем мы быстрее, чем она отдаёт в сеть.
-const DEST_BUFFER_LIMIT = 2 * 1024 * 1024;
-const DEST_STALL_TIMEOUT = 5000;
+// Twitch can legitimately stop reading the local pipe for several seconds
+// while opening RTMP. Keep enough data for that handshake; the 15-second
+// network timeout still terminates a genuinely dead platform independently.
+const DEST_BUFFER_LIMIT = 16 * 1024 * 1024;
+const DEST_STALL_TIMEOUT = 20000;
 // Базовая пауза перед повторным подъёмом площадки. При череде неудач растёт
 // по экспоненте до потолка: Twitch после обрыва держит ключ «в эфире» ещё
 // 10–30 с и отбивает слишком быстрые переподключения тем самым «Invalid
@@ -451,6 +459,7 @@ function spawnDestination(dest) {
     retryTimer: null,
     stallTimer: null,
     lastError: '',
+    loggedErrorKinds: new Set(),
     startedAt: Date.now(),
     target: targetUrl(dest),
   };
@@ -477,12 +486,28 @@ function spawnDestination(dest) {
     const line = chunk.toString().trim();
     if (line) {
       entry.lastError = redactLogText(line.split('\n').pop()).slice(0, 200);
-      logEvent('destination-error', {
-        destinationId: dest.id,
-        destination: dest.name,
-        target: safeNetworkAddress(entry.target),
-        message: redactLogText(line),
-      });
+      const message = redactLogText(line);
+      const errorKind = /Nothing was written/i.test(message)
+        ? 'nothing-written'
+        : /Could not write header|dimensions not set/i.test(message)
+          ? 'invalid-header'
+          : /non-existing PPS|decode_slice_header/i.test(message)
+            ? 'missing-video-headers'
+            : /Connection|Broken pipe|timed out/i.test(message)
+              ? 'connection'
+              : 'other';
+      // FFmpeg can print the same decoder complaint for every frame. One
+      // sample of each kind per process plus destination-exit is sufficient.
+      if (!entry.loggedErrorKinds.has(errorKind)) {
+        entry.loggedErrorKinds.add(errorKind);
+        logEvent('destination-error', {
+          destinationId: dest.id,
+          destination: dest.name,
+          target: safeNetworkAddress(entry.target),
+          kind: errorKind,
+          message,
+        });
+      }
     }
   });
 

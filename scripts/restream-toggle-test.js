@@ -55,6 +55,9 @@ async function main() {
       '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=15',
       '-f', 'lavfi', '-i', 'sine=frequency=440',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '15',
+      // Match OBS streams that only send SPS/PPS at the beginning. The
+      // restream listener must repeat them for destinations enabled mid-live.
+      '-x264-params', 'repeat-headers=0',
       '-c:a', 'aac', '-shortest',
       '-f', 'flv', `rtmp://127.0.0.1:${PORT}/live/${KEY}`,
     ],
@@ -133,6 +136,18 @@ async function main() {
   await sleep(500);
 
   console.log(`\nРезультат: ${failures.length ? `провалено ${failures.length}` : 'всё сошлось'}`);
+  if (failures.length) {
+    const logPath = path.join(workDir, 'logs', 'restream.log');
+    if (fs.existsSync(logPath)) {
+      const diagnostic = fs
+        .readFileSync(logPath, 'utf8')
+        .trim()
+        .split(/\r?\n/)
+        .filter((line) => /listener-error|listener-exit/.test(line))
+        .slice(-20);
+      console.error(diagnostic.join('\n'));
+    }
+  }
   fs.rmSync(workDir, { recursive: true, force: true });
   process.exit(failures.length ? 1 : 0);
 }
