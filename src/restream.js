@@ -48,6 +48,59 @@ let destStats = new Map();
 let bitrateKbps = 0; // текущий сквозной битрейт (из stats ffmpeg)
 let respawnTimer = null;
 let statusListener = () => {};
+let logFile = '';
+
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+function safeNetworkAddress(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return 'invalid-address';
+  }
+}
+
+function redactLogText(value) {
+  return String(value || '')
+    .replace(/rtmps?:\/\/[^\s"'<>]+/gi, (match) => safeNetworkAddress(match))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
+}
+
+function initLogging(storageDir) {
+  try {
+    const baseDir = path.basename(storageDir).toLowerCase() === 'settings'
+      ? path.dirname(storageDir)
+      : storageDir;
+    const logDir = path.join(baseDir, 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    logFile = path.join(logDir, 'restream.log');
+    if (fs.existsSync(logFile) && fs.statSync(logFile).size >= LOG_MAX_BYTES) {
+      const previous = `${logFile}.1`;
+      if (fs.existsSync(previous)) {
+        fs.unlinkSync(previous);
+      }
+      fs.renameSync(logFile, previous);
+    }
+  } catch (error) {
+    logFile = '';
+    console.error('[restream] cannot initialize log:', error?.message || error);
+  }
+}
+
+function logEvent(event, details = {}) {
+  if (!logFile) {
+    return;
+  }
+  const record = { time: new Date().toISOString(), event, ...details };
+  fs.appendFile(logFile, `${JSON.stringify(record)}\n`, (error) => {
+    if (error) {
+      console.error('[restream] cannot write log:', error.message);
+    }
+  });
+}
 
 // Статистика текущей сессии (пока OBS подключён) + счётчики за время работы сервера.
 let sessionStartedAt = 0;
@@ -308,6 +361,10 @@ function buildListenerArgs() {
 }
 
 function buildDestinationArgs(dest) {
+  const target = targetUrl(dest);
+  const networkOutputArgs = /^rtmps?:\/\//i.test(target)
+    ? ['-rw_timeout', '15000000']
+    : [];
   return [
     '-loglevel', 'level+error',
     // Площадка может подняться в середине эфира (переподключение). Тогда ffmpeg
@@ -348,7 +405,8 @@ function buildDestinationArgs(dest) {
     // частоту и каналы ffmpeg наследует от источника сам.
     '-c:a', 'aac',
     '-b:a', `${audioKbps && audioKbps >= 64 ? Math.min(audioKbps, 320) : 160}k`,
-    '-f', 'flv', targetUrl(dest),
+    ...networkOutputArgs,
+    '-f', 'flv', target,
   ];
 }
 
@@ -359,7 +417,8 @@ const destProcs = new Map();
 // Сколько байт разрешаем накопить в трубе площадки, прежде чем считать её
 // затыком. Площадка, которая не успевает принимать, иначе утащила бы в память
 // весь эфир: пишем мы быстрее, чем она отдаёт в сеть.
-const DEST_BUFFER_LIMIT = 8 * 1024 * 1024;
+const DEST_BUFFER_LIMIT = 2 * 1024 * 1024;
+const DEST_STALL_TIMEOUT = 5000;
 // Базовая пауза перед повторным подъёмом площадки. При череде неудач растёт
 // по экспоненте до потолка: Twitch после обрыва держит ключ «в эфире» ещё
 // 10–30 с и отбивает слишком быстрые переподключения тем самым «Invalid
@@ -386,8 +445,22 @@ function spawnDestination(dest) {
   const child = spawn(ffmpegPath, buildDestinationArgs(dest), { windowsHide: true });
   // target запоминаем, чтобы заметить смену адреса (например, включили
   // ретрансляцию через свой сервер) и перезапустить только эту площадку.
-  const entry = { child, pending: 0, retryTimer: null, lastError: '', startedAt: Date.now(), target: targetUrl(dest) };
+  const entry = {
+    child,
+    pending: 0,
+    retryTimer: null,
+    stallTimer: null,
+    lastError: '',
+    startedAt: Date.now(),
+    target: targetUrl(dest),
+  };
   destProcs.set(dest.id, entry);
+  logEvent('destination-start', {
+    destinationId: dest.id,
+    destination: dest.name,
+    target: safeNetworkAddress(entry.target),
+    viaRelay: Boolean(dest.viaRelay),
+  });
 
   stat.status = live ? 'live' : 'idle';
   stat.error = '';
@@ -403,17 +476,24 @@ function spawnDestination(dest) {
   child.stderr.on('data', (chunk) => {
     const line = chunk.toString().trim();
     if (line) {
-      entry.lastError = line.split('\n').pop().slice(0, 200);
+      entry.lastError = redactLogText(line.split('\n').pop()).slice(0, 200);
+      logEvent('destination-error', {
+        destinationId: dest.id,
+        destination: dest.name,
+        target: safeNetworkAddress(entry.target),
+        message: redactLogText(line),
+      });
     }
   });
 
-  child.on('exit', () => {
+  child.on('exit', (code, signal) => {
     if (destProcs.get(dest.id) !== entry) {
       return;
     }
 
     destProcs.delete(dest.id);
     clearTimeout(entry.retryTimer);
+    clearTimeout(entry.stallTimer);
 
     // Выключили руками — процесса быть и не должно, это не ошибка. Заодно
     // обнуляем счётчик неудач, чтобы следующее включение стартовало без паузы.
@@ -442,6 +522,15 @@ function spawnDestination(dest) {
     // Экспоненциальная пауза: 4с → 8с → 16с → … до потолка. Даём Twitch время
     // освободить зависший ключ, вместо того чтобы биться в него каждые 4 секунды.
     const delay = Math.min(DEST_RETRY_DELAY * 2 ** (stat.failStreak - 1), DEST_RETRY_MAX_DELAY);
+    logEvent('destination-exit', {
+      destinationId: dest.id,
+      destination: dest.name,
+      target: safeNetworkAddress(entry.target),
+      code,
+      signal,
+      message: entry.lastError,
+      retryInMs: delay,
+    });
 
     // Поднимаем только эту площадку: остальные и слушатель ничего не заметят.
     entry.retryTimer = setTimeout(() => {
@@ -454,7 +543,18 @@ function spawnDestination(dest) {
   });
 
   child.on('error', (error) => {
+    entry.lastError = redactLogText(error?.message || error);
+    logEvent('destination-process-error', {
+      destinationId: dest.id,
+      destination: dest.name,
+      target: safeNetworkAddress(entry.target),
+      message: entry.lastError,
+    });
     console.error('[restream] площадка не запустилась:', error?.message || error);
+  });
+  child.stdin.on('drain', () => {
+    clearTimeout(entry.stallTimer);
+    entry.stallTimer = null;
   });
 }
 
@@ -466,6 +566,7 @@ function killDestination(id) {
 
   destProcs.delete(id);
   clearTimeout(entry.retryTimer);
+  clearTimeout(entry.stallTimer);
   try {
     entry.child.kill('SIGKILL');
   } catch {
@@ -520,14 +621,22 @@ function killAllDestinations() {
 // Раздаёт очередной кусок эфира всем живым площадкам.
 function fanOut(chunk) {
   for (const [id, entry] of destProcs) {
-    if (entry.pending > DEST_BUFFER_LIMIT) {
+    if (entry.pending + chunk.length > DEST_BUFFER_LIMIT) {
       // Площадка не успевает принимать. Роняем её процесс: обработчик exit
       // пометит ошибку и через паузу поднимет заново, с чистой трубой.
       const stat = destStats.get(id);
       if (stat) {
         stat.error = 'площадка не успевает принимать поток';
       }
+      entry.lastError = 'destination input buffer exceeded limit';
+      logEvent('destination-buffer-overflow', {
+        destinationId: id,
+        target: safeNetworkAddress(entry.target),
+        queuedBytes: entry.pending,
+        limitBytes: DEST_BUFFER_LIMIT,
+      });
       entry.pending = 0;
+      clearTimeout(entry.stallTimer);
       try {
         entry.child.kill('SIGKILL');
       } catch {
@@ -538,9 +647,28 @@ function fanOut(chunk) {
 
     entry.pending += chunk.length;
     try {
-      entry.child.stdin.write(chunk, () => {
+      const accepted = entry.child.stdin.write(chunk, () => {
         entry.pending = Math.max(entry.pending - chunk.length, 0);
       });
+      if (!accepted && !entry.stallTimer) {
+        entry.stallTimer = setTimeout(() => {
+          entry.stallTimer = null;
+          if (destProcs.get(id) !== entry || entry.child.stdin.destroyed || entry.pending === 0) {
+            return;
+          }
+          entry.lastError = 'destination input stalled';
+          logEvent('destination-stall', {
+            destinationId: id,
+            target: safeNetworkAddress(entry.target),
+            queuedBytes: entry.pending,
+          });
+          try {
+            entry.child.kill('SIGKILL');
+          } catch {
+            /* already dead */
+          }
+        }, DEST_STALL_TIMEOUT);
+      }
     } catch {
       entry.pending = Math.max(entry.pending - chunk.length, 0);
     }
@@ -559,6 +687,14 @@ function spawnListener() {
 
   const child = spawn(ffmpegPath, buildListenerArgs(), { windowsHide: true });
   proc = child;
+  logEvent('listener-start', {
+    ingestPort: config.ingestPort,
+    destinations: enabledDestinations().map((dest) => ({
+      id: dest.id,
+      name: dest.name,
+      target: safeNetworkAddress(targetUrl(dest)),
+    })),
+  });
 
   child.stdout.on('data', fanOut);
   syncDestinations();
@@ -646,6 +782,9 @@ function spawnListener() {
     if (!live && timeMatch) {
       live = true;
       sessionStartedAt = Date.now();
+      logEvent('stream-live', {
+        destinations: enabledDestinations().map((dest) => dest.name),
+      });
       for (const [id, stat] of destStats) {
         if (destProcs.has(id)) {
           stat.status = 'live';
@@ -664,11 +803,17 @@ function spawnListener() {
       lastStatsEmit = now;
       emitStatus();
     }
+
+    for (const line of text.split(/\r?\n/)) {
+      if (/\b(error|failed|failure|broken pipe|connection reset|timed out)\b/i.test(line)) {
+        logEvent('listener-error', { message: redactLogText(line) });
+      }
+    }
   };
   // stdout занят самим эфиром — в лог идёт только stderr.
   child.stderr.on('data', onLog);
 
-  child.on('exit', () => {
+  child.on('exit', (code, signal) => {
     if (proc === child) {
       proc = null;
     }
@@ -678,6 +823,12 @@ function spawnListener() {
       disconnects += 1;
       lastDisconnectAt = Date.now();
     }
+    logEvent('listener-exit', {
+      code,
+      signal,
+      wasLive: live,
+      disconnects,
+    });
     live = false;
     resetSessionStats();
     // Эфира больше нет — площадкам нечего передавать, гасим их процессы.
@@ -697,6 +848,7 @@ function spawnListener() {
 
   child.on('error', (error) => {
     console.error('[restream] ffmpeg error:', error?.message || error);
+    logEvent('listener-process-error', { message: redactLogText(error?.message || error) });
   });
 
   emitStatus();
@@ -748,7 +900,18 @@ function init({ storageDir, onStatus } = {}) {
     statusListener = onStatus;
   }
   if (storageDir) {
+    initLogging(storageDir);
     load(storageDir);
+    logEvent('restream-init', {
+      enabled: config.enabled,
+      ingestPort: config.ingestPort,
+      destinations: config.destinations.map((dest) => ({
+        id: dest.id,
+        name: dest.name,
+        enabled: dest.enabled,
+        target: safeNetworkAddress(targetUrl(dest)),
+      })),
+    });
   }
   if (config.enabled) {
     start();
