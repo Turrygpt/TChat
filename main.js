@@ -164,7 +164,9 @@ let streamWidgets = [];
 let activePoll = null;
 let pollFinishTimer = null;
 let giveawayFinishTimers = new Map();
+let giveawayHideTimers = new Map();
 let giveawayWinnerLog = [];
+const GIVEAWAY_AUTO_HIDE_MS = 5 * 60 * 1000;
 let countdownTickTimer = null;
 const DEFAULT_COUNTDOWN_SECONDS = 7200;
 const DEFAULT_TEXTS_FONT_SIZE = 32;
@@ -1493,6 +1495,8 @@ function deleteStreamWidget(id) {
   const widgetId = String(id || '');
   clearTimeout(giveawayFinishTimers.get(widgetId));
   giveawayFinishTimers.delete(widgetId);
+  clearTimeout(giveawayHideTimers.get(widgetId));
+  giveawayHideTimers.delete(widgetId);
   streamWidgets = streamWidgets.filter((widget) => widget.id !== widgetId);
   saveStreamWidgets(streamWidgets);
   broadcastStreamWidgets();
@@ -1512,10 +1516,44 @@ function scheduleGiveawayFinish(widget) {
   giveawayFinishTimers.set(widget.id, setTimeout(() => finishGiveaway(widget.id), delay));
 }
 
+function hideFinishedGiveaway(id, expectedFinishedAt) {
+  const current = getGiveawayWidget(id);
+  giveawayHideTimers.delete(String(id || ''));
+  if (
+    !current ||
+    current.status !== 'finished' ||
+    current.finishedAt !== expectedFinishedAt ||
+    current.enabled === false
+  ) {
+    return;
+  }
+
+  streamWidgets = streamWidgets.map((widget) =>
+    widget.id === current.id ? normalizeStreamWidget({ ...widget, enabled: false }) : widget,
+  );
+  saveStreamWidgets(streamWidgets);
+  broadcastStreamWidgets();
+}
+
+function scheduleGiveawayHide(widget) {
+  clearTimeout(giveawayHideTimers.get(widget?.id));
+  giveawayHideTimers.delete(widget?.id);
+  if (!widget || widget.status !== 'finished' || !widget.finishedAt || widget.enabled === false) return;
+
+  const hideAt = new Date(widget.finishedAt).getTime() + GIVEAWAY_AUTO_HIDE_MS;
+  const delay = Math.max(hideAt - Date.now(), 0);
+  giveawayHideTimers.set(
+    widget.id,
+    setTimeout(() => hideFinishedGiveaway(widget.id, widget.finishedAt), delay),
+  );
+}
+
 function scheduleAllGiveawayFinishes() {
   streamWidgets.filter((widget) => widget.type === 'giveaway').forEach((widget) => {
     if (widget.status === 'running' && widget.endsAt && new Date(widget.endsAt).getTime() <= Date.now()) {
       finishGiveaway(widget.id);
+    } else if (widget.status === 'finished') {
+      scheduleGiveawayHide(widget);
     } else {
       scheduleGiveawayFinish(widget);
     }
@@ -1527,6 +1565,8 @@ function startGiveaway(id, payload = {}) {
   if (!current) throw new Error('Виджет розыгрыша не найден.');
 
   const configured = normalizeGiveawayWidget({ ...current, ...payload });
+  clearTimeout(giveawayHideTimers.get(current.id));
+  giveawayHideTimers.delete(current.id);
   const startedAt = new Date().toISOString();
   const next = normalizeStreamWidget({
     ...configured,
@@ -1599,6 +1639,7 @@ function finishGiveaway(id) {
     startedAt: current.startedAt,
     finishedAt,
   });
+  scheduleGiveawayHide(next);
   broadcastStreamWidgets();
   return getStreamWidgetsPayload();
 }
@@ -1608,6 +1649,8 @@ function resetGiveaway(id) {
   if (!current) throw new Error('Виджет розыгрыша не найден.');
   clearTimeout(giveawayFinishTimers.get(current.id));
   giveawayFinishTimers.delete(current.id);
+  clearTimeout(giveawayHideTimers.get(current.id));
+  giveawayHideTimers.delete(current.id);
   streamWidgets = streamWidgets.map((widget) =>
     widget.id === current.id
       ? normalizeStreamWidget({
@@ -1633,6 +1676,8 @@ function resetGiveaway(id) {
 function resetAllGiveaways() {
   giveawayFinishTimers.forEach((timer) => clearTimeout(timer));
   giveawayFinishTimers.clear();
+  giveawayHideTimers.forEach((timer) => clearTimeout(timer));
+  giveawayHideTimers.clear();
   streamWidgets = streamWidgets.map((widget) =>
     widget.type === 'giveaway'
       ? normalizeStreamWidget({
@@ -1693,6 +1738,15 @@ function registerGiveawayWinnerNickname(message = {}) {
   const nickname = parseNicknameCommand(message.text);
   if (!nickname) return;
 
+  // «Ник: ...» is a profile command, not only a giveaway command. Remember it
+  // at any time; if this viewer is also a current winner, update that draw too.
+  const wasKnown = Boolean(profiles.findByUser(message.platform, message.user));
+  const savedProfile = profiles.setNicknameForUser({
+    platform: message.platform,
+    user: message.user,
+    displayName: message.user,
+    nickname,
+  });
   const participant = normalizeGiveawayParticipant({
     platform: message.platform,
     user: message.user,
@@ -1717,23 +1771,17 @@ function registerGiveawayWinnerNickname(message = {}) {
     });
   });
 
-  if (!captured.length) return;
-  const wasKnown = Boolean(profiles.findByUser(message.platform, message.user));
-  const savedProfile = profiles.setNicknameForUser({
-    platform: message.platform,
-    user: message.user,
-    displayName: message.user,
-    nickname,
-  });
-  saveStreamWidgets(streamWidgets);
-  captured.forEach(({ drawId, widgetId, winner }) => {
-    appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt, 'chat-command');
-  });
+  if (captured.length) {
+    saveStreamWidgets(streamWidgets);
+    captured.forEach(({ drawId, widgetId, winner }) => {
+      appendGiveawayNicknameLog(drawId, widgetId, winner, nickname, capturedAt, 'chat-command');
+    });
+    broadcastStreamWidgets();
+  }
   if (savedProfile) {
     void notifyProfileChanged(savedProfile.id);
     if (!wasKnown) broadcastProfileKeys();
   }
-  broadcastStreamWidgets();
 }
 
 // В старой версии первое сообщение победителя ошибочно считалось ником. Для
@@ -3174,6 +3222,30 @@ function readLocalPatchnotes() {
   }
 }
 
+async function resolveUpdatePolicy(version) {
+  const targetVersion = String(version || '').trim();
+  let notes = readLocalPatchnotes();
+  const feedUrl = String(require('./package.json')?.build?.publish?.[0]?.url || '').replace(/\/+$/, '');
+
+  if (feedUrl) {
+    try {
+      const response = await fetch(`${feedUrl}/patchnotes.json`, { cache: 'no-store' });
+      if (response.ok) {
+        const remote = await response.json();
+        if (Array.isArray(remote?.notes)) {
+          notes = remote.notes;
+        }
+      }
+    } catch {
+      // Only an explicit critical flag blocks the application.
+    }
+  }
+
+  const note = notes.find((item) => String(item?.version || '') === targetVersion);
+  const critical = note?.critical === true;
+  return { critical, updateType: critical ? 'critical' : 'regular' };
+}
+
 function installDownloadedUpdate({ clean = false } = {}) {
   if (!autoUpdater) {
     return { ok: false, error: 'модуль обновления недоступен' };
@@ -3206,40 +3278,52 @@ function setupAutoUpdater() {
   // Версию из update-available запоминаем: событие download-progress её не несёт,
   // а окну обновления нужно показывать «TChat vX» и во время скачивания.
   let pendingUpdateVersion = '';
+  let pendingUpdatePolicy = Promise.resolve({ critical: false, updateType: 'regular' });
 
   autoUpdater.on('checking-for-update', () => broadcastUpdaterStatus({ state: 'checking' }));
   autoUpdater.on('update-available', (info) => {
     pendingUpdateVersion = info?.version || '';
-    broadcastUpdaterStatus({
-      state: 'available',
-      version: pendingUpdateVersion,
-      current: app.getVersion(),
-      downloadUrl: getInstallerDownloadUrl(pendingUpdateVersion),
-    });
+    pendingUpdatePolicy = resolveUpdatePolicy(pendingUpdateVersion);
+    void pendingUpdatePolicy.then((policy) =>
+      broadcastUpdaterStatus({
+        state: 'available',
+        version: pendingUpdateVersion,
+        current: app.getVersion(),
+        downloadUrl: getInstallerDownloadUrl(pendingUpdateVersion),
+        ...policy,
+      }),
+    );
   });
-  autoUpdater.on('update-not-available', () =>
-    broadcastUpdaterStatus({ state: 'none', current: app.getVersion() }),
-  );
-  autoUpdater.on('download-progress', (progress) =>
-    broadcastUpdaterStatus({
-      state: 'downloading',
-      version: pendingUpdateVersion,
-      current: app.getVersion(),
-      percent: Math.round(progress?.percent || 0),
-      speedKbps: Math.round((progress?.bytesPerSecond || 0) / 1024),
-    }),
-  );
+  autoUpdater.on('update-not-available', () => {
+    pendingUpdateVersion = '';
+    pendingUpdatePolicy = Promise.resolve({ critical: false, updateType: 'regular' });
+    broadcastUpdaterStatus({ state: 'none', current: app.getVersion() });
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    void pendingUpdatePolicy.then((policy) =>
+      broadcastUpdaterStatus({
+        state: 'downloading',
+        version: pendingUpdateVersion,
+        current: app.getVersion(),
+        percent: Math.round(progress?.percent || 0),
+        speedKbps: Math.round((progress?.bytesPerSecond || 0) / 1024),
+        ...policy,
+      }),
+    );
+  });
 
-  autoUpdater.on('update-downloaded', (info) => {
+  autoUpdater.on('update-downloaded', async (info) => {
     const version = info?.version || pendingUpdateVersion || 'новая версия';
+    const policy = await pendingUpdatePolicy;
     broadcastUpdaterStatus({
       state: 'downloaded',
       version,
       current: app.getVersion(),
       downloadUrl: getInstallerDownloadUrl(info?.version || pendingUpdateVersion || ''),
+      ...policy,
     });
 
-    // Бэкоффис показывает своё окно обновления, которое нельзя закрыть мимо.
+    // Бэкоффис показывает своё окно: обычное можно отложить, критическое нельзя.
     // Системный диалог нужен только если бэкоффиса на экране нет — иначе
     // пользователь получил бы два запроса разом.
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
@@ -3251,10 +3335,14 @@ function setupAutoUpdater() {
         type: 'info',
         title: 'Обновление TChat',
         message: `Скачано обновление ${version}. Установить сейчас?`,
-        detail: 'Приложение перезапустится. Если идёт эфир — сначала завершите его.',
-        buttons: ['Установить сейчас', 'Позже'],
+        detail: policy.critical
+          ? 'Это критическое обновление. Продолжить работу без него нельзя.'
+          : 'Приложение перезапустится. Если идёт эфир — обновление можно отложить.',
+        buttons: policy.critical
+          ? ['Установить и перезапустить']
+          : ['Установить сейчас', 'Позже'],
         defaultId: 0,
-        cancelId: 1,
+        cancelId: policy.critical ? -1 : 1,
       })
       .then(({ response }) => {
         if (response === 0) {

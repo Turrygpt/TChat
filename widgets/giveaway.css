@@ -9,7 +9,7 @@ html, body {
   width: 100%;
   min-height: 100%;
   margin: 0;
-  overflow: hidden;
+  overflow: visible;
   background: transparent !important;
   background-color: rgb(0 0 0 / 0%) !important;
 }
@@ -23,9 +23,8 @@ body {
 .giveaway {
   position: relative;
   width: min(680px, 100%);
-  max-height: 100vh;
   zoom: 0.7;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgb(255 255 255 / 20%);
   border-radius: 24px;
   background:
@@ -100,9 +99,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  max-height: 150px;
   margin: 14px 24px 22px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .giveaway__person {

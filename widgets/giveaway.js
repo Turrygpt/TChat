@@ -9,6 +9,7 @@ let tickTimer = null;
 let revealedId = '';
 let renderedSignature = '';
 let timerKey = '';
+let autoHideTimer = null;
 
 fetch('/widgets/state')
   .then((response) => response.json())
@@ -23,7 +24,20 @@ function applyState(state = {}) {
   );
   const widget = requestedId ? giveaways.find((item) => item.id === requestedId) : giveaways[0];
   latestWidget = widget || null;
-  const nextSignature = JSON.stringify(widget ? { ...widget, updatedAt: undefined } : null);
+  clearTimeout(autoHideTimer);
+  autoHideTimer = null;
+  if (widget?.status === 'finished' && widget.finishedAt) {
+    const hideDelay = new Date(widget.finishedAt).getTime() + 5 * 60 * 1000 - Date.now();
+    if (hideDelay <= 0) {
+      latestWidget = null;
+    } else {
+      autoHideTimer = setTimeout(() => {
+        latestWidget = null;
+        render();
+      }, hideDelay);
+    }
+  }
+  const nextSignature = JSON.stringify(latestWidget ? { ...latestWidget, updatedAt: undefined } : null);
   if (nextSignature !== renderedSignature) {
     renderedSignature = nextSignature;
     render();
@@ -53,6 +67,7 @@ function render() {
   const widget = latestWidget;
   if (!widget) {
     root.hidden = true;
+    reportHeight();
     return;
   }
 
@@ -99,7 +114,6 @@ function render() {
             ${
               participants.length
                 ? participants
-                    .slice(-60)
                     .map((participant) => `<span class="giveaway__person">${escapeHtml(participant.user)}</span>`)
                     .join('')
                 : '<em class="giveaway__empty">Ждём первых участников…</em>'
@@ -109,6 +123,23 @@ function render() {
     }
     <footer class="giveaway__footer">${participants.length} ${plural(participants.length, 'участник', 'участника', 'участников')}</footer>
   `;
+  reportHeight();
+}
+
+function reportHeight() {
+  requestAnimationFrame(() => {
+    const height = root.hidden ? 0 : Math.ceil(root.getBoundingClientRect().height);
+    if (window.parent !== window) {
+      window.parent.postMessage(
+        { type: 'tchat:giveaway-size', id: latestWidget?.id || requestedId || '', height },
+        '*',
+      );
+    }
+  });
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(reportHeight).observe(root);
 }
 
 function timerText(widget) {

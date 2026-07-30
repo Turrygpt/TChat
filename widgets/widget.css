@@ -283,6 +283,8 @@ body {
 
 .stream-embedded-widget--giveaway {
   min-height: 320px;
+  height: auto;
+  overflow: visible;
   border: 0;
   background: transparent !important;
   background-color: rgb(0 0 0 / 0%) !important;

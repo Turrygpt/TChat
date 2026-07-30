@@ -803,6 +803,15 @@
         pointer-events: none;
       }
 
+      .preview-giveaway-frame {
+        display: block;
+        width: 100%;
+        min-height: 320px;
+        border: 0;
+        background: transparent;
+        pointer-events: none;
+      }
+
       .preview-widget:active {
         cursor: grabbing;
       }
@@ -1591,6 +1600,12 @@
         font-weight: 700;
         letter-spacing: 0.03em;
         text-transform: uppercase;
+      }
+
+      .update-modal[data-critical="true"] .update-modal__badge {
+        border: 1px solid rgb(251 113 133 / 42%);
+        background: rgb(190 24 93 / 22%);
+        color: #fecdd3;
       }
 
       .update-modal__actions {
@@ -3278,13 +3293,13 @@
       </div>
     </div>
 
-    <!-- Обязательное обновление: окно нельзя закрыть, пока версия не установлена. -->
+    <!-- Обычное обновление можно отложить; критическое блокирует дальнейшую работу. -->
     <div id="updateModal" class="update-modal" hidden>
-      <div class="update-modal__backdrop"></div>
+      <div class="update-modal__backdrop" data-update-later></div>
       <div class="update-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle">
-        <div class="update-modal__badge">Доступно обновление</div>
+        <div id="updateModalBadge" class="update-modal__badge">Обычное обновление</div>
         <h2 id="updateModalTitle">TChat <span id="updateModalVersion">—</span></h2>
-        <p id="updateModalSubtitle" class="muted">У вас <span id="updateModalCurrent">—</span>. Обновление обязательно.</p>
+        <p id="updateModalSubtitle" class="muted">У вас <span id="updateModalCurrent">—</span>.</p>
 
         <div id="updateProgressWrap" class="update-progress" hidden>
           <div class="update-progress__bar"><span id="updateProgressFill"></span></div>
@@ -3310,6 +3325,7 @@
 
         <div class="update-modal__actions">
           <button id="updateInstallButton" class="button" type="button" disabled>Скачиваю...</button>
+          <button id="updateLaterButton" class="button button--ghost" type="button" data-update-later>Позже</button>
           <button id="updateNotesToggle" class="button button--ghost" type="button">Что нового</button>
           <a id="updateManualLink" class="button button--ghost" href="#" target="_blank" rel="noreferrer" hidden>Скачать вручную</a>
         </div>
@@ -4813,6 +4829,20 @@
         updatePreviewScale();
       }
 
+      window.addEventListener('message', (event) => {
+        if (event.data?.type !== 'tchat:giveaway-size' || !previewStage) return;
+        const frame = [...previewStage.querySelectorAll('.preview-giveaway-frame')].find(
+          (candidate) => candidate.contentWindow === event.source,
+        );
+        if (!frame) return;
+
+        const wrapper = frame.closest('[data-preview-widget]');
+        if (wrapper?.classList.contains('has-explicit-height')) return;
+        const height = Math.max(Number(event.data.height) || 0, 0);
+        frame.hidden = height === 0;
+        frame.style.height = height ? `${height}px` : '0px';
+      });
+
       function renderPreviewWidgetContent(widget) {
         if (widget.type === 'goal') {
           const target = Math.max(Number(widget.target || 1), 1);
@@ -4870,16 +4900,14 @@
         }
 
         if (widget.type === 'giveaway') {
-          const people = Array.isArray(widget.participants) ? widget.participants : [];
-          const winners = Array.isArray(widget.winners) ? widget.winners : [];
+          const source = `${widgetsState.urls?.giveaway || 'http://localhost:3000/widgets/giveaway.html'}?preview=1&id=${encodeURIComponent(widget.id)}`;
           return `
-            <article class="stream-goal">
-              <div class="stream-goal__top">
-                <strong>🎁 ${escapeHtml(widget.prize || 'Приз')}</strong>
-                <span>${people.length} участников</span>
-              </div>
-              <div class="stream-goal__value">${widget.status === 'finished' ? escapeHtml(winners.map((item) => item.user).join(', ') || 'Нет участников') : escapeHtml(widget.keyword || '!участвую')}</div>
-            </article>
+            <iframe
+              class="preview-giveaway-frame"
+              data-preview-giveaway-frame="${escapeHtml(widget.id)}"
+              src="${escapeHtml(source)}"
+              title="${escapeHtml(widget.title || 'Розыгрыш')}"
+              allowtransparency="true"></iframe>
           `;
         }
 
@@ -7528,11 +7556,13 @@
         }, delayMs);
       }
 
-      // --- окно обязательного обновления ---
+      // --- окно обычного или критического обновления ---
       const updateModal = document.querySelector('#updateModal');
+      const updateModalBadge = document.querySelector('#updateModalBadge');
+      const updateModalSubtitle = document.querySelector('#updateModalSubtitle');
       const updateModalVersion = document.querySelector('#updateModalVersion');
-      const updateModalCurrent = document.querySelector('#updateModalCurrent');
       const updateInstallButton = document.querySelector('#updateInstallButton');
+      const updateLaterButton = document.querySelector('#updateLaterButton');
       const updateNotesToggle = document.querySelector('#updateNotesToggle');
       const updateNotes = document.querySelector('#updateNotes');
       const updateManualLink = document.querySelector('#updateManualLink');
@@ -7544,6 +7574,7 @@
 
       let patchnotesCache = null;
       let updateNotesLoaded = false;
+      let dismissedUpdateVersion = '';
 
       async function loadPatchnotes() {
         if (patchnotesCache) return patchnotesCache;
@@ -7580,6 +7611,8 @@
               '<div class="update-notes__head"><span class="update-notes__version">v' +
               escapeHtml(note.version) +
               '</span><span class="muted" style="font-size:12px;">' +
+              (note.critical === true ? 'Критическое' : 'Обычное') +
+              ' · ' +
               escapeHtml(note.date || '') +
               '</span></div>' +
               (note.title ? '<div class="muted" style="font-size:13px;">' + escapeHtml(note.title) + '</div>' : '') +
@@ -7674,17 +7707,37 @@
       }
 
       function showUpdateModal(status) {
-        if (!updateModal) return;
+        if (!updateModal) return false;
+        const critical = status.critical === true;
+        if (!critical && dismissedUpdateVersion === status.version) return false;
+        updateModal.dataset.critical = String(critical);
+        updateModalBadge.textContent = critical ? 'Критическое обновление' : 'Обычное обновление';
+        updateLaterButton.hidden = critical;
+        updateModalSubtitle.innerHTML = critical
+          ? `У вас <span id="updateModalCurrent">${escapeHtml('v' + (status.current || '—'))}</span>. Без этого обновления продолжить работу нельзя.`
+          : `У вас <span id="updateModalCurrent">${escapeHtml('v' + (status.current || '—'))}</span>. Можно установить сейчас или отложить.`;
         updateModal.hidden = false;
         document.body.classList.add('is-modal-open');
         if (status.version) updateModalVersion.textContent = 'v' + status.version;
-        if (status.current && updateModalCurrent) updateModalCurrent.textContent = 'v' + status.current;
         if (status.downloadUrl) {
           updateManualLink.href = status.downloadUrl;
           updateManualLink.hidden = false;
         }
         refreshUpdateWarning();
+        return true;
       }
+
+      function closeRegularUpdate() {
+        if (!updateModal || updateModal.dataset.critical === 'true') return;
+        dismissedUpdateVersion = updateModalVersion.textContent.replace(/^v/, '');
+        updateModal.hidden = true;
+        document.body.classList.remove('is-modal-open');
+      }
+
+      updateLaterButton?.addEventListener('click', closeRegularUpdate);
+      updateModal?.addEventListener('click', (event) => {
+        if (event.target.closest('[data-update-later]')) closeRegularUpdate();
+      });
 
       function renderUpdaterStatus(status) {
         if (!status) return;
@@ -7945,10 +7998,14 @@
             document.body.classList.remove('is-modal-open');
           }
         }
+        if (event.key === 'Escape' && updateModal?.hidden === false) {
+          closeRegularUpdate();
+        }
       });
 
       checkUpdatesButton?.addEventListener('click', async () => {
         if (!window.tchat?.checkUpdates) return;
+        dismissedUpdateVersion = '';
         checkUpdatesButton.disabled = true;
         checkUpdatesButton.textContent = 'Проверяю...';
         try {

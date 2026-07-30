@@ -21,6 +21,15 @@ const REMOTE_DIR = '/opt/tchat';
 const projectDir = path.join(__dirname, '..');
 const dist = path.join(projectDir, 'dist');
 const version = require(path.join(projectDir, 'package.json')).version;
+const patchnotes = JSON.parse(fs.readFileSync(path.join(projectDir, 'patchnotes.json'), 'utf8'));
+const releaseNote = patchnotes.notes?.find((note) => String(note.version) === String(version));
+
+if (!releaseNote || typeof releaseNote.critical !== 'boolean') {
+  console.error(
+    `Релиз ${version} не помечен в patchnotes.json. Добавьте к записи версии "critical": true или false.`,
+  );
+  process.exit(1);
+}
 
 const password = process.env.TCHAT_DEPLOY_PASS;
 if (!password) {
@@ -40,7 +49,6 @@ const widgetUploads = fs.existsSync(widgetsDir)
   : [];
 
 const uploads = [
-  [path.join(dist, 'latest.yml'), `${REMOTE_DIR}/releases/latest.yml`],
   [path.join(dist, `TChat-Setup-${version}.exe`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe`],
   [path.join(dist, `TChat-Setup-${version}.exe.blockmap`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe.blockmap`],
   [path.join(projectDir, 'src', 'server', 'widgetServer.js'), `${REMOTE_DIR}/src/server/widgetServer.js`],
@@ -50,6 +58,9 @@ const uploads = [
   // которой у него ещё нет, с той же раздачи, откуда качает обновление.
   [path.join(projectDir, 'patchnotes.json'), `${REMOTE_DIR}/releases/patchnotes.json`],
   ...widgetUploads,
+  // Publish latest.yml last. Clients must not discover a release before its
+  // critical/regular policy, installer, blockmap and patch notes are present.
+  [path.join(dist, 'latest.yml'), `${REMOTE_DIR}/releases/latest.yml`],
 ];
 
 for (const [local] of uploads) {

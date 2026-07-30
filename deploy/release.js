@@ -22,6 +22,15 @@ const path = require('node:path');
 
 const projectDir = path.join(__dirname, '..');
 const version = require(path.join(projectDir, 'package.json')).version;
+const patchnotes = JSON.parse(fs.readFileSync(path.join(projectDir, 'patchnotes.json'), 'utf8'));
+const releaseNote = patchnotes.notes?.find((note) => String(note.version) === String(version));
+
+if (!releaseNote || typeof releaseNote.critical !== 'boolean') {
+  console.error(
+    `Релиз ${version} не помечен в patchnotes.json. Добавьте к записи версии "critical": true или false.`,
+  );
+  process.exit(1);
+}
 
 if (!process.env.TCHAT_DEPLOY_PASS) {
   console.error(

@@ -79,6 +79,24 @@ socket.on('widgets:state', applyWidgetsState);
 
 socket.on('chat:message', addChatMessage);
 
+window.addEventListener('message', (event) => {
+  if (event.origin !== window.location.origin || event.data?.type !== 'tchat:giveaway-size') return;
+  const id = String(event.data.id || '');
+  const frame = streamEmbeddedWidgets?.querySelector(
+    `.stream-embedded-widget--giveaway[data-embedded-widget-id="${CSS.escape(id)}"]`,
+  );
+  if (!frame) return;
+
+  const widget = latestState.items.find((item) => item.id === id);
+  const hasExplicitHeight = Number.isFinite(Number(widget?.height)) && Number(widget.height) > 0;
+  if (hasExplicitHeight) return;
+
+  const height = Math.max(Number(event.data.height) || 0, 0);
+  frame.hidden = height === 0;
+  frame.style.height = height ? `${height}px` : '0px';
+  frame.style.aspectRatio = 'auto';
+});
+
 // Скрытые в окне чата отправители/сообщения. Прячем и будущие совпадения,
 // и уже показанные строки в панели.
 let hiddenChatSenders = new Set();

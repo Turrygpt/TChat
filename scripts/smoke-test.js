@@ -525,6 +525,31 @@ check('giveaway prize settings update from backoffice', async () => {
   }
 });
 
+check('giveaway auto-hides and grows for all participants', async () => {
+  const [scriptResponse, cssResponse, streamResponse] = await Promise.all([
+    request('/widgets/giveaway.js', { method: 'GET', headers: {} }),
+    request('/widgets/giveaway.css', { method: 'GET', headers: {} }),
+    request('/widgets/stream.js', { method: 'GET', headers: {} }),
+  ]);
+  const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const backofficeBody = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (
+    !scriptResponse.response.ok ||
+    !scriptResponse.body.includes("type: 'tchat:giveaway-size'") ||
+    scriptResponse.body.includes('.slice(-60)') ||
+    !cssResponse.response.ok ||
+    !cssResponse.body.includes('.giveaway__participants') ||
+    cssResponse.body.includes('max-height: 150px') ||
+    !streamResponse.response.ok ||
+    !streamResponse.body.includes("event.data?.type !== 'tchat:giveaway-size'") ||
+    !mainBody.includes('const GIVEAWAY_AUTO_HIDE_MS = 5 * 60 * 1000') ||
+    !mainBody.includes('scheduleGiveawayHide(next)') ||
+    !backofficeBody.includes('class="preview-giveaway-frame"')
+  ) {
+    throw new Error('giveaway auto-hide, full participant list or dynamic preview height missing');
+  }
+});
+
 check('giveaway nicknames require an explicit command and persist in profiles', async () => {
   const { parseNicknameCommand } = require(path.join(projectRoot, 'src', 'giveawayNicknames'));
   const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
@@ -541,6 +566,35 @@ check('giveaway nicknames require an explicit command and persist in profiles', 
     !backofficeBody.includes('data-giveaway-reset-all')
   ) {
     throw new Error('strict giveaway nickname/profile/reset integration missing');
+  }
+});
+
+check('nickname commands update profiles outside giveaways', () => {
+  const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const handler = mainBody.slice(
+    mainBody.indexOf('function registerGiveawayWinnerNickname'),
+    mainBody.indexOf('// В старой версии', mainBody.indexOf('function registerGiveawayWinnerNickname')),
+  );
+  if (
+    !handler.includes('profiles.setNicknameForUser') ||
+    handler.includes('if (!captured.length) return') ||
+    !handler.includes('if (captured.length)')
+  ) {
+    throw new Error('nickname command is still limited to an active finished giveaway');
+  }
+});
+
+check('updates support regular and critical policy', () => {
+  const mainBody = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const backofficeBody = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (
+    !mainBody.includes('async function resolveUpdatePolicy') ||
+    !mainBody.includes("updateType: critical ? 'critical' : 'regular'") ||
+    !backofficeBody.includes('id="updateLaterButton"') ||
+    !backofficeBody.includes("updateModal.dataset.critical === 'true'") ||
+    !backofficeBody.includes('Без этого обновления продолжить работу нельзя')
+  ) {
+    throw new Error('regular/critical updater policy missing');
   }
 });
 
