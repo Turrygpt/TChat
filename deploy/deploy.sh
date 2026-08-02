@@ -30,6 +30,8 @@ fi
 
 echo ">> Копирую проект на ${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}"
 $SSH "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${REMOTE_DIR}"
+# Runtime state and published desktop releases live only on the server.
+# Protect them from rsync --delete during ordinary web deploys.
 rsync -az --delete -e "$RSYNC_RSH" \
   --exclude '.git' \
   --exclude 'node_modules' \
@@ -38,6 +40,8 @@ rsync -az --delete -e "$RSYNC_RSH" \
   --exclude 'build' \
   --exclude 'youtube-bypass' \
   --exclude 'assets/tts' \
+  --exclude 'data' \
+  --exclude 'releases' \
   ./ "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/"
 
 echo ">> Настраиваю сервер (Node.js, зависимости, systemd, nginx)"
