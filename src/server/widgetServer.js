@@ -22,6 +22,16 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   const widgetsPath = path.join(__dirname, '../../widgets');
   const assetsPath = path.join(__dirname, '../../assets');
   const releasesPath = path.join(__dirname, '../../releases');
+  const noCacheStaticOptions = {
+    etag: false,
+    lastModified: false,
+    maxAge: 0,
+    setHeaders(response) {
+      response.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      response.setHeader('Pragma', 'no-cache');
+      response.setHeader('Expires', '0');
+    },
+  };
 
   app.use(express.json());
   app.get([
@@ -33,7 +43,8 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   ], (_request, response) => {
     response.redirect(302, '/widgets/chat.html');
   });
-  app.use('/widgets', express.static(widgetsPath));
+  app.use('/widgets', express.static(widgetsPath, noCacheStaticOptions));
+  app.use('/assets/vdv', express.static(path.join(assetsPath, 'vdv'), noCacheStaticOptions));
   app.use('/assets', express.static(assetsPath));
   // Стабильная ссылка на свежий установщик: URL не меняется от версии к версии,
   // всегда отдаёт текущую сборку. Версию берём из latest.yml (его кладёт

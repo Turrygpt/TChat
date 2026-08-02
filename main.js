@@ -2787,6 +2787,16 @@ function createLocalServer() {
   const expressApp = express();
   const widgetsPath = path.join(__dirname, 'widgets');
   const assetsPath = path.join(__dirname, 'assets');
+  const noCacheStaticOptions = {
+    etag: false,
+    lastModified: false,
+    maxAge: 0,
+    setHeaders(response) {
+      response.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      response.setHeader('Pragma', 'no-cache');
+      response.setHeader('Expires', '0');
+    },
+  };
 
   expressApp.use(express.json());
   expressApp.use((request, response, next) => {
@@ -2808,15 +2818,8 @@ function createLocalServer() {
   ], (_request, response) => {
     response.redirect(302, '/widgets/chat.html');
   });
-  expressApp.use('/widgets', (request, response, next) => {
-    if (/\.(?:js|css|html)$/.test(request.path)) {
-      response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      response.setHeader('Pragma', 'no-cache');
-      response.setHeader('Expires', '0');
-    }
-    next();
-  });
-  expressApp.use('/widgets', express.static(widgetsPath));
+  expressApp.use('/widgets', express.static(widgetsPath, noCacheStaticOptions));
+  expressApp.use('/assets/vdv', express.static(path.join(assetsPath, 'vdv'), noCacheStaticOptions));
   expressApp.use('/assets', express.static(assetsPath));
 
   expressApp.get('/', (_request, response) => {
