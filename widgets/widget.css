@@ -269,6 +269,10 @@ body {
   z-index: 12;
 }
 
+.stream-embedded-widgets.has-vdv-reveal {
+  z-index: 100;
+}
+
 .stream-embedded-widget {
   position: absolute;
   min-width: 220px;
@@ -279,6 +283,37 @@ body {
 
 .stream-embedded-widget--music {
   min-height: 260px;
+}
+
+.stream-embedded-widget--lastdonation {
+  min-width: 300px;
+  min-height: 440px;
+  aspect-ratio: auto;
+  height: auto;
+  overflow: visible;
+  background: transparent !important;
+  background-color: rgb(0 0 0 / 0%) !important;
+  color-scheme: normal;
+}
+
+.stream-embedded-widget--vdv {
+  min-width: 200px;
+  min-height: 294px;
+  aspect-ratio: auto;
+  border: 0;
+  background: transparent;
+  transition: none;
+}
+
+.stream-embedded-widget--vdv.is-revealing {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 100 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden !important;
 }
 
 .stream-embedded-widget--giveaway {

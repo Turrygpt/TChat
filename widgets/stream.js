@@ -23,6 +23,7 @@ const queuedAlertIds = new Set();
 let isAlertPlaying = false;
 let displaySeconds = 8;
 let latestState = { items: [], poll: null };
+let latestVdvState = null;
 let pollTickTimer = null;
 let countdownRenderTimer = null;
 
@@ -76,6 +77,12 @@ fetch('/alerts/state')
   .catch(() => {});
 
 socket.on('widgets:state', applyWidgetsState);
+socket.on('vdv:update', applyVdvState);
+
+fetch('/vdv/state')
+  .then((response) => response.json())
+  .then(applyVdvState)
+  .catch(() => {});
 
 socket.on('chat:message', addChatMessage);
 
@@ -169,6 +176,14 @@ function applyWidgetsState(state = {}) {
   renderEmbeddedWidgets(latestState.items);
   renderPoll(latestState.poll);
   applyChatWidgetLayout(latestState.items);
+}
+
+function applyVdvState(state = {}) {
+  latestVdvState = state;
+  const frame = streamEmbeddedWidgets?.querySelector('.stream-embedded-widget--vdv');
+  const revealing = Number(state.revealIndex) >= 0;
+  frame?.classList.toggle('is-revealing', revealing);
+  streamEmbeddedWidgets?.classList.toggle('has-vdv-reveal', revealing && Boolean(frame));
 }
 
 // Чат в общем overlay: сам виджет (позиция, ширина, вкл/выкл) приходит в
@@ -615,10 +630,25 @@ function renderTasks(items) {
   });
 }
 
+// Виджеты, которые живут отдельной страницей со своим canvas и звуком, проще
+// вставить в overlay целиком (iframe), чем повторять их разметку здесь.
+function embeddedWidgetSrc(widget) {
+  if (widget.type === 'music') {
+    return '/widgets/music.html?embedded=1';
+  }
+  if (widget.type === 'lastdonation') {
+    return '/widgets/lastdonation.html?embedded=1';
+  }
+  if (widget.type === 'vdv') {
+    return '/widgets/vdv.html?embedded=1';
+  }
+  return `/widgets/giveaway.html?embedded=1&id=${encodeURIComponent(widget.id)}`;
+}
+
 function renderEmbeddedWidgets(items) {
   if (!streamEmbeddedWidgets) return;
 
-  const widgets = items.filter((item) => ['music', 'giveaway'].includes(item.type) && item.enabled !== false);
+  const widgets = items.filter((item) => ['music', 'giveaway', 'lastdonation', 'vdv'].includes(item.type) && item.enabled !== false);
   const activeIds = new Set(widgets.map((widget) => widget.id));
 
   streamEmbeddedWidgets.querySelectorAll('[data-embedded-widget-id]').forEach((node) => {
@@ -631,10 +661,7 @@ function renderEmbeddedWidgets(items) {
     const x = Number(widget.x ?? 68);
     const y = Number(widget.y ?? 10);
     const width = Number(widget.width ?? 28);
-    const src =
-      widget.type === 'music'
-        ? '/widgets/music.html?embedded=1'
-        : `/widgets/giveaway.html?embedded=1&id=${encodeURIComponent(widget.id)}`;
+    const src = embeddedWidgetSrc(widget);
     const style = `left: ${x}%; top: ${y}%; width: ${width}%; ${widgetHeightCss(widget)}`;
     let node = streamEmbeddedWidgets.querySelector(`[data-embedded-widget-id="${widget.id}"]`);
 
@@ -644,6 +671,7 @@ function renderEmbeddedWidgets(items) {
       }
       node.setAttribute('title', widget.title || 'Музыка');
       node.setAttribute('style', style);
+      if (widget.type === 'vdv') node.classList.toggle('is-revealing', Number(latestVdvState?.revealIndex) >= 0);
       return;
     }
 
@@ -656,9 +684,12 @@ function renderEmbeddedWidgets(items) {
     node.allow = 'clipboard-write; autoplay; encrypted-media; fullscreen';
     node.setAttribute('allowtransparency', 'true');
     node.allowFullscreen = true;
+    if (widget.type === 'vdv') node.classList.toggle('is-revealing', Number(latestVdvState?.revealIndex) >= 0);
     node.addEventListener('load', () => syncObsPlaybackState(node));
     streamEmbeddedWidgets.appendChild(node);
   });
+
+  applyVdvState(latestVdvState || {});
 }
 
 let obsSourceVisible = true;

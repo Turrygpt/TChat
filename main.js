@@ -14,7 +14,9 @@ const restream = require('./src/restream');
 const incoming = require('./src/incoming');
 const profiles = require('./src/profiles');
 const { parseNicknameCommand } = require('./src/giveawayNicknames');
+const lastDonation = require('./src/lastDonation');
 const donatepay = require('./src/donatepay');
+const vdv = require('./src/vdv');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -412,6 +414,8 @@ function setupDonationAlertsStorage() {
   loadWindowState();
   loadChatUiSettings();
   loadGoalState();
+  vdv.load(storageDir);
+  lastDonation.load(storageDir);
   loadStreamWidgets();
   loadGiveawayWinnerLog();
   scheduleAllGiveawayFinishes();
@@ -689,6 +693,17 @@ function createDefaultStreamWidgets() {
         { id: 'task-2', text: 'Запустить ресторан', done: false },
         { id: 'task-3', text: 'Сделать моцареллу', done: false },
       ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'builtin-vdv',
+      type: 'vdv',
+      title: 'День ВДВ',
+      enabled: false,
+      x: 66,
+      y: 34,
+      width: 17.33,
+      height: 28,
       createdAt: new Date().toISOString(),
     },
   ];
@@ -980,19 +995,23 @@ function normalizeGiveawayWidget(widget = {}) {
 }
 
 function normalizeStreamWidget(widget = {}) {
-  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'custom']);
+  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv', 'custom']);
   const type = knownTypes.has(widget.type) ? widget.type : 'goal';
   const id = String(widget.id || `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const minWidgetWidth = ['countdown', 'texts'].includes(type) ? 5 : 14;
-  const height = normalizeWidgetHeight(widget.height);
+  const legacyFullscreenVdv = type === 'vdv' && Number(widget.width) >= 90 && Number(widget.height) >= 90;
+  const legacyCompactVdv = type === 'vdv' && Math.abs(Number(widget.width) - 26) < 0.05 && Math.abs(Number(widget.height) - 42) < 0.05;
+  const legacyVdvSize = legacyFullscreenVdv || legacyCompactVdv;
+  const height = legacyVdvSize ? 28 : normalizeWidgetHeight(widget.height);
+  const position = legacyFullscreenVdv ? defaultWidgetPosition(type) : widget;
   const base = {
     id,
     type,
     title: String(widget.title || widgetTitleByType(type)).trim() || widgetTitleByType(type),
     enabled: widget.enabled !== false,
-    x: normalizeWidgetCoord(widget.x, defaultWidgetPosition(type).x),
-    y: normalizeWidgetCoord(widget.y, defaultWidgetPosition(type).y),
-    width: Math.max(Number(widget.width ?? defaultWidgetPosition(type).width), minWidgetWidth),
+    x: normalizeWidgetCoord(position.x, defaultWidgetPosition(type).x),
+    y: normalizeWidgetCoord(position.y, defaultWidgetPosition(type).y),
+    width: Math.max(Number(legacyVdvSize ? defaultWidgetPosition(type).width : widget.width ?? defaultWidgetPosition(type).width), minWidgetWidth),
     createdAt: widget.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -1416,6 +1435,8 @@ function widgetTitleByType(type) {
     countdown: 'Обратный отсчёт',
     texts: 'Тексты',
     tasks: 'Задачи на стрим',
+    lastdonation: 'Последний донат',
+    vdv: 'День ВДВ',
     custom: 'Кастомный виджет',
   }[type] || 'Виджет';
 }
@@ -1431,6 +1452,8 @@ function defaultWidgetPosition(type) {
     countdown: { x: 72, y: 4, width: 18 },
     texts: { x: 8, y: 18, width: 44 },
     tasks: { x: 4, y: 8, width: 26 },
+    lastdonation: { x: 66, y: 34, width: 26 },
+    vdv: { x: 66, y: 34, width: 17.33 },
     custom: { x: 12, y: 18, width: 32 },
   }[type] || { x: 10, y: 10, width: 32 };
 }
@@ -1451,6 +1474,8 @@ function getStreamWidgetsPayload() {
       countdown: `http://localhost:${SERVER_PORT}/widgets/countdown.html`,
       texts: `http://localhost:${SERVER_PORT}/widgets/texts.html`,
       tasks: `http://localhost:${SERVER_PORT}/widgets/tasks.html`,
+      lastdonation: `http://localhost:${SERVER_PORT}/widgets/lastdonation.html`,
+      vdv: `http://localhost:${SERVER_PORT}/widgets/vdv.html`,
     },
   };
 }
@@ -2828,10 +2853,12 @@ function createLocalServer() {
         stickers: '/widgets/stickers.html',
         chat: '/widgets/chat.html',
         goal: '/widgets/goal.html',
+        lastdonation: '/widgets/lastdonation.html',
         music: '/widgets/music.html',
         countdown: '/widgets/countdown.html',
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
+        vdv: '/widgets/vdv.html',
         remote: '/widgets/remote.html',
       },
     });
@@ -3059,6 +3086,30 @@ function createLocalServer() {
     response.json(goalState);
   });
 
+  expressApp.get('/vdv/state', (_request, response) => {
+    response.json(vdv.payload());
+  });
+
+  expressApp.post('/vdv/update', (request, response) => {
+    response.json({ ok: true, state: broadcastVdvState(vdv.update(request.body || {})) });
+  });
+
+  expressApp.post('/vdv/reveal/:index', (request, response) => {
+    response.json({ ok: true, state: broadcastVdvState(vdv.reveal(Number(request.params.index))) });
+  });
+
+  expressApp.post('/vdv/close/:index', (request, response) => {
+    response.json({ ok: true, state: broadcastVdvState(vdv.close(Number(request.params.index))) });
+  });
+
+  expressApp.post('/vdv/reset', (_request, response) => {
+    response.json({ ok: true, state: broadcastVdvState(vdv.resetCards()) });
+  });
+
+  expressApp.post('/vdv/add', (request, response) => {
+    response.json({ ok: true, state: broadcastVdvState(vdv.addAmount(request.body?.amount)) });
+  });
+
   expressApp.get('/widgets/state', (_request, response) => {
     response.json(getStreamWidgetsPayload());
   });
@@ -3066,6 +3117,56 @@ function createLocalServer() {
   expressApp.post('/goal/update', (request, response) => {
     const payload = updateGoalState(request.body);
     response.json({ ok: true, goal: payload });
+  });
+
+  expressApp.get('/lastdonation/state', (_request, response) => {
+    response.json(lastDonation.payload());
+  });
+
+  // Ники для автодополнения ручного доната: берём из профилей зрителей.
+  expressApp.get('/lastdonation/nicknames', (_request, response) => {
+    response.json({ items: getKnownNicknames() });
+  });
+
+  expressApp.post('/lastdonation/update', (request, response) => {
+    lastDonation.update(request.body || {});
+    response.json({ ok: true, state: broadcastLastDonation() });
+  });
+
+  expressApp.post('/lastdonation/donation', (request, response) => {
+    const amount = Number(request.body?.amount || 0);
+    if (!(amount > 0)) {
+      response.status(400).json({ ok: false, error: 'Укажите сумму больше нуля.' });
+      return;
+    }
+
+    const result = registerLastDonation({ ...request.body, amount, manual: true });
+    response.json({
+      ok: true,
+      counted: Boolean(result.donation),
+      reachedTiers: result.reachedTiers,
+      state: result.state,
+    });
+  });
+
+  expressApp.post('/lastdonation/donation/remove', (request, response) => {
+    const result = lastDonation.removeDonation(String(request.body?.id || ''));
+    if (result.removed) broadcastLastDonation(result.state);
+    response.json({ ok: result.removed, state: result.state });
+  });
+
+  expressApp.post('/lastdonation/stream/:action', (request, response) => {
+    const { action } = request.params;
+    if (action === 'start') lastDonation.startStream(request.body?.minutes);
+    else if (action === 'extend') lastDonation.extendStream(request.body?.minutes);
+    else if (action === 'stop') lastDonation.stopStream();
+    else if (action === 'reset') lastDonation.reset();
+    else {
+      response.status(400).json({ ok: false, error: 'Неизвестное действие.' });
+      return;
+    }
+
+    response.json({ ok: true, state: broadcastLastDonation() });
   });
 
   // Живой MPEG-TS входящего потока по id: incoming.js держит ffmpeg на каждый
@@ -3097,7 +3198,9 @@ function createLocalServer() {
     socket.emit('chat:status', getChatStatusPayload());
     socket.emit('chat:history', getRecentChatMessages(20));
     socket.emit('widgets:state', getStreamWidgetsPayload());
+    socket.emit('vdv:update', vdv.payload());
     socket.emit('stickers:settings', stickerSettings);
+    socket.emit('lastdonation:update', lastDonation.payload());
 
     socket.on('disconnect', () => {
       // Не логируем отключение: в Electron/OBS console.log может выбросить EPIPE и уронить приложение.
@@ -3575,6 +3678,13 @@ function broadcastGoalState() {
   socketServer?.emit('goal:update', goalState);
 }
 
+function broadcastVdvState(payload = vdv.payload()) {
+  mainWindow?.webContents.send('vdv:state', payload);
+  chatWindow?.webContents.send('vdv:state', payload);
+  socketServer?.emit('vdv:update', payload);
+  return payload;
+}
+
 function updateGoalState(payload = {}) {
   goalState = saveGoalState({
     ...goalState,
@@ -3582,6 +3692,48 @@ function updateGoalState(payload = {}) {
   });
   broadcastGoalState();
   return goalState;
+}
+
+// Ники из профилей зрителей — подсказки для ручного доната. Ник профиля идёт
+// первым: его стример и держит в голове, отображаемое имя платформы — запасное.
+function getKnownNicknames() {
+  const seen = new Set();
+  const items = [];
+
+  profiles.list().forEach((profile) => {
+    [profile.nickname, profile.displayName].forEach((name) => {
+      const value = String(name || '').trim();
+      const key = value.toLowerCase();
+      if (!value || seen.has(key)) return;
+      seen.add(key);
+      items.push(value);
+    });
+  });
+
+  return items;
+}
+
+function broadcastLastDonation(payload = lastDonation.payload()) {
+  socketServer?.emit('lastdonation:update', payload);
+  mainWindow?.webContents.send('lastdonation:state', payload);
+  return payload;
+}
+
+// Пробитая ступень едет отдельным событием: виджет по нему пускает салют, а
+// обычное обновление состояния остаётся тихим.
+function registerLastDonation(donation) {
+  const result = lastDonation.addDonation(donation);
+  if (!result.donation) {
+    return result;
+  }
+
+  broadcastLastDonation(result.state);
+
+  result.reachedTiers.forEach((tier) => {
+    socketServer?.emit('lastdonation:tier', { tier, donation: result.donation });
+  });
+
+  return result;
 }
 
 // Донат идёт в счётчик только тех сборов, которые сейчас включены. Выключенный
@@ -3592,6 +3744,8 @@ function addDonationToGoal(amount) {
   if (!value) {
     return goalState;
   }
+
+  broadcastVdvState(vdv.addAmount(value));
 
   const goalWidgets = streamWidgets.filter((widget) => widget.type === 'goal');
   const activeGoalWidgets = goalWidgets.filter((widget) => widget.enabled !== false);
@@ -3867,6 +4021,12 @@ function normalizeRaid(payload = {}) {
 function enqueueDonationAlert(donation) {
   const normalizedDonation = normalizeDonation(donation);
   addDonationToGoal(normalizedDonation.amount);
+  registerLastDonation({
+    username: normalizedDonation.username,
+    amount: normalizedDonation.amount,
+    currency: normalizedDonation.currency,
+    platform: normalizedDonation.platform || 'donate',
+  });
   const musicLinks = extractMusicLinks(normalizedDonation.message || '');
 
   if (musicLinks.length) {
@@ -6724,6 +6884,57 @@ ipcMain.handle('announce:send', async (_event, prepared) => {
 ipcMain.handle('goal:get-state', () => goalState);
 
 ipcMain.handle('goal:update', (_event, payload) => updateGoalState(payload));
+
+ipcMain.handle('vdv:get-state', () => vdv.payload());
+
+ipcMain.handle('vdv:update', (_event, payload) => broadcastVdvState(vdv.update(payload || {})));
+
+ipcMain.handle('vdv:reveal', (_event, payload) => broadcastVdvState(vdv.reveal(payload?.index)));
+
+ipcMain.handle('vdv:close', (_event, payload) => broadcastVdvState(vdv.close(payload?.index)));
+
+ipcMain.handle('vdv:reset', () => broadcastVdvState(vdv.resetCards()));
+
+ipcMain.handle('vdv:add', (_event, payload) => broadcastVdvState(vdv.addAmount(payload?.amount)));
+
+ipcMain.handle('lastdonation:get-state', () => lastDonation.payload());
+
+ipcMain.handle('lastdonation:get-nicknames', () => getKnownNicknames());
+
+ipcMain.handle('lastdonation:update', (_event, payload) => {
+  lastDonation.update(payload || {});
+  return broadcastLastDonation();
+});
+
+ipcMain.handle('lastdonation:set-tiers', (_event, payload) => {
+  lastDonation.setTiers(payload);
+  return broadcastLastDonation();
+});
+
+ipcMain.handle('lastdonation:set-top-prizes', (_event, payload) => {
+  lastDonation.setTopPrizes(payload);
+  return broadcastLastDonation();
+});
+
+ipcMain.handle('lastdonation:add-donation', (_event, payload) => {
+  const result = registerLastDonation({ ...(payload || {}), manual: true });
+  return { counted: Boolean(result.donation), reachedTiers: result.reachedTiers, state: result.state };
+});
+
+ipcMain.handle('lastdonation:remove-donation', (_event, payload) => {
+  const result = lastDonation.removeDonation(String(payload?.id || ''));
+  if (result.removed) broadcastLastDonation(result.state);
+  return result.state;
+});
+
+ipcMain.handle('lastdonation:stream', (_event, payload) => {
+  const action = payload?.action;
+  if (action === 'start') lastDonation.startStream(payload?.minutes);
+  else if (action === 'extend') lastDonation.extendStream(payload?.minutes);
+  else if (action === 'stop') lastDonation.stopStream();
+  else if (action === 'reset') lastDonation.reset();
+  return broadcastLastDonation();
+});
 
 ipcMain.handle('widgets:get-state', () => getStreamWidgetsPayload());
 

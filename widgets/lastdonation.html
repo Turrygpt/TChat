@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TChat Last Donation Widget</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./widget.css" />
+    <link rel="stylesheet" href="./lastdonation.css" />
+  </head>
+  <body class="widget-page widget-page--lastdonation">
+    <section class="lastdon" id="lastdonRoot">
+      <canvas class="lastdon__fx" id="lastdonFx" aria-hidden="true"></canvas>
+
+      <div class="lastdon__card" id="lastdonCard">
+        <header class="lastdon__head">
+          <span class="lastdon__title" id="lastdonTitle">Последний донат</span>
+          <span class="lastdon__timer" id="lastdonTimer">--:--:--</span>
+        </header>
+
+        <div class="lastdon__hero">
+          <div class="lastdon__crown" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 7l4.5 3.5L12 4l4.5 6.5L21 7l-1.8 11H4.8L3 7Z"/></svg>
+          </div>
+          <div class="lastdon__hero-body">
+            <span class="lastdon__hero-name" id="lastdonName">Ждём донат</span>
+            <span class="lastdon__hero-sub">
+              <span class="lastdon__hero-amount" id="lastdonAmount">0</span>
+              <span class="lastdon__hero-prize" id="lastdonPrize">главный приз</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="lastdon__bar">
+          <div class="lastdon__bar-track">
+            <div class="lastdon__bar-fill" id="lastdonBarFill"></div>
+            <div class="lastdon__bar-spark" id="lastdonBarSpark"></div>
+          </div>
+          <div class="lastdon__bar-legend">
+            <span id="lastdonTotal">0</span>
+            <span id="lastdonNext">до следующего приза —</span>
+          </div>
+        </div>
+
+        <ol class="lastdon__tiers" id="lastdonTiers"></ol>
+
+        <div class="lastdon__top-wrap">
+          <div class="lastdon__top-head">
+            <span>Топ-призы</span>
+            <span class="lastdon__top-lock" id="lastdonTopLock">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="4" y="10" width="16" height="11" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+              <span id="lastdonTopLockText">заперто</span>
+            </span>
+          </div>
+          <ol class="lastdon__top" id="lastdonTop"></ol>
+        </div>
+
+        <div class="lastdon__tease" id="lastdonTease"></div>
+      </div>
+
+      <div class="lastdon__burst" id="lastdonBurst" hidden>
+        <span class="lastdon__burst-label">ПРОГРЕССИЯ ПРОБИТА</span>
+        <strong class="lastdon__burst-prize" id="lastdonBurstPrize"></strong>
+        <span class="lastdon__burst-winner" id="lastdonBurstWinner"></span>
+      </div>
+    </section>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./lastdonation.js"></script>
+  </body>
+</html>

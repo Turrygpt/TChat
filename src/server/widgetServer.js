@@ -4,6 +4,9 @@ const path = require('node:path');
 const express = require('express');
 const { Server } = require('socket.io');
 
+const lastDonation = require('../lastDonation');
+const vdv = require('../vdv');
+
 const APP_VERSION = require('../../package.json').version;
 
 function createWidgetServer({ port, host = '0.0.0.0' }) {
@@ -65,12 +68,14 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         alerts: '/widgets/alerts.html',
         chat: '/widgets/chat.html',
         goal: '/widgets/goal.html',
+        lastdonation: '/widgets/lastdonation.html',
         music: '/widgets/music.html',
         giveaway: '/widgets/giveaway.html',
         countdown: '/widgets/countdown.html',
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
         stickers: '/widgets/stickers.html',
+        vdv: '/widgets/vdv.html',
       },
     });
   });
@@ -102,6 +107,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         alerts: `http://localhost:${port}/widgets/alerts.html`,
         chat: `http://localhost:${port}/widgets/chat.html`,
         goal: `http://localhost:${port}/widgets/goal.html`,
+        lastdonation: `http://localhost:${port}/widgets/lastdonation.html`,
         music: `http://localhost:${port}/widgets/music.html`,
         giveaway: `http://localhost:${port}/widgets/giveaway.html`,
         countdown: `http://localhost:${port}/widgets/countdown.html`,
@@ -167,13 +173,84 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
     const item = createDonationAlertItem(payload);
     io.emit('donation:alert', payload);
     io.emit('alert:play', item);
+    io.emit('vdv:update', vdv.addAmount(payload.amount));
     response.json({ ok: true, payload, item });
   });
+
+  vdv.load(path.join(__dirname, '../../data'));
+
+  function broadcastVdv(payload = vdv.payload()) {
+    io.emit('vdv:update', payload);
+    return payload;
+  }
+
+  app.get('/vdv/state', (_request, response) => response.json(vdv.payload()));
+  app.post('/vdv/update', (request, response) => response.json({ ok: true, state: broadcastVdv(vdv.update(request.body || {})) }));
+  app.post('/vdv/reveal/:index', (request, response) => response.json({ ok: true, state: broadcastVdv(vdv.reveal(Number(request.params.index))) }));
+  app.post('/vdv/close/:index', (request, response) => response.json({ ok: true, state: broadcastVdv(vdv.close(Number(request.params.index))) }));
+  app.post('/vdv/reset', (_request, response) => response.json({ ok: true, state: broadcastVdv(vdv.resetCards()) }));
+  app.post('/vdv/add', (request, response) => response.json({ ok: true, state: broadcastVdv(vdv.addAmount(request.body?.amount)) }));
 
   app.post('/demo/goal', (request, response) => {
     const payload = normalizeGoal(request.body);
     io.emit('goal:update', payload);
     response.json({ ok: true, payload });
+  });
+
+  // Виджет «Последний донат». В headless-режиме состояние лежит рядом с сервером
+  // (в Electron его ведёт main.js), поэтому веб-версия работает автономно.
+  lastDonation.load(path.join(__dirname, '../../data'));
+
+  function broadcastLastDonation(payload = lastDonation.payload()) {
+    io.emit('lastdonation:update', payload);
+    return payload;
+  }
+
+  app.get('/lastdonation/state', (_request, response) => {
+    response.json(lastDonation.payload());
+  });
+
+  app.post('/lastdonation/update', (request, response) => {
+    lastDonation.update(request.body || {});
+    response.json({ ok: true, state: broadcastLastDonation() });
+  });
+
+  app.post('/lastdonation/donation', (request, response) => {
+    const amount = Number(request.body?.amount || 0);
+    if (!(amount > 0)) {
+      response.status(400).json({ ok: false, error: 'Укажите сумму больше нуля.' });
+      return;
+    }
+
+    const result = lastDonation.addDonation({ ...request.body, amount });
+    if (result.donation) {
+      broadcastLastDonation(result.state);
+      result.reachedTiers.forEach((tier) => {
+        io.emit('lastdonation:tier', { tier, donation: result.donation });
+      });
+    }
+
+    response.json({ ok: true, counted: Boolean(result.donation), state: result.state });
+  });
+
+  app.post('/lastdonation/donation/remove', (request, response) => {
+    const result = lastDonation.removeDonation(String(request.body?.id || ''));
+    if (result.removed) broadcastLastDonation(result.state);
+    response.json({ ok: result.removed, state: result.state });
+  });
+
+  app.post('/lastdonation/stream/:action', (request, response) => {
+    const { action } = request.params;
+    if (action === 'start') lastDonation.startStream(request.body?.minutes);
+    else if (action === 'extend') lastDonation.extendStream(request.body?.minutes);
+    else if (action === 'stop') lastDonation.stopStream();
+    else if (action === 'reset') lastDonation.reset();
+    else {
+      response.status(400).json({ ok: false, error: 'Неизвестное действие.' });
+      return;
+    }
+
+    response.json({ ok: true, state: broadcastLastDonation() });
   });
 
   io.on('connection', (socket) => {
@@ -183,6 +260,9 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
       message: 'Связь с локальным сервером установлена.',
       connectedAt: new Date().toISOString(),
     });
+
+    socket.emit('lastdonation:update', lastDonation.payload());
+    socket.emit('vdv:update', vdv.payload());
 
     socket.on('disconnect', () => {
       console.log(`Виджет отключён от Socket.io: ${socket.id}`);
@@ -314,6 +394,7 @@ function renderLandingPage() {
     ['alerts', 'Алерты', 'Донаты, подписки, рейды'],
     ['chat', 'Чат', 'Агрегированный чат'],
     ['goal', 'Цель сбора', 'Прогресс-бар цели'],
+    ['lastdonation', 'Последний донат', 'Призы за последний донат'],
     ['music', 'Музыка', 'Текущий трек / заявки'],
     ['giveaway', 'Розыгрыш', 'Участники и победители'],
     ['countdown', 'Таймер', 'Обратный отсчёт'],

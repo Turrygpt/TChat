@@ -106,6 +106,25 @@ contextBridge.exposeInMainWorld('tchat', {
   removeMusicItem: (payload) => ipcRenderer.invoke('music:remove-item', payload),
   getGoalState: () => ipcRenderer.invoke('goal:get-state'),
   updateGoal: (payload) => ipcRenderer.invoke('goal:update', payload),
+  getVdvState: () => ipcRenderer.invoke('vdv:get-state'),
+  updateVdv: (payload) => ipcRenderer.invoke('vdv:update', payload),
+  revealVdvCard: (index) => ipcRenderer.invoke('vdv:reveal', { index }),
+  closeVdvCard: (index) => ipcRenderer.invoke('vdv:close', { index }),
+  resetVdvCards: () => ipcRenderer.invoke('vdv:reset'),
+  addVdvAmount: (amount) => ipcRenderer.invoke('vdv:add', { amount }),
+  getLastDonationState: () => ipcRenderer.invoke('lastdonation:get-state'),
+  getLastDonationNicknames: () => ipcRenderer.invoke('lastdonation:get-nicknames'),
+  updateLastDonation: (payload) => ipcRenderer.invoke('lastdonation:update', payload),
+  setLastDonationTiers: (payload) => ipcRenderer.invoke('lastdonation:set-tiers', payload),
+  setLastDonationTopPrizes: (payload) => ipcRenderer.invoke('lastdonation:set-top-prizes', payload),
+  addLastDonation: (payload) => ipcRenderer.invoke('lastdonation:add-donation', payload),
+  removeLastDonation: (payload) => ipcRenderer.invoke('lastdonation:remove-donation', payload),
+  controlLastDonationStream: (payload) => ipcRenderer.invoke('lastdonation:stream', payload),
+  onLastDonationState: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('lastdonation:state', listener);
+    return () => ipcRenderer.removeListener('lastdonation:state', listener);
+  },
   getWidgetsState: () => ipcRenderer.invoke('widgets:get-state'),
   createWidget: (payload) => ipcRenderer.invoke('widgets:create', payload),
   updateWidget: (payload) => ipcRenderer.invoke('widgets:update', payload),
@@ -189,6 +208,11 @@ contextBridge.exposeInMainWorld('tchat', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('goal:state', listener);
     return () => ipcRenderer.removeListener('goal:state', listener);
+  },
+  onVdvState: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('vdv:state', listener);
+    return () => ipcRenderer.removeListener('vdv:state', listener);
   },
   onWidgetsState: (callback) => {
     const listener = (_event, payload) => callback(payload);

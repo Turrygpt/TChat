@@ -135,6 +135,63 @@
         color: var(--text-2);
       }
 
+      .form-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .field--inline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .field--inline input {
+        width: 18px;
+        min-height: 18px;
+      }
+
+      .ld-rows {
+        display: grid;
+        gap: 6px;
+        margin: 8px 0 12px;
+      }
+
+      .ld-row {
+        display: grid;
+        grid-template-columns: 96px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .ld-row input {
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        padding: 0 10px;
+      }
+
+      .ld-row__note {
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ld-row__remove {
+        min-height: 32px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-3);
+        color: var(--text-2);
+        padding: 0 10px;
+        cursor: pointer;
+      }
+
       .field input,
       .field select,
       .rule-grid input,
@@ -838,6 +895,11 @@
       .preview-widget.has-explicit-height > .stream-alert,
       .preview-widget.has-explicit-height > .chat,
       .preview-widget.has-explicit-height > .preview-stream-fallback {
+        height: 100%;
+        min-height: 0;
+      }
+
+      .preview-widget.has-explicit-height > .preview-giveaway-frame {
         height: 100%;
         min-height: 0;
       }
@@ -2397,6 +2459,18 @@
         }
       }
     </style>
+    <style>
+      .vdv-admin { border-color: rgba(54, 168, 235, .48); background: linear-gradient(145deg, rgba(13, 62, 104, .34), rgba(20, 27, 42, .92)); }
+      .vdv-admin__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+      .vdv-admin__head h2 { margin: 0; color: #87d7ff; }
+      .vdv-admin__cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+      .vdv-admin-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid rgba(126, 185, 220, .25); border-radius: 10px; background: rgba(6, 25, 47, .56); }
+      .vdv-admin-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      .vdv-admin-card.is-open { border-color: rgba(238, 201, 93, .7); background: rgba(79, 78, 36, .38); }
+      .vdv-admin-card .mini-button { flex: 0 0 auto; }
+      .vdv-admin__stats { margin: 8px 0; color: #b8dced; font-size: 13px; }
+      @media (max-width: 720px) { .vdv-admin__cards { grid-template-columns: 1fr; } }
+    </style>
   </head>
   <body>
     <div class="app">
@@ -2652,6 +2726,8 @@
                 <button id="quickCreateCountdownButton" class="mini-button" type="button">+ Таймер</button>
                 <button id="quickCreateTextsButton" class="mini-button" type="button">+ Тексты</button>
                 <button id="quickCreateTasksButton" class="mini-button" type="button">+ Задачи</button>
+                <button id="quickCreateLastDonationButton" class="mini-button" type="button">+ Последний донат</button>
+                <button id="quickCreateVdvButton" class="mini-button" type="button">+ День ВДВ</button>
               </div>
             </div>
             <div id="workspaceWidgetCards" class="control-card-list"></div>
@@ -2713,6 +2789,14 @@
                     <strong>Задачи</strong>
                     <span>План эфира с отметками выполнения.</span>
                   </button>
+                  <button class="widget-type-card" type="button" data-widget-type="lastdonation">
+                    <strong>Последний донат</strong>
+                    <span>Призы за последний донат и прогрессия.</span>
+                  </button>
+                  <button class="widget-type-card" type="button" data-widget-type="vdv">
+                    <strong>День ВДВ</strong>
+                    <span>8 испытаний и кумулятивный норматив.</span>
+                  </button>
                 </div>
                 <div id="goalWidgetForm">
                   <label class="field">
@@ -2756,6 +2840,14 @@
                 <div id="tasksWidgetHint" hidden>
                   <p class="muted">Список задач появится в overlay как панель с чеклистом.</p>
                   <button id="createTasksWidgetButton" class="button" type="button">Добавить задачи</button>
+                </div>
+                <div id="lastdonationWidgetHint" hidden>
+                  <p class="muted">Виджет появится в общем overlay. Призы, минимальную сумму и ручные донаты настраивайте в панели “Последний донат” ниже.</p>
+                  <button id="createLastDonationWidgetButton" class="button" type="button">Добавить виджет</button>
+                </div>
+                <div id="vdvWidgetHint" hidden>
+                  <p class="muted">Полноэкранный праздничный виджет появится в общем overlay. Карточки и испытания настраиваются в панели «День ВДВ» ниже.</p>
+                  <button id="createVdvWidgetButton" class="button" type="button">Добавить День ВДВ</button>
                 </div>
                 <p id="widgetsStudioState" class="muted">Готово к настройке.</p>
               </div>
@@ -2845,6 +2937,34 @@
             </label>
             <button id="addGoalDonationButton" class="button button--ghost" type="button">Добавить донат</button>
             <p id="goalStateText" class="muted">Полоска готова.</p>
+          </article>
+
+          <article class="panel vdv-admin">
+            <div class="vdv-admin__head">
+              <h2>День ВДВ — испытания</h2>
+              <button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/vdv.html">Открыть OBS</button>
+            </div>
+            <div class="widget-link">
+              <strong>Ссылка виджета</strong>
+              <code>http://localhost:3000/widgets/vdv.html</code>
+            </div>
+            <div class="field-grid field-grid--two">
+              <label class="field"><span>Заголовок</span><input id="vdvTitleInput" type="text" value="ДЕНЬ ВДВ" /></label>
+              <label class="field"><span>Девиз</span><input id="vdvSubtitleInput" type="text" value="Никто, кроме нас!" /></label>
+            </div>
+            <label class="field">
+              <span>8 испытаний — по одному на строке</span>
+              <textarea id="vdvChallengesInput" rows="8" spellcheck="true"></textarea>
+            </label>
+            <div class="button-row">
+              <button id="saveVdvButton" class="button" type="button">Сохранить названия</button>
+              <button id="resetVdvCardsButton" class="button button--danger" type="button">Закрыть все</button>
+            </div>
+            <div id="vdvCardsAdmin" class="vdv-admin__cards"></div>
+            <hr />
+            <label class="field"><span>Добавить в кумулятивную сумму, ₽</span><input id="vdvAmountInput" type="number" min="0" value="1000" /></label>
+            <button id="addVdvAmountButton" class="button button--ghost" type="button">Добавить сумму</button>
+            <p id="vdvStateText" class="vdv-admin__stats">Виджет загружается…</p>
           </article>
 
           <article class="panel">
@@ -3382,6 +3502,7 @@
       };
       let alertSettings = { displaySeconds: 8, systemAlerts: {}, rules: [] };
       let widgetsState = { items: [], poll: null, urls: {} };
+      let vdvWidgetState = null;
       let workspaceCountdownTimer = null;
       let selectedWidgetType = 'goal';
       let selectedWorkspaceWidgetId = '';
@@ -3424,6 +3545,12 @@
       const goalCurrencyInput = document.querySelector('#goalCurrencyInput');
       const manualGoalDonationInput = document.querySelector('#manualGoalDonationInput');
       const goalStateText = document.querySelector('#goalStateText');
+      const vdvTitleInput = document.querySelector('#vdvTitleInput');
+      const vdvSubtitleInput = document.querySelector('#vdvSubtitleInput');
+      const vdvChallengesInput = document.querySelector('#vdvChallengesInput');
+      const vdvCardsAdmin = document.querySelector('#vdvCardsAdmin');
+      const vdvAmountInput = document.querySelector('#vdvAmountInput');
+      const vdvStateText = document.querySelector('#vdvStateText');
       const streamOverlayUrl = document.querySelector('#streamOverlayUrl');
       const streamWidgetsList = document.querySelector('#streamWidgetsList');
       const widgetsStudioState = document.querySelector('#widgetsStudioState');
@@ -3659,6 +3786,276 @@
         const goal = await window.tchat.getGoalState();
         renderGoalState(goal);
       }
+
+      function renderVdvState(data = {}) {
+        vdvWidgetState = data;
+        if (document.activeElement !== vdvTitleInput) vdvTitleInput.value = data.title || 'ДЕНЬ ВДВ';
+        if (document.activeElement !== vdvSubtitleInput) vdvSubtitleInput.value = data.subtitle || 'Никто, кроме нас!';
+        if (document.activeElement !== vdvChallengesInput) vdvChallengesInput.value = (data.challenges || []).join('\n');
+        vdvCardsAdmin.innerHTML = (data.challenges || []).map((challenge, index) => `
+          <div class="vdv-admin-card${data.opened?.[index] ? ' is-open' : ''}">
+            <span>${index + 1}. ${escapeHtml(challenge)}</span>
+            <button class="mini-button" type="button" data-vdv-card="${index}" data-vdv-visible="${data.revealIndex === index ? '1' : '0'}">${data.revealIndex === index ? 'Закрыть показ' : data.opened?.[index] ? 'Показать' : 'Открыть'}</button>
+          </div>`).join('');
+        vdvStateText.textContent = `${formatMoney(data.amount || 0)} ₽ · ${formatMoney(data.pushups || 0)} отжиманий · ${formatMoney(data.squats || 0)} приседаний`;
+        renderWorkspaceCards();
+        const selectedWidget = widgetsState.items.find((item) => item.id === selectedWorkspaceWidgetId);
+        if (selectedWidget?.type === 'vdv') renderWorkspaceConfigurator();
+      }
+
+      async function saveVdv() {
+        const challenges = vdvChallengesInput.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 8);
+        const data = await window.tchat.updateVdv({ title: vdvTitleInput.value, subtitle: vdvSubtitleInput.value, challenges });
+        renderVdvState(data);
+      }
+
+      async function addVdvAmount() {
+        const amount = Number(vdvAmountInput.value || 0);
+        if (!(amount > 0)) { vdvStateText.textContent = 'Введите сумму больше нуля.'; return; }
+        renderVdvState(await window.tchat.addVdvAmount(amount));
+        vdvAmountInput.value = 1000;
+      }
+
+      // --- Виджет «Последний донат» ---------------------------------------
+      // Настройки живут в конфигураторе рабочей области: выбрал карточку виджета
+      // — справа суммы, призы и ручной донат. Ступени и топ-призы правятся прямо
+      // в строках и уходят на сервер целым списком. Победители ступеней здесь не
+      // редактируются: пробитие уже случилось, переиграть его нельзя.
+
+      const ldState = { data: null, nicknames: [], note: '' };
+
+      function ldConfigRoot() {
+        const widget = widgetsState.items.find((item) => item.id === selectedWorkspaceWidgetId);
+        return widget?.type === 'lastdonation' ? workspaceConfigurator : null;
+      }
+
+      function ldField(name) {
+        return ldConfigRoot()?.querySelector(`[data-ld-field="${name}"]`) || null;
+      }
+
+      function renderLastDonationConfiguratorHtml(widget = {}) {
+        const data = ldState.data || {};
+        const currency = data.currency || 'RUB';
+        const left = data.streamEndsAt && !data.finished
+          ? `осталось ${Math.max(Math.round((new Date(data.streamEndsAt) - Date.now()) / 60000), 0)} мин`
+          : data.finished ? 'стрим завершён' : 'отсчёт не запущен';
+        const status = `${formatMoney(data.total || 0)} ${currency} · ${left} · топ-призы ${
+          data.topUnlocked ? 'открыты' : `заперты (ещё ${data.lockedTiers || 0})`
+        }`;
+
+        const tiersHtml = (data.tiers || []).map((tier) => `
+          <div class="ld-row">
+            <input type="number" min="0" data-ld-tier-amount="${escapeHtml(tier.id)}" value="${escapeHtml(tier.amount)}" />
+            <input type="text" data-ld-tier-title="${escapeHtml(tier.id)}" value="${escapeHtml(tier.title)}" />
+            ${tier.winner
+              ? `<span class="ld-row__note">забрал ${escapeHtml(tier.winner.username)}</span>`
+              : `<button class="ld-row__remove" type="button" data-ld-remove-tier="${escapeHtml(tier.id)}">Убрать</button>`}
+          </div>
+        `).join('');
+
+        const topHtml = (data.topPrizes || []).map((prize) => {
+          const holder = data.leaders?.find((entry) => entry.place === prize.place);
+          return `
+            <div class="ld-row">
+              <input type="number" min="1" data-ld-top-place="${escapeHtml(prize.id)}" value="${escapeHtml(prize.place)}" />
+              <input type="text" data-ld-top-title="${escapeHtml(prize.id)}" value="${escapeHtml(prize.title)}" />
+              ${holder
+                ? `<span class="ld-row__note">${escapeHtml(holder.username)}</span>`
+                : `<button class="ld-row__remove" type="button" data-ld-remove-top="${escapeHtml(prize.id)}">Убрать</button>`}
+            </div>
+          `;
+        }).join('');
+
+        const donationsHtml = (data.donations || []).slice(0, 10).map((donation, index) => `
+          <div class="ld-row">
+            <span class="ld-row__note">${formatMoney(donation.amount)} ${escapeHtml(donation.currency)}</span>
+            <span class="ld-row__note">${index + 1}. ${escapeHtml(donation.username)}</span>
+            <button class="ld-row__remove" type="button" data-ld-remove-donation="${escapeHtml(donation.id)}">Убрать</button>
+          </div>
+        `).join('') || '<p class="muted">Донатов пока нет.</p>';
+
+        return `
+          <label class="field">Название
+            <input data-config-field="title" type="text" value="${escapeHtml(widget.title || 'Последний донат')}" />
+          </label>
+          <div class="compact-grid">
+            <label class="field">X, %
+              <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 66)}" />
+            </label>
+            <label class="field">Y, %
+              <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 34)}" />
+            </label>
+          </div>
+          ${renderWorkspaceSizeFields(widget, { defaultWidth: 26 })}
+          <div class="button-row">
+            <button class="button" type="button" data-save-config>Сохранить</button>
+            <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
+          </div>
+
+          <hr />
+          <div class="compact-grid">
+            <label class="field">Минимальная сумма
+              <input data-ld-field="minAmount" type="number" min="0" value="${escapeHtml(data.minAmount ?? 500)}" />
+            </label>
+            <label class="field">Длина стрима, мин
+              <input data-ld-field="streamMinutes" type="number" min="1" value="${escapeHtml(data.streamMinutes || 180)}" />
+            </label>
+          </div>
+          <label class="field field--inline">
+            <input data-ld-field="enabled" type="checkbox" ${data.enabled === false ? '' : 'checked'} />
+            <span>Ловить донаты</span>
+          </label>
+          <div class="button-row">
+            <button class="button" type="button" data-ld-action="save">Сохранить призы</button>
+            <button class="button button--ghost" type="button" data-ld-action="start">Запустить отсчёт</button>
+            <button class="button button--ghost" type="button" data-ld-action="extend30">+30 мин</button>
+            <button class="button button--ghost" type="button" data-ld-action="extend60">+час</button>
+            <button class="button button--ghost" type="button" data-ld-action="stop">Завершить</button>
+            <button class="button button--danger" type="button" data-ld-action="reset">Сбросить призы</button>
+          </div>
+          <p class="muted" data-ld-status>${escapeHtml(ldState.note || status)}</p>
+
+          <hr />
+          <h3>Прогрессия призов</h3>
+          <p class="muted">Ступень забирает тот, чей донат пробил сумму.</p>
+          <div class="ld-rows">${tiersHtml}</div>
+          <button class="button button--ghost" type="button" data-ld-action="add-tier">Добавить ступень</button>
+
+          <hr />
+          <h3>Топ-призы</h3>
+          <p class="muted">Открываются только после всей прогрессии. 1 место — последний задонативший.</p>
+          <div class="ld-rows">${topHtml}</div>
+          <button class="button button--ghost" type="button" data-ld-action="add-top">Добавить место</button>
+
+          <hr />
+          <h3>Ручной донат</h3>
+          <div class="compact-grid">
+            <label class="field">Ник
+              <input data-ld-field="manualName" type="text" list="ldNicknames" placeholder="Ник зрителя" />
+            </label>
+            <label class="field">Сумма
+              <input data-ld-field="manualAmount" type="number" min="0" value="${escapeHtml(data.minAmount ?? 500)}" />
+            </label>
+          </div>
+          <datalist id="ldNicknames">${ldState.nicknames.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}</datalist>
+          <button class="button" type="button" data-ld-action="add-donation">Засчитать донат</button>
+          <div class="ld-rows">${donationsHtml}</div>
+        `;
+      }
+
+      // Состояние прилетает и по сокету, и в ответ на действие: перерисовываем
+      // конфигуратор, только если сейчас открыт именно этот виджет.
+      function renderLastDonationState(payload = {}) {
+        ldState.data = payload;
+        renderWorkspaceCards();
+        if (ldConfigRoot()) {
+          renderWorkspaceConfigurator();
+        }
+      }
+
+      function collectTiers() {
+        const root = ldConfigRoot();
+        return (ldState.data?.tiers || []).map((tier) => ({
+          ...tier,
+          amount: Number(root?.querySelector(`[data-ld-tier-amount="${tier.id}"]`)?.value ?? tier.amount),
+          title: root?.querySelector(`[data-ld-tier-title="${tier.id}"]`)?.value.trim() || tier.title,
+        }));
+      }
+
+      function collectTopPrizes() {
+        const root = ldConfigRoot();
+        return (ldState.data?.topPrizes || []).map((prize) => ({
+          ...prize,
+          place: Number(root?.querySelector(`[data-ld-top-place="${prize.id}"]`)?.value ?? prize.place),
+          title: root?.querySelector(`[data-ld-top-title="${prize.id}"]`)?.value.trim() || prize.title,
+        }));
+      }
+
+      async function saveLastDonationTiers(tiers) {
+        renderLastDonationState(await window.tchat.setLastDonationTiers(tiers));
+      }
+
+      async function saveLastDonationTopPrizes(prizes) {
+        renderLastDonationState(await window.tchat.setLastDonationTopPrizes(prizes));
+      }
+
+      async function saveLastDonationSettings() {
+        ldState.note = '';
+        renderLastDonationState(await window.tchat.updateLastDonation({
+          minAmount: Number(ldField('minAmount')?.value || 0),
+          streamMinutes: Number(ldField('streamMinutes')?.value || 180),
+          enabled: ldField('enabled')?.checked !== false,
+          tiers: collectTiers(),
+          topPrizes: collectTopPrizes(),
+        }));
+      }
+
+      async function controlLastDonationStream(action, minutes) {
+        ldState.note = '';
+        renderLastDonationState(await window.tchat.controlLastDonationStream({ action, minutes }));
+      }
+
+      async function addManualLastDonation() {
+        const amount = Number(ldField('manualAmount')?.value || 0);
+        if (amount <= 0) {
+          ldState.note = 'Введите сумму доната.';
+          renderWorkspaceConfigurator();
+          return;
+        }
+
+        const result = await window.tchat.addLastDonation({
+          username: ldField('manualName')?.value.trim() || 'Аноним',
+          amount,
+        });
+        ldState.note = result.counted
+          ? ''
+          : `Донат меньше минимальной суммы (${formatMoney(ldState.data?.minAmount || 0)}) — не засчитан.`;
+        renderLastDonationState(result.state);
+      }
+
+      async function loadLastDonationNicknames() {
+        ldState.nicknames = await window.tchat.getLastDonationNicknames();
+        if (ldConfigRoot()) renderWorkspaceConfigurator();
+      }
+
+      // Все кнопки и поля конфигуратора этого виджета — через делегирование:
+      // конфигуратор перерисовывается целиком, точечные слушатели не выживут.
+      workspaceConfigurator?.addEventListener('click', (event) => {
+        if (!ldConfigRoot()) return;
+
+        const action = event.target.closest('[data-ld-action]')?.dataset.ldAction;
+        const removeTier = event.target.closest('[data-ld-remove-tier]')?.dataset.ldRemoveTier;
+        const removeTop = event.target.closest('[data-ld-remove-top]')?.dataset.ldRemoveTop;
+        const removeDonation = event.target.closest('[data-ld-remove-donation]')?.dataset.ldRemoveDonation;
+
+        if (removeTier) {
+          void saveLastDonationTiers(collectTiers().filter((item) => item.id !== removeTier));
+          return;
+        }
+        if (removeTop) {
+          void saveLastDonationTopPrizes(collectTopPrizes().filter((item) => item.id !== removeTop));
+          return;
+        }
+        if (removeDonation) {
+          window.tchat.removeLastDonation({ id: removeDonation }).then(renderLastDonationState);
+          return;
+        }
+
+        if (action === 'save') void saveLastDonationSettings();
+        else if (action === 'start') void controlLastDonationStream('start', Number(ldField('streamMinutes')?.value || 180));
+        else if (action === 'extend30') void controlLastDonationStream('extend', 30);
+        else if (action === 'extend60') void controlLastDonationStream('extend', 60);
+        else if (action === 'stop') void controlLastDonationStream('stop');
+        else if (action === 'reset') void controlLastDonationStream('reset');
+        else if (action === 'add-donation') void addManualLastDonation();
+        else if (action === 'add-tier') {
+          const tiers = collectTiers();
+          void saveLastDonationTiers([...tiers, { amount: (tiers[tiers.length - 1]?.amount || 0) + 3000, title: 'Новый приз' }]);
+        } else if (action === 'add-top') {
+          const prizes = collectTopPrizes();
+          void saveLastDonationTopPrizes([...prizes, { place: prizes.length + 1, title: 'Новый топ-приз' }]);
+        }
+      });
 
       function renderStatus(status) {
         document.querySelector('#totalViewers').textContent = status.viewers?.total || 0;
@@ -4187,6 +4584,8 @@
           countdown: 'Обратный отсчёт',
           texts: 'Тексты',
           tasks: 'Задачи',
+          lastdonation: 'Последний донат',
+          vdv: 'День ВДВ',
           custom: 'Кастомный виджет',
         }[type] || 'Виджет';
       }
@@ -4664,6 +5063,19 @@
           const done = getTaskItems(widget).filter((item) => item.done).length;
           return total ? `${done}/${total} выполнено` : 'Нет задач';
         }
+        if (widget.type === 'lastdonation') {
+          if (widget.enabled === false) return 'Последний донат скрыт в overlay';
+          const data = ldState.data;
+          if (!data) return 'Виджет в overlay';
+          const leader = data.leaders?.[0];
+          const prizes = data.topUnlocked ? 'топ-призы открыты' : `ещё ${data.lockedTiers} ступеней до топ-призов`;
+          return leader ? `${leader.username} · ${formatMoney(data.total || 0)} · ${prizes}` : `Ждём донат · ${prizes}`;
+        }
+        if (widget.type === 'vdv') {
+          if (widget.enabled === false) return 'Праздничный виджет скрыт в overlay';
+          const opened = vdvWidgetState?.opened?.filter(Boolean).length || 0;
+          return `${opened}/8 карточек · ${formatMoney(vdvWidgetState?.amount || 0)} ₽`;
+        }
         return widget.enabled ? 'Активен' : 'Скрыт';
       }
 
@@ -4931,6 +5343,28 @@
 
         if (widget.type === 'tasks') {
           return renderPreviewTasksHtml(widget);
+        }
+
+        if (widget.type === 'lastdonation') {
+          const source = `${widgetsState.urls?.lastdonation || 'http://localhost:3000/widgets/lastdonation.html'}?embedded=1&preview=1`;
+          return `
+            <iframe
+              class="preview-giveaway-frame"
+              src="${escapeHtml(source)}"
+              title="${escapeHtml(widget.title || 'Последний донат')}"
+              allowtransparency="true"></iframe>
+          `;
+        }
+
+        if (widget.type === 'vdv') {
+          const source = `${widgetsState.urls?.vdv || 'http://localhost:3000/widgets/vdv.html'}?embedded=1&sound=0`;
+          return `
+            <iframe
+              class="preview-giveaway-frame"
+              src="${escapeHtml(source)}"
+              title="${escapeHtml(widget.title || 'День ВДВ')}"
+              allowtransparency="true"></iframe>
+          `;
         }
 
         return `
@@ -5259,6 +5693,63 @@
 
         if (widget.type === 'tasks') {
           workspaceConfigurator.innerHTML = renderTasksConfiguratorHtml(widget);
+          return;
+        }
+
+        if (widget.type === 'lastdonation') {
+          workspaceConfigurator.innerHTML = renderLastDonationConfiguratorHtml(widget);
+          return;
+        }
+
+        if (widget.type === 'vdv') {
+          const state = vdvWidgetState || {};
+          const challenges = Array.isArray(state.challenges) ? state.challenges : [];
+          const opened = Array.isArray(state.opened) ? state.opened : [];
+          workspaceConfigurator.innerHTML = `
+            <div class="workspace-poll-status">
+              ${escapeHtml(`${formatMoney(state.amount || 0)} ₽ · ${formatMoney(state.pushups || 0)} отжиманий · ${formatMoney(state.squats || 0)} приседаний`)}
+            </div>
+            <label class="field">Заголовок
+              <input data-workspace-vdv-field="title" type="text" value="${escapeHtml(state.title || 'ДЕНЬ ВДВ')}" />
+            </label>
+            <label class="field">Девиз
+              <input data-workspace-vdv-field="subtitle" type="text" value="${escapeHtml(state.subtitle || 'Никто, кроме нас!')}" />
+            </label>
+            <label class="field">Испытания — по одному в строке
+              <textarea data-workspace-vdv-field="challenges" rows="8" spellcheck="true">${escapeHtml(challenges.join('\n'))}</textarea>
+            </label>
+            <div class="button-row">
+              <button class="button" type="button" data-workspace-vdv-save>Сохранить испытания</button>
+              <button class="button button--ghost" type="button" data-workspace-vdv-reset>Закрыть все карточки</button>
+            </div>
+            <div class="vdv-admin__cards">
+              ${challenges.map((challenge, index) => `
+                <div class="vdv-admin-card${opened[index] ? ' is-open' : ''}">
+                  <span>${index + 1}. ${escapeHtml(challenge)}</span>
+                  <button class="mini-button" type="button" data-workspace-vdv-card="${index}" data-workspace-vdv-visible="${state.revealIndex === index ? '1' : '0'}">${state.revealIndex === index ? 'Закрыть показ' : opened[index] ? 'Показать' : 'Открыть'}</button>
+                </div>
+              `).join('') || '<p class="muted">Состояние виджета загружается…</p>'}
+            </div>
+            <label class="field">Добавить в кумулятивную сумму, ₽
+              <input data-workspace-vdv-field="amount" type="number" min="1" value="1000" />
+            </label>
+            <div class="button-row">
+              <button class="button" type="button" data-workspace-vdv-add>Добавить сумму</button>
+            </div>
+            <div class="compact-grid">
+              <label class="field">X, %
+                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 66)}" />
+              </label>
+              <label class="field">Y, %
+                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 34)}" />
+              </label>
+            </div>
+            ${renderWorkspaceSizeFields(widget, { defaultWidth: 17.33 })}
+            <div class="button-row">
+              <button class="button" type="button" data-save-config>Сохранить позицию</button>
+              <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
+            </div>
+          `;
           return;
         }
 
@@ -5663,6 +6154,55 @@
         renderWidgetsState(payload);
       }
 
+      // Виджет «Последний донат» один на стрим: его состояние (призы, счёт,
+      // победители) общее, второй экземпляр показывал бы то же самое.
+      async function createLastDonationWidget() {
+        const existing = widgetsState.items.find((item) => item.type === 'lastdonation');
+        if (existing) {
+          selectedWorkspaceWidgetId = existing.id;
+          const payload = await window.tchat.updateWidget({ ...existing, enabled: true, id: existing.id });
+          if (widgetsStudioState) {
+            widgetsStudioState.textContent = 'Виджет уже был в списке, включил его в overlay.';
+          }
+          renderWidgetsState(payload);
+          return;
+        }
+
+        const payload = await window.tchat.createWidget({
+          type: 'lastdonation',
+          title: 'Последний донат',
+          enabled: true,
+          x: 66,
+          y: 34,
+          width: 26,
+        });
+        widgetsStudioState.textContent = 'Виджет последнего доната добавлен в общий overlay.';
+        renderWidgetsState(payload);
+      }
+
+      async function createVdvWidget() {
+        const existing = widgetsState.items.find((item) => item.type === 'vdv');
+        if (existing) {
+          selectedWorkspaceWidgetId = existing.id;
+          const payload = await window.tchat.updateWidget({ ...existing, enabled: true, id: existing.id });
+          widgetsStudioState.textContent = 'Виджет «День ВДВ» включён в общем overlay.';
+          renderWidgetsState(payload);
+          return;
+        }
+
+        const payload = await window.tchat.createWidget({
+          type: 'vdv',
+          title: 'День ВДВ',
+          enabled: true,
+          x: 66,
+          y: 34,
+          width: 17.33,
+          height: 28,
+        });
+        widgetsStudioState.textContent = 'Виджет «День ВДВ» добавлен в общий overlay.';
+        renderWidgetsState(payload);
+      }
+
       async function createPollWidget() {
         const existing = widgetsState.items.find((item) => item.type === 'poll');
         if (existing) {
@@ -5973,7 +6513,7 @@
       }
 
       function selectWidgetType(type) {
-        selectedWidgetType = ['poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks'].includes(type) ? type : 'goal';
+        selectedWidgetType = ['poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv'].includes(type) ? type : 'goal';
         document.querySelectorAll('[data-widget-type]').forEach((button) => {
           button.classList.toggle('is-active', button.dataset.widgetType === selectedWidgetType);
         });
@@ -5989,6 +6529,12 @@
         }
         if (document.querySelector('#tasksWidgetHint')) {
           document.querySelector('#tasksWidgetHint').hidden = selectedWidgetType !== 'tasks';
+        }
+        if (document.querySelector('#lastdonationWidgetHint')) {
+          document.querySelector('#lastdonationWidgetHint').hidden = selectedWidgetType !== 'lastdonation';
+        }
+        if (document.querySelector('#vdvWidgetHint')) {
+          document.querySelector('#vdvWidgetHint').hidden = selectedWidgetType !== 'vdv';
         }
       }
 
@@ -6082,6 +6628,16 @@
       document.querySelector('#sendRaidButton').addEventListener('click', sendTestRaid);
       document.querySelector('#saveGoalButton').addEventListener('click', saveGoal);
       document.querySelector('#addGoalDonationButton').addEventListener('click', addGoalDonation);
+      document.querySelector('#saveVdvButton').addEventListener('click', saveVdv);
+      document.querySelector('#resetVdvCardsButton').addEventListener('click', async () => renderVdvState(await window.tchat.resetVdvCards()));
+      document.querySelector('#addVdvAmountButton').addEventListener('click', addVdvAmount);
+      vdvCardsAdmin.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-vdv-card]');
+        if (!button) return;
+        const index = Number(button.dataset.vdvCard);
+        const data = button.dataset.vdvVisible === '1' ? await window.tchat.closeVdvCard(index) : await window.tchat.revealVdvCard(index);
+        renderVdvState(data);
+      });
       document.querySelector('#addManualMusicButton').addEventListener('click', addManualMusic);
       musicVolumeInput.addEventListener('input', () => {
         musicVolumeValue.textContent = `${musicVolumeInput.value}%`;
@@ -6103,12 +6659,16 @@
       document.querySelector('#quickCreateCountdownButton').addEventListener('click', createCountdownWidget);
       document.querySelector('#quickCreateTextsButton').addEventListener('click', createTextsWidget);
       document.querySelector('#quickCreateTasksButton').addEventListener('click', createTasksWidget);
+      document.querySelector('#quickCreateLastDonationButton').addEventListener('click', createLastDonationWidget);
+      document.querySelector('#quickCreateVdvButton').addEventListener('click', createVdvWidget);
       document.querySelector('#createMusicWidgetButton').addEventListener('click', createMusicWidget);
       document.querySelector('#createPollWidgetButton')?.addEventListener('click', createPollWidget);
       document.querySelector('#createGiveawayWidgetButton')?.addEventListener('click', createGiveawayWidget);
       document.querySelector('#createCountdownWidgetButton')?.addEventListener('click', createCountdownWidget);
       document.querySelector('#createTextsWidgetButton')?.addEventListener('click', createTextsWidget);
       document.querySelector('#createTasksWidgetButton')?.addEventListener('click', createTasksWidget);
+      document.querySelector('#createLastDonationWidgetButton')?.addEventListener('click', createLastDonationWidget);
+      document.querySelector('#createVdvWidgetButton')?.addEventListener('click', createVdvWidget);
       document.querySelector('#addPollOptionButton').addEventListener('click', () => {
         collectPollOptions();
         pollOptionDraft.push(`Вариант ${pollOptionDraft.length + 1}`);
@@ -6151,10 +6711,51 @@
         const countdownResetButton = event.target.closest('[data-countdown-reset]');
         const countdownAdjustButton = event.target.closest('[data-countdown-adjust]');
         const countdownModeButton = event.target.closest('[data-countdown-mode]');
+        const workspaceVdvSave = event.target.closest('[data-workspace-vdv-save]');
+        const workspaceVdvReset = event.target.closest('[data-workspace-vdv-reset]');
+        const workspaceVdvAdd = event.target.closest('[data-workspace-vdv-add]');
+        const workspaceVdvCard = event.target.closest('[data-workspace-vdv-card]');
         const tasksSaveButton = event.target.closest('[data-tasks-save]');
         const tasksAddButton = event.target.closest('[data-tasks-add]');
         const tasksMoveButton = event.target.closest('[data-tasks-move]');
         const taskDeleteButton = event.target.closest('[data-task-delete]');
+
+        if (workspaceVdvSave) {
+          const title = workspaceConfigurator.querySelector('[data-workspace-vdv-field="title"]')?.value || 'ДЕНЬ ВДВ';
+          const subtitle = workspaceConfigurator.querySelector('[data-workspace-vdv-field="subtitle"]')?.value || 'Никто, кроме нас!';
+          const challenges = (workspaceConfigurator.querySelector('[data-workspace-vdv-field="challenges"]')?.value || '')
+            .split(/\r?\n/)
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .slice(0, 8);
+          window.tchat.updateVdv({ title, subtitle, challenges }).then(renderVdvState);
+          return;
+        }
+
+        if (workspaceVdvReset) {
+          window.tchat.resetVdvCards().then(renderVdvState);
+          return;
+        }
+
+        if (workspaceVdvAdd) {
+          const amountInput = workspaceConfigurator.querySelector('[data-workspace-vdv-field="amount"]');
+          const amount = Number(amountInput?.value || 0);
+          if (!(amount > 0)) {
+            workspaceStatusText.textContent = 'Введите сумму больше нуля.';
+            return;
+          }
+          window.tchat.addVdvAmount(amount).then(renderVdvState);
+          return;
+        }
+
+        if (workspaceVdvCard) {
+          const index = Number(workspaceVdvCard.dataset.workspaceVdvCard);
+          const request = workspaceVdvCard.dataset.workspaceVdvVisible === '1'
+            ? window.tchat.closeVdvCard(index)
+            : window.tchat.revealVdvCard(index);
+          request.then(renderVdvState);
+          return;
+        }
 
         if (giveawaySaveButton && selectedWorkspaceWidgetId) {
           saveGiveawayFromWorkspace(selectedWorkspaceWidgetId);
@@ -6475,12 +7076,17 @@
       window.tchat.onAlertQueue(renderAlertQueue);
       window.tchat.onMusicQueue(renderMusicQueue);
       window.tchat.onGoalState(renderGoalState);
+      window.tchat.onVdvState(renderVdvState);
+      window.tchat.onLastDonationState(renderLastDonationState);
       window.tchat.onWidgetsState(renderWidgetsState);
       renderPollOptions();
       window.tchat.getChatStatus().then(renderStatus);
       window.tchat.getChatUiSettings().then(renderChatUiSettings);
       window.tchat.getDonationAlertsState().then(renderDonationAlerts);
       window.tchat.getGoalState().then(renderGoalState);
+      window.tchat.getVdvState().then(renderVdvState);
+      window.tchat.getLastDonationState().then(renderLastDonationState);
+      loadLastDonationNicknames();
       window.tchat.getWidgetsState().then(renderWidgetsState);
       // Сначала узнаём адрес локального сервера, иначе первая отрисовка алертов
       // соберёт превью на дефолтном порту и промахнётся, если порт другой.

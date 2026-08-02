@@ -1,0 +1,138 @@
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@500;700;800;900&family=Russo+One&display=swap');
+
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+body { font-family: 'Exo 2', sans-serif; color: white; }
+.vdv { position: relative; width: 100vw; height: 100vh; min-height: 620px; padding: 3vh 4vw 3.2vh; display: grid; grid-template-rows: auto 1fr auto; gap: 2.1vh; isolation: isolate; background: #064d95 url('/assets/vdv/vdv-sky-bg.png') center/cover no-repeat; }
+.vdv::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(circle at 50% 48%, transparent 0 24%, rgba(0,29,72,.22) 68%, rgba(0,14,34,.68) 100%), linear-gradient(180deg, rgba(3,33,72,.08), rgba(3,33,72,.25)); }
+.vdv::after { content: ''; position: absolute; inset: 0; z-index: 10; pointer-events: none; box-shadow: inset 0 0 7vw rgba(0,10,27,.75), inset 0 0 0 3px rgba(255,255,255,.14); }
+.sky-rays { position:absolute; inset:-30%; z-index:-1; opacity:.24; background: repeating-conic-gradient(from 190deg at 85% 0%, rgba(255,255,255,.35) 0 4deg, transparent 4deg 12deg); animation: breathe 7s ease-in-out infinite alternate; }
+.aircraft { position:absolute; top:9%; left:-10%; font-size:clamp(32px,4vw,74px); color:rgba(2,23,52,.38); filter:drop-shadow(0 10px 3px rgba(0,0,0,.2)); animation: flyby 24s linear infinite; transform:rotate(7deg); }
+.hero { display:flex; align-items:center; justify-content:center; gap:1.35vw; text-align:center; filter:drop-shadow(0 7px 8px rgba(0,16,45,.72)); }
+.hero h1 { margin:-.15vh 0 0; font-family:'Russo One',sans-serif; font-size:clamp(38px,5.2vw,92px); line-height:.94; letter-spacing:.09em; color:#fff; text-shadow:0 3px 0 #1365aa,0 6px 0 #063d76,0 0 28px rgba(117,210,255,.6); }
+.hero p { margin:.45vh 0 0; font-size:clamp(14px,1.35vw,25px); font-weight:900; letter-spacing:.28em; text-transform:uppercase; color:#ffd979; }
+.kicker { margin-bottom:.3vh; font-size:clamp(9px,.75vw,14px); font-weight:900; letter-spacing:.36em; color:#c4eaff; }
+.badge { width:clamp(72px,6.2vw,116px); aspect-ratio:1; display:grid; place-content:center; border:3px solid #f5d17a; border-radius:50%; background:radial-gradient(circle,#147fc4 0 51%,#064d89 52%); box-shadow:0 0 0 5px #fff,0 0 0 8px #1a75b5,0 8px 16px rgba(0,0,0,.35); font-family:'Russo One'; font-size:clamp(10px,.75vw,15px); color:#ffd979; }
+.badge__chute { display:block; font-size:clamp(26px,2.5vw,48px); line-height:.72; color:#fff; transform:rotate(180deg); }
+.wing { width:clamp(55px,7vw,135px); height:4px; background:linear-gradient(90deg,transparent,#fff); transform:skewY(-13deg); box-shadow:0 10px 0 #1885cb,0 20px 0 #fff; opacity:.9; }
+.wing--right { transform:scaleX(-1) skewY(-13deg); }
+.cards { align-self:center; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:clamp(10px,1.25vw,24px); max-width:1500px; width:100%; margin:auto; perspective:1500px; }
+.card { position:relative; min-height:clamp(140px,20.5vh,235px); border:0; padding:0; color:#fff; background:transparent; transform-style:preserve-3d; transition:filter .35s,transform .35s; }
+.card__inner { position:absolute; inset:0; transform-style:preserve-3d; transition:transform 1s cubic-bezier(.18,.8,.2,1); }
+.card.is-open .card__inner { transform:rotateY(180deg); }
+.card__face { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden; backface-visibility:hidden; border:2px solid rgba(220,241,255,.9); clip-path:polygon(8% 0,92% 0,100% 10%,100% 90%,92% 100%,8% 100%,0 90%,0 10%); box-shadow:inset 0 0 0 5px rgba(13,90,145,.8),inset 0 0 35px rgba(0,12,31,.65),0 12px 24px rgba(0,15,35,.4); }
+.card__back { background:linear-gradient(145deg,rgba(11,91,148,.97),rgba(2,39,80,.98)); }
+.card__back::before { content:''; position:absolute; inset:8px; opacity:.25; background:repeating-linear-gradient(45deg,transparent 0 17px,#82c5ec 18px 20px),repeating-linear-gradient(-45deg,transparent 0 27px,#184b77 28px 34px); clip-path:inherit; }
+.card__back::after { content:'★'; display:grid; place-items:center; position:absolute; width:38%; aspect-ratio:1; border:3px solid #f4d77b; border-radius:50%; color:#f4d77b; font-size:clamp(30px,3vw,58px); background:#0b5c99; box-shadow:0 0 0 5px #fff,0 0 25px rgba(133,214,255,.7); }
+.card__number { position:absolute; top:12%; left:10%; font:900 clamp(12px,1vw,18px) 'Exo 2'; letter-spacing:.15em; color:#b9e8ff; }
+.card__lock { position:absolute; bottom:11%; z-index:2; font-size:clamp(9px,.65vw,13px); font-weight:900; letter-spacing:.22em; color:#fff; }
+.card__front { padding:clamp(12px,1.5vw,25px); transform:rotateY(180deg); text-align:center; background:linear-gradient(145deg,rgba(37,76,43,.97),rgba(11,42,47,.98)); }
+.card__front::before { content:''; position:absolute; inset:0; opacity:.28; background:radial-gradient(ellipse at 18% 30%,#b3aa68 0 10%,transparent 11%),radial-gradient(ellipse at 70% 68%,#6a7d45 0 15%,transparent 16%),repeating-linear-gradient(35deg,transparent 0 20px,#7f8651 21px 29px); }
+.card__front small,.card__front strong { position:relative; z-index:1; }
+.card__front small { color:#b7e4ff; font-size:clamp(9px,.7vw,13px); font-weight:900; letter-spacing:.19em; }
+.card__front strong { margin-top:1vh; font-family:'Russo One'; font-size:clamp(17px,1.55vw,29px); line-height:1.15; text-shadow:0 3px 8px rgba(0,0,0,.5); }
+.card.is-new { z-index:20; animation:cardPop 1.4s ease both; }
+.progress-panel { max-width:1500px; width:100%; margin:auto; padding:clamp(12px,1.25vw,24px) clamp(18px,2vw,38px) clamp(11px,1.1vw,20px); border:2px solid rgba(231,246,255,.78); clip-path:polygon(1.4% 0,98.6% 0,100% 18%,100% 82%,98.6% 100%,1.4% 100%,0 82%,0 18%); background:linear-gradient(105deg,rgba(2,33,69,.93),rgba(5,75,123,.88),rgba(2,33,69,.93)); box-shadow:inset 0 0 25px rgba(54,163,224,.3),0 12px 35px rgba(0,13,35,.5); }
+.progress-heading { display:flex; justify-content:space-between; align-items:end; margin-bottom:1.1vh; font-weight:900; letter-spacing:.16em; font-size:clamp(12px,1vw,19px); color:#c8edff; }
+.progress-heading strong { font-family:'Russo One'; font-size:clamp(22px,2vw,37px); color:#ffd468; letter-spacing:.03em; }
+.progress-track { position:relative; height:clamp(18px,2.2vh,28px); border:3px solid #deeff9; border-radius:5px; background:#061e38; box-shadow:inset 0 4px 9px rgba(0,0,0,.65),0 0 18px rgba(82,188,241,.45); }
+.progress-fill { height:100%; width:0; background:linear-gradient(90deg,#0c70ba,#30b4ec 55%,#fff2a0); box-shadow:0 0 20px #55c9ff; transition:width 1.1s cubic-bezier(.2,.8,.2,1); }
+.progress-track i { position:absolute; top:-7px; width:3px; height:calc(100% + 14px); background:#fff; opacity:.75; }
+.progress-track i span { position:absolute; bottom:calc(100% + 5px); transform:translateX(-50%); font:800 clamp(8px,.58vw,11px) 'Exo 2'; color:#c8edff; }
+.progress-track i:last-of-type span { transform: translateX(-100%); }
+.runner { position:absolute; top:50%; left:0; translate:-50% -50%; color:#ffd464; font-size:clamp(22px,2.3vw,42px); text-shadow:0 0 12px #fff,0 0 22px #ffc738; transition:left 1.1s cubic-bezier(.2,.8,.2,1); }
+.stats { display:grid; grid-template-columns:auto auto 1fr; align-items:center; gap:2.2vw; margin-top:1.25vh; }
+.stat { display:flex; align-items:center; gap:.7vw; }
+.stat__icon { display:grid; place-items:center; width:clamp(34px,2.7vw,50px); aspect-ratio:1; border-radius:50%; background:#f3cc5d; color:#08457b; font-size:clamp(18px,1.6vw,30px); box-shadow:0 0 0 3px #fff; }
+.stat small { display:block; font-size:clamp(8px,.6vw,11px); letter-spacing:.13em; color:#a8d9f2; }
+.stat b { font-size:clamp(14px,1.18vw,22px); white-space:nowrap; }
+.stat b span { color:#ffd564; font-family:'Russo One'; }
+.next { justify-self:end; font-size:clamp(11px,.9vw,17px); font-weight:800; color:#d9f2ff; }
+.reveal { position:absolute; inset:0; z-index:50; display:grid; place-items:center; visibility:hidden; background:radial-gradient(circle,rgba(68,183,242,.28),rgba(0,21,52,.78)); }
+.reveal.is-active { visibility:visible; animation:revealBg 3.6s both; }
+.reveal__flare { position:absolute; width:80vmax; height:80vmax; background:repeating-conic-gradient(#fff8c7 0 2deg,transparent 2deg 11deg); opacity:.2; animation:spin 7s linear infinite; }
+.reveal__card { position:relative; width:min(58vw,880px); min-height:min(43vh,470px); padding:5vh 5vw; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; clip-path:polygon(7% 0,93% 0,100% 12%,100% 88%,93% 100%,7% 100%,0 88%,0 12%); border:4px solid white; background:linear-gradient(145deg,#397144,#102e36); box-shadow:inset 0 0 0 9px #dbbd55,inset 0 0 55px #071b25,0 0 80px #5bcaff; animation:revealCard 3.6s both; }
+.reveal__card::before { content:''; position:absolute; inset:0; opacity:.24; background:repeating-linear-gradient(35deg,transparent 0 28px,#c8bb71 29px 39px); }
+.reveal__card small,.reveal__card span,.reveal__card strong { position:relative; }
+.reveal__card small { color:#ffd769; letter-spacing:.35em; font-weight:900; font-size:clamp(13px,1.1vw,20px); }
+.reveal__card span { margin:1.5vh 0; color:#b9e7ff; font-weight:900; letter-spacing:.2em; }
+.reveal__card strong { font:clamp(30px,4vw,70px)/1.08 'Russo One'; text-shadow:0 5px 14px rgba(0,0,0,.55); }
+.particle { position:absolute; left:50%; top:50%; width:8px; height:18px; background:var(--c); animation:burst 1.5s ease-out forwards; transform:rotate(var(--r)); }
+@keyframes breathe { to { opacity:.4; transform:rotate(3deg); } }
+@keyframes flyby { 0%{transform:translateX(-15vw) rotate(7deg)} 100%{transform:translateX(125vw) rotate(7deg)} }
+@keyframes cardPop { 0%{transform:scale(1)} 28%{transform:scale(1.18) translateY(-3vh);filter:drop-shadow(0 0 28px #fff)} 100%{transform:scale(1)} }
+@keyframes revealBg { 0%,100%{opacity:0} 10%,82%{opacity:1} }
+@keyframes revealCard { 0%{transform:scale(.08) rotate(-16deg);opacity:0} 18%{transform:scale(1.08) rotate(2deg);opacity:1} 28%,78%{transform:scale(1) rotate(0)} 100%{transform:scale(1.4);opacity:0} }
+@keyframes spin { to{transform:rotate(360deg)} }
+@keyframes burst { to { transform:translate(var(--x),var(--y)) rotate(calc(var(--r) + 540deg)); opacity:0; } }
+@media (max-aspect-ratio: 4/3) { .vdv{padding-left:2vw;padding-right:2vw}.cards{grid-template-columns:repeat(2,1fr)}.card{min-height:15vh}.stats{grid-template-columns:1fr 1fr}.next{display:none} }
+
+/* В общем overlay виджет остаётся компактной постоянной панелью. Сам iframe
+   разворачивается родительским stream.js только на время показа карточки. */
+body.is-embedded .vdv {
+  min-height: 0;
+  padding: 12px;
+  grid-template-rows: auto 1fr auto;
+  gap: 9px;
+  border: 2px solid rgba(231,246,255,.78);
+  border-radius: 18px;
+  background: linear-gradient(145deg,rgba(3,55,103,.97),rgba(2,25,58,.98));
+}
+body.is-embedded .vdv::after { border-radius: 18px; box-shadow: inset 0 0 36px rgba(0,10,27,.72), inset 0 0 0 2px rgba(255,255,255,.12); }
+body.is-embedded .aircraft,
+body.is-embedded .wing,
+body.is-embedded .badge,
+body.is-embedded .kicker { display: none; }
+body.is-embedded .hero { display: block; }
+body.is-embedded .hero h1 { margin: 0; font-size: clamp(22px, 7vw, 38px); letter-spacing: .05em; }
+body.is-embedded .hero p { margin-top: 4px; font-size: clamp(9px, 2.8vw, 14px); letter-spacing: .12em; }
+body.is-embedded .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 7px; align-self: stretch; width: 100%; height: 100%; min-height: 0; margin: 0 auto; }
+body.is-embedded .card { width: 100%; height: auto; min-height: 0; aspect-ratio: 1 / 1; align-self: center; filter: drop-shadow(0 5px 8px rgba(0,10,28,.42)); }
+body.is-embedded .card__face { border-width: 1px; clip-path: polygon(9% 0,91% 0,100% 10%,100% 90%,91% 100%,9% 100%,0 90%,0 10%); box-shadow: inset 0 0 0 2px rgba(13,90,145,.72), 0 4px 9px rgba(0,15,35,.4); }
+body.is-embedded .card__back { background: linear-gradient(145deg,#0d78bd,#042e65 70%,#021d46); }
+body.is-embedded .card__back::before { inset: 4px; opacity: .2; background: repeating-linear-gradient(45deg,transparent 0 11px,#8edaff 12px 13px),repeating-linear-gradient(-45deg,transparent 0 17px,#183d72 18px 22px); }
+body.is-embedded .card__back::after { content: ''; width: 58%; border: 1px solid rgba(255,220,112,.55); box-shadow: 0 0 0 2px rgba(255,255,255,.55), 0 0 18px rgba(69,192,255,.52); background: rgba(2,42,90,.62); }
+body.is-embedded .card__number { inset: 50% auto auto 50%; z-index: 3; transform: translate(-50%,-54%); font: 900 clamp(25px, 8.5vw, 52px)/1 'Russo One'; letter-spacing: .02em; color: #fff3bd; text-shadow: 0 3px 0 #8c5d00, 0 0 14px rgba(255,218,96,.8); }
+body.is-embedded .card__lock { display: block; bottom: 7%; z-index: 3; font-size: clamp(6px,1.6vw,9px); letter-spacing: .16em; color: #c7ebff; }
+body.is-embedded .card__front { padding: 5px; background: #06264d var(--card-image) center/cover no-repeat; }
+body.is-embedded .card__front::before { background: linear-gradient(180deg, transparent 35%, rgba(0,17,39,.92)); opacity: 1; }
+body.is-embedded .card__front small { display: block; align-self: flex-start; padding: 2px 4px; border-radius: 4px; background: rgba(1,22,50,.72); font-size: clamp(6px,1.45vw,8px); }
+body.is-embedded .card__front strong { align-self: stretch; margin: auto 0 0; padding: 3px; font: 800 clamp(7px, 1.8vw, 11px)/1.05 'Exo 2'; text-shadow: 0 2px 5px #000; }
+body.is-embedded .progress-panel { padding: 8px 11px 9px; border-width: 1px; }
+body.is-embedded .progress-heading { margin-bottom: 5px; font-size: clamp(8px, 2.1vw, 12px); }
+body.is-embedded .progress-heading strong { font-size: clamp(15px, 4vw, 21px); }
+body.is-embedded .progress-track { height: 13px; border-width: 1px; }
+body.is-embedded .progress-track i { top: -3px; height: calc(100% + 6px); width: 1px; }
+body.is-embedded .progress-track i span { display: block; bottom: auto; top: 100%; margin-top: 2px; font-size: clamp(6px,1.35vw,8px); }
+body.is-embedded .runner { display: block; font-size: clamp(13px,3vw,18px); }
+body.is-embedded .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 14px; }
+body.is-embedded .stat { min-width: 0; gap: 5px; padding: 5px 6px; border: 1px solid rgba(181,226,251,.22); border-radius: 8px; background: rgba(2,29,62,.62); }
+body.is-embedded .stat__icon { width: 24px; font-size: 13px; box-shadow: 0 0 0 1px #fff; }
+body.is-embedded .stat small { font-size: clamp(6px,1.35vw,8px); letter-spacing: .06em; }
+body.is-embedded .stat b { display: block; overflow: hidden; font-size: clamp(8px,1.8vw,11px); text-overflow: ellipsis; }
+body.is-embedded .next { display: none; }
+
+/* Открытая карточка остаётся на экране до явной команды «Закрыть». */
+.reveal.is-active { visibility: visible; opacity: 1; animation: none; }
+.reveal.is-active.is-animated { animation: revealBgIn .55s ease both; }
+.reveal__card {
+  width: min(92vw, 980px);
+  height: min(92vh, 980px);
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: grid;
+  border-radius: 26px;
+  clip-path: none;
+  background: #03132b;
+  animation: none;
+}
+.reveal.is-animated .reveal__card { animation: revealCardIn .7s cubic-bezier(.18,.8,.2,1) both; }
+.reveal__image { width: 100%; height: 100%; object-fit: contain; }
+.reveal__caption { position: absolute; left: 4%; right: 4%; bottom: 3%; display: flex; flex-direction: column; align-items: center; padding: 12px 18px; border-radius: 14px; background: linear-gradient(180deg,rgba(1,17,39,.2),rgba(1,17,39,.92)); text-shadow: 0 3px 9px #000; }
+.reveal__caption small { font-size: clamp(10px,.85vw,16px); }
+.reveal__caption span { margin: 5px 0; }
+.reveal__caption strong { font-size: clamp(20px,2.2vw,40px); }
+@keyframes revealBgIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes revealCardIn { from { transform: scale(.1) rotate(-10deg); opacity: 0; } to { transform: scale(1); opacity: 1; } }

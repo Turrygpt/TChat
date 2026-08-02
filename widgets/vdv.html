@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>День ВДВ — испытания</title>
+    <link rel="stylesheet" href="./vdv.css?v=5" />
+  </head>
+  <body>
+    <main class="vdv" id="vdvRoot">
+      <div class="sky-rays" aria-hidden="true"></div>
+      <div class="aircraft" aria-hidden="true">✈</div>
+      <header class="hero">
+        <div class="wing wing--left"></div>
+        <div class="badge"><span class="badge__chute">♠</span><span>02·08</span></div>
+        <div>
+          <div class="kicker">ПРАЗДНИЧНЫЙ МАРАФОН</div>
+          <h1 id="title">ДЕНЬ ВДВ</h1>
+          <p id="subtitle">Никто, кроме нас!</p>
+        </div>
+        <div class="wing wing--right"></div>
+      </header>
+
+      <section class="cards" id="cards" aria-label="Карточки испытаний"></section>
+
+      <section class="progress-panel">
+        <div class="progress-heading">
+          <span>БОЕВОЙ НОРМАТИВ</span>
+          <strong id="amount">0 ₽</strong>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+          <i style="left:33.333%"><span>1 000</span></i>
+          <i style="left:66.666%"><span>2 000</span></i>
+          <i style="left:100%"><span>3 000</span></i>
+          <div class="runner" id="runner">★</div>
+        </div>
+        <div class="stats">
+          <div class="stat stat--squats"><span class="stat__icon">◆</span><div><small>1 000 ₽ = +10</small><b><span id="squats">0</span> ПРИСЕДАНИЙ</b></div></div>
+          <div class="stat stat--pushups"><span class="stat__icon">↯</span><div><small>3 000 ₽ = +10</small><b><span id="pushups">0</span> ОТЖИМАНИЙ</b></div></div>
+          <div class="next" id="nextMilestone">До следующего норматива: 1 000 ₽</div>
+        </div>
+      </section>
+
+      <div class="reveal" id="reveal" aria-hidden="true">
+        <div class="reveal__flare"></div>
+        <article class="reveal__card">
+          <img class="reveal__image" id="revealImage" alt="" />
+          <div class="reveal__caption">
+          <small>ИСПЫТАНИЕ ПРИНЯТО</small>
+          <span id="revealNumber">КАРТОЧКА 01</span>
+          <strong id="revealText">Испытание</strong>
+          </div>
+        </article>
+      </div>
+      <div class="particles" id="particles" aria-hidden="true"></div>
+    </main>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./vdv.js?v=6"></script>
+  </body>
+</html>
