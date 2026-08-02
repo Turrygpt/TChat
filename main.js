@@ -996,7 +996,13 @@ function normalizeGiveawayWidget(widget = {}) {
 
 function normalizeStreamWidget(widget = {}) {
   const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv', 'custom']);
-  const type = knownTypes.has(widget.type) ? widget.type : 'goal';
+  const persistedId = String(widget.id || '');
+  const migratedType = persistedId === 'builtin-vdv'
+    ? 'vdv'
+    : persistedId.startsWith('lastdonation-')
+      ? 'lastdonation'
+      : widget.type;
+  const type = knownTypes.has(migratedType) ? migratedType : 'goal';
   const id = String(widget.id || `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const minWidgetWidth = ['countdown', 'texts'].includes(type) ? 5 : 14;
   const legacyFullscreenVdv = type === 'vdv' && Number(widget.width) >= 90 && Number(widget.height) >= 90;
