@@ -2,10 +2,13 @@
 
 // Локальный рестрим-сервер TChat.
 // OBS публикует один RTMP-поток на этот компьютер, ffmpeg принимает его
-// (режим -listen) и раздаёт на все включённые площадки: видео — как есть,
-// без перекодирования (-c copy), звук пережимается в тот же битрейт ради
-// совместимости площадок (см. buildDestinationArgs). Так убирается крюк
-// через VPS и лаг.
+// (режим -listen) и раздаёт на все включённые площадки. По умолчанию видео
+// уходит как есть, без перекодирования (-c copy) — так убирается крюк через
+// VPS и лаг. У каждой площадки можно вместо этого задать своё разрешение
+// и/или битрейт видео (см. buildTranscodeVideoArgs) — тогда именно эта
+// площадка получает отдельно перекодированную копию, остальные не трогает.
+// Звук пережимается всегда, в тот же битрейт, ради совместимости площадок
+// (см. buildDestinationArgs).
 //
 // Раньше ингест держал node-media-server, но его RTMP-раздача в v4 «морит»
 // ретранслятор (получалось ~40 кбит/с, 0 fps). ffmpeg -listen отдаёт весь поток.
@@ -25,6 +28,53 @@ const DEFAULT_INGEST_PORT = 1935;
 const DEFAULT_STREAM_KEY = 'tchat';
 const RESPAWN_DELAY = 1200;
 
+// Разрешение и битрейт видео по площадкам. По умолчанию площадка не задаёт ни
+// то, ни другое — тогда видео уходит как в OBS, 1:1, без перекодирования
+// (-c copy), как и раньше: без нагрузки на CPU и без потери качества. Как
+// только у площадки задано разрешение или битрейт, для НЕЁ ОДНОЙ включается
+// перекодирование libx264 — соседей и сам приём это не касается.
+//
+// Если задано только разрешение, битрейт берётся из этой лесенки — ориентир,
+// а не жёсткая норма (примерно как рекомендации YouTube/Twitch для 16:9).
+const BITRATE_LADDER = [
+  { height: 1080, kbps: 6000 },
+  { height: 720, kbps: 4000 },
+  { height: 480, kbps: 2000 },
+  { height: 360, kbps: 1200 },
+  { height: 240, kbps: 800 },
+];
+
+function bitrateForHeight(height) {
+  const h = Number(height) || 0;
+  const found = BITRATE_LADDER.find((row) => h >= row.height);
+  return (found || BITRATE_LADDER[BITRATE_LADDER.length - 1]).kbps;
+}
+
+// "1920x1080" -> { width, height }; всё остальное (пусто, мусор) — null, что
+// в normalizeDestinations() и buildDestinationArgs() значит «как в OBS».
+function parseResolution(value) {
+  const match = /^(\d{2,5})x(\d{2,5})$/.exec(String(value || '').trim());
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width && height ? { width, height } : null;
+}
+
+// Площадке нужно собственное кодирование, если задано хотя бы одно из полей —
+// иначе она идёт по общему пути -c copy вместе со всеми остальными.
+function destinationNeedsTranscode(dest) {
+  return Boolean(parseResolution(dest.resolution)) || Number(dest.videoBitrateKbps) > 0;
+}
+
+// Отпечаток настроек видео площадки — по нему syncDestinations() решает,
+// нужно ли перезапустить именно её процесс (адрес не менялся, но поменяли
+// разрешение/битрейт).
+function videoSignature(dest) {
+  return `${dest.resolution || ''}|${dest.videoBitrateKbps || 0}`;
+}
+
 // Ретрансляция через свой сервер. Площадка с флагом viaRelay получает поток не
 // напрямую, а через VPS: мы публикуем на MediaMTX, а он уже отдаёт площадке.
 // Нужно, когда канал до площадки не тянет 1080p — до своего сервера поток идёт
@@ -43,7 +93,7 @@ let config = createDefaultConfig();
 let proc = null; // текущий ffmpeg-listen
 let running = false; // слушатель активен
 let live = false; // OBS подключён, кадры идут
-// id -> { status: 'idle'|'live'|'error', error, liveSince, failedAt, sentBytes }
+// id -> { status: 'idle'|'live'|'error', error, liveSince, failedAt, sentBytes, bitrateKbps }
 let destStats = new Map();
 let bitrateKbps = 0; // текущий сквозной битрейт (из stats ffmpeg)
 let respawnTimer = null;
@@ -196,6 +246,9 @@ function normalizeDestinations(list) {
       // Отдавать эту площадку через свой сервер, а не напрямую.
       viaRelay: Boolean(d.viaRelay),
       relayPath: String(d.relayPath || '').trim(),
+      // Пусто — «как в OBS» (без перекодирования). См. buildDestinationArgs().
+      resolution: parseResolution(d.resolution) ? String(d.resolution).trim() : '',
+      videoBitrateKbps: Math.max(0, Math.min(50000, Math.round(Number(d.videoBitrateKbps) || 0))),
     }))
     .filter((d) => d.url);
 }
@@ -307,9 +360,16 @@ function getState() {
         viaRelay: d.viaRelay,
         relayPath: relayPathFor(d),
         status,
-        // Поток на площадки идёт один и тот же (-c copy), поэтому битрейт у всех
-        // живых одинаковый; отличаются статус, ошибка и момент обрыва.
-        bitrateKbps: status === 'live' ? bitrateKbps : 0,
+        // Пусто — площадка идёт как в OBS (без перекодирования). Заданное
+        // значение — своё разрешение/битрейт именно для этой площадки.
+        resolution: d.resolution,
+        videoBitrateKbps: d.videoBitrateKbps,
+        transcoded: destinationNeedsTranscode(d),
+        // Битрейт своего процесса площадки (из его stats), а не общий входящий:
+        // у площадки со своим перекодированием он отличается от остальных.
+        // Пока свежих stats ещё нет (первая секунда), подстраховываемся общим
+        // битрейтом эфира — для площадок без перекодирования это и есть их битрейт.
+        bitrateKbps: status === 'live' ? (stat?.bitrateKbps || bitrateKbps) : 0,
         // Теперь это честный счётчик своей площадки: считаем то, что реально
         // ушло в её процесс, а не общий размер потока, как было при tee.
         sentBytes: stat ? stat.sentBytes : 0,
@@ -365,13 +425,46 @@ function buildListenerArgs() {
   ];
 }
 
+// Аргументы кодирования видео для площадки с собственными настройками.
+// size — { width, height } из parseResolution() или null (оставить размер
+// источника и перекодировать только ради ограничения битрейта).
+function buildTranscodeVideoArgs(dest, size) {
+  const targetKbps = dest.videoBitrateKbps || bitrateForHeight(size ? size.height : videoHeight || 720);
+  // Интервал ключевого кадра ~2с — как и советуем выставлять в OBS (см. подсказку
+  // в бэкофисе). fps источника на старте площадки может быть ещё не определён
+  // (баннер входа приходит по факту эфира) — берём 30 как безопасный запас.
+  const keyframeInterval = Math.max(1, Math.round((fps || 30) * 2));
+  return [
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-tune', 'zerolatency',
+    // scale+pad, а не голый scale: у площадки может быть свой фиксированный
+    // формат (например, 1920x1080 под вертикальный или обрезанный источник) —
+    // так кадр всегда получается точно нужного размера, без искажения пропорций.
+    ...(size
+      ? ['-vf', `scale=${size.width}:${size.height}:force_original_aspect_ratio=decrease,pad=${size.width}:${size.height}:(ow-iw)/2:(oh-ih)/2`]
+      : []),
+    '-b:v', `${targetKbps}k`,
+    '-maxrate', `${targetKbps}k`,
+    '-bufsize', `${targetKbps * 2}k`,
+    '-g', String(keyframeInterval),
+    '-keyint_min', String(keyframeInterval),
+    '-pix_fmt', 'yuv420p',
+  ];
+}
+
 function buildDestinationArgs(dest) {
   const target = targetUrl(dest);
   const networkOutputArgs = /^rtmps?:\/\//i.test(target)
     ? ['-rw_timeout', '15000000']
     : [];
+  const size = parseResolution(dest.resolution);
+  const videoArgs = destinationNeedsTranscode(dest)
+    ? buildTranscodeVideoArgs(dest, size)
+    : ['-c:v', 'copy'];
   return [
     '-loglevel', 'level+error',
+    '-stats', // прогресс раз в ~0.5с в stderr — оттуда берём фактический битрейт площадки
     // Площадка может подняться в середине эфира (переподключение). Тогда ffmpeg
     // входит в mpegts не с начала и должен успеть выцепить extradata H.264
     // (SPS/PPS), прежде чем писать flv-заголовок — иначе flv-муксер отвечает
@@ -391,8 +484,11 @@ function buildDestinationArgs(dest) {
     // лишние дорожки; `?` у аудио — на случай потока без звука, чтобы не падать.
     '-map', '0:v:0',
     '-map', '0:a:0?',
-    // Видео уходит как есть — ни перекодирования, ни потери качества.
-    '-c:v', 'copy',
+    // По умолчанию видео уходит как есть — ни перекодирования, ни потери
+    // качества (videoArgs = ['-c:v', 'copy']). Если у площадки задано своё
+    // разрешение или битрейт, videoArgs вместо этого запускает libx264 —
+    // см. buildTranscodeVideoArgs(); остальных площадок это не касается.
+    ...videoArgs,
     // А вот звук приходится пережимать, и вот почему. В mpegts кадры AAC лежат
     // в ADTS, без отдельного описания потока. Когда ffmpeg с `-c copy` открывает
     // flv-выход, описания звука он ещё не знает и пишет ПУСТОЙ AAC sequence
@@ -439,7 +535,12 @@ const DEST_HEALTHY_MS = 15000;
 
 function ensureDestStat(id) {
   if (!destStats.has(id)) {
-    destStats.set(id, { status: 'idle', error: '', liveSince: 0, failedAt: 0, sentBytes: 0, failStreak: 0 });
+    destStats.set(id, {
+      status: 'idle', error: '', liveSince: 0, failedAt: 0, sentBytes: 0, failStreak: 0,
+      // Битрейт этой площадки конкретно, из её собственного вывода ffmpeg —
+      // важно, когда у неё своё перекодирование и битрейт отличается от общего.
+      bitrateKbps: 0,
+    });
   }
   return destStats.get(id);
 }
@@ -462,6 +563,7 @@ function spawnDestination(dest) {
     loggedErrorKinds: new Set(),
     startedAt: Date.now(),
     target: targetUrl(dest),
+    videoSig: videoSignature(dest),
   };
   destProcs.set(dest.id, entry);
   logEvent('destination-start', {
@@ -473,6 +575,7 @@ function spawnDestination(dest) {
 
   stat.status = live ? 'live' : 'idle';
   stat.error = '';
+  stat.bitrateKbps = 0; // старое значение неактуально — ждём свежих stats
   if (live && !stat.liveSince) {
     stat.liveSince = Date.now();
   }
@@ -483,9 +586,24 @@ function spawnDestination(dest) {
   });
 
   child.stderr.on('data', (chunk) => {
-    const line = chunk.toString().trim();
-    if (line) {
-      entry.lastError = redactLogText(line.split('\n').pop()).slice(0, 200);
+    for (const rawLine of chunk.toString().split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
+      }
+
+      // Строка прогресса от -stats: "size=...kB time=... bitrate=1234.5kbits/s
+      // speed=...x" (у перекодируемых площадок ещё и "frame="). Не ошибка —
+      // это фактический битрейт, который реально уходит на эту площадку.
+      if (/\btime=\d/.test(line) && /bitrate=/i.test(line) && /speed=/i.test(line)) {
+        const brMatch = line.match(/bitrate=\s*([\d.]+)\s*kbits\/s/i);
+        if (brMatch) {
+          stat.bitrateKbps = Math.round(Number(brMatch[1]));
+        }
+        continue;
+      }
+
+      entry.lastError = redactLogText(line).slice(0, 200);
       const message = redactLogText(line);
       const errorKind = /Nothing was written/i.test(message)
         ? 'nothing-written'
@@ -527,6 +645,7 @@ function spawnDestination(dest) {
       stat.status = 'idle';
       stat.liveSince = 0;
       stat.failStreak = 0;
+      stat.bitrateKbps = 0;
       emitStatus();
       return;
     }
@@ -542,6 +661,7 @@ function spawnDestination(dest) {
     stat.error = entry.lastError || 'обрыв связи с площадкой';
     stat.failedAt = Date.now();
     stat.liveSince = 0;
+    stat.bitrateKbps = 0;
     emitStatus();
 
     // Экспоненциальная пауза: 4с → 8с → 16с → … до потолка. Даём Twitch время
@@ -602,6 +722,7 @@ function killDestination(id) {
   if (stat) {
     stat.status = 'idle';
     stat.liveSince = 0;
+    stat.bitrateKbps = 0;
   }
 }
 
@@ -629,6 +750,10 @@ function syncDestinations() {
     if (entry && entry.target && entry.target !== targetUrl(dest)) {
       // Адрес площадки сменился на ходу — поднимаем её заново по новому адресу.
       // Соседей и сам приём это не трогает.
+      killDestination(dest.id);
+    } else if (entry && entry.videoSig !== videoSignature(dest)) {
+      // Поменяли только разрешение/битрейт этой площадки — адрес тот же, но
+      // ffmpeg-аргументы другие, без перезапуска её процесса не применятся.
       killDestination(dest.id);
     }
     if (!destProcs.has(dest.id)) {

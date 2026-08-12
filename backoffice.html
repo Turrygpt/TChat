@@ -2083,6 +2083,63 @@
         gap: var(--sp-2);
       }
 
+      /* Состояние подключения площадок: строка «название — кружок — что сейчас
+         происходит». Видно и что подключено, и как идёт переподключение. */
+      .platform-status {
+        display: grid;
+        gap: var(--sp-1);
+        margin-top: var(--sp-3);
+      }
+
+      .platform-status__row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md, 8px);
+        background: rgb(255 255 255 / 3%);
+        font-size: var(--fs-sm);
+      }
+
+      .platform-status__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .platform-status__name {
+        color: var(--text-2);
+      }
+
+      .platform-status__text {
+        justify-self: end;
+        color: var(--muted);
+        text-align: right;
+      }
+
+      .platform-status__row.is-ok .platform-status__dot { background: var(--green); }
+      .platform-status__row.is-ok .platform-status__text { color: var(--green); }
+      .platform-status__row.is-error .platform-status__dot { background: var(--danger); }
+      .platform-status__row.is-error .platform-status__text { color: var(--danger); }
+      .platform-status__row.is-pending .platform-status__dot {
+        background: var(--warn);
+        animation: platform-status-pulse 1s ease-in-out infinite;
+      }
+      .platform-status__row.is-pending .platform-status__text { color: var(--warn); }
+
+      /* Пульсация именно у «в процессе»: переподключение должно быть заметно. */
+      @keyframes platform-status-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.25; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .platform-status__row.is-pending .platform-status__dot { animation: none; }
+      }
+
       /* Чип: хобби, черты характера, метки. */
       .chip {
         display: inline-block;
@@ -2570,8 +2627,12 @@
             </label>
             <div class="button-row">
               <button id="connectButton" class="button" type="button">Подключить</button>
+              <button id="reconnectButton" class="button button--ghost" type="button">Переподключиться</button>
             </div>
+            <div id="platformStatusList" class="platform-status"></div>
             <p id="connectState" class="muted">Готово к подключению.</p>
+            <p class="muted">«Переподключиться» пересобирает связь с площадками на уже сохранённых
+              каналах — если чат где-то отвалился молча, это быстрее перезапуска TChat.</p>
           </article>
 
           <article class="panel">
@@ -3214,10 +3275,12 @@
             <details class="help">
               <summary>Как ведут себя площадки в эфире</summary>
               <p>
-                Видео уходит на площадки как есть, без перекодирования, поэтому битрейт у всех в эфире одинаковый —
-                различаются статус, объём отправленного и ошибки. Площадка, отвалившаяся посреди эфира,
-                сама не вернётся: её счётчик замирает на моменте обрыва, а для переподключения нужно
-                выключить и включить рестрим.
+                По умолчанию видео уходит на площадку как есть, без перекодирования — CPU это не грузит,
+                качество не теряется. У каждой площадки можно вместо этого задать своё разрешение и/или
+                битрейт видео (ниже, в списке площадок) — тогда именно для неё включается отдельное
+                перекодирование; на остальные площадки и на приём с OBS это не влияет. Площадка,
+                отвалившаяся посреди эфира, сама не вернётся: её счётчик замирает на моменте обрыва,
+                а для переподключения нужно выключить и включить рестрим.
               </p>
             </details>
             <div id="restreamDestList" class="list-stack"></div>
@@ -3660,6 +3723,23 @@
         }
       }
 
+      // Переподключение на уже сохранённых каналах: ничего не перезаписываем в
+      // настройках, просто просим main пересобрать связь с площадками.
+      async function reconnectChannels() {
+        const button = document.querySelector('#reconnectButton');
+        button.disabled = true;
+        connectState.textContent = 'Переподключаемся…';
+
+        try {
+          await window.tchat.reconnectChat();
+          connectState.textContent = 'Переподключились. Состояние площадок — в списке подключений.';
+        } catch (error) {
+          connectState.textContent = `Не удалось переподключиться: ${error?.message || error}`;
+        } finally {
+          button.disabled = false;
+        }
+      }
+
       function connectChannels() {
         const settings = {
           ...readSettings(),
@@ -4057,11 +4137,48 @@
         }
       });
 
+      const PLATFORM_LABELS = {
+        twitch: 'Twitch',
+        vk: 'VK Видео Live',
+        youtube: 'YouTube',
+        rutube: 'Rutube',
+      };
+
+      // main присылает статус словами («подключён», «ищем эфир», «ошибка: …»).
+      // Здесь решаем только, каким цветом это показать. Порядок проверок важен:
+      // «не удалось подключить» — это ошибка, а не подключение.
+      function platformStateKind(text) {
+        const value = String(text || '').toLowerCase();
+        if (!value || value.includes('не задан')) return 'idle';
+        if (value.includes('ошибк') || value.includes('не удалось') || value.includes('недоступ')) return 'error';
+        if (value.startsWith('отключён')) return 'error';
+        if (value.includes('подключён')) return 'ok';
+        return 'pending';
+      }
+
+      function renderPlatformStatuses(statuses = {}) {
+        const list = document.querySelector('#platformStatusList');
+        if (!list) return;
+
+        list.innerHTML = Object.entries(PLATFORM_LABELS)
+          .map(([platform, label]) => {
+            const text = statuses[platform] || 'нет данных';
+            return `
+              <div class="platform-status__row is-${platformStateKind(text)}">
+                <span class="platform-status__dot"></span>
+                <span class="platform-status__name">${escapeHtml(label)}</span>
+                <span class="platform-status__text">${escapeHtml(text)}</span>
+              </div>`;
+          })
+          .join('');
+      }
+
       function renderStatus(status) {
         document.querySelector('#totalViewers').textContent = status.viewers?.total || 0;
         document.querySelector('#twitchViewers').textContent = status.viewers?.twitch || 0;
         document.querySelector('#vkViewers').textContent = status.viewers?.vk || 0;
         document.querySelector('#messageCount').textContent = status.messages || 0;
+        renderPlatformStatuses(status.statuses);
       }
 
       function renderDonationAlerts(state) {
@@ -6622,6 +6739,7 @@
       document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
       document.querySelector('#openChatButton').addEventListener('click', () => window.tchat.openChatWindow());
       document.querySelector('#connectButton').addEventListener('click', connectChannels);
+      document.querySelector('#reconnectButton').addEventListener('click', reconnectChannels);
       document.querySelector('#saveChatUiSettingsButton').addEventListener('click', saveChatUiSettings);
       document.querySelector('#sendButton').addEventListener('click', sendTestMessage);
       document.querySelector('#sendDonationButton').addEventListener('click', sendTestDonation);
@@ -7874,11 +7992,33 @@
         }
 
         // Площадка целиком, как её ждёт saveRestreamConfig: любое изменение списка
-        // пересылает все поля, иначе флаг ретрансляции и путь потерялись бы.
+        // пересылает все поля, иначе флаг ретрансляции, путь, разрешение и битрейт потерялись бы.
         const destPayload = (d, patch = {}) => ({
           id: d.id, name: d.name, url: d.url, key: d.key, enabled: d.enabled,
-          viaRelay: d.viaRelay, relayPath: d.relayPath, ...patch,
+          viaRelay: d.viaRelay, relayPath: d.relayPath,
+          resolution: d.resolution, videoBitrateKbps: d.videoBitrateKbps, ...patch,
         });
+
+        // Пусто — «как в OBS» (без перекодирования именно этой площадки).
+        const RESOLUTION_PRESETS = [
+          { value: '', label: 'как в OBS (без перекодирования)' },
+          { value: '1920x1080', label: '1920×1080' },
+          { value: '1280x720', label: '1280×720' },
+          { value: '854x480', label: '854×480' },
+          { value: '640x360', label: '640×360' },
+        ];
+
+        function resolutionOptionsHtml(current) {
+          const value = current || '';
+          const known = RESOLUTION_PRESETS.some((p) => p.value === value);
+          const options = RESOLUTION_PRESETS.map((p) =>
+            '<option value="' + escapeHtml(p.value) + '"' + (p.value === value ? ' selected' : '') + '>' + escapeHtml(p.label) + '</option>',
+          );
+          if (!known) {
+            options.push('<option value="' + escapeHtml(value) + '" selected>' + escapeHtml(value) + '</option>');
+          }
+          return options.join('');
+        }
 
         // Что показать вместо прямого адреса, когда площадка идёт через сервер.
         function relayLabel(dest) {
@@ -7923,12 +8063,25 @@
                 (relayReady ? '' : ' — не задан адрес сервера') + '</label>'
               : '';
 
+            // Разрешение и битрейт видео — по умолчанию пусто (как в OBS, без
+            // перекодирования). Заданное значение включает перекодирование
+            // только для этой площадки; остальные площадки не трогает.
+            const videoSettings =
+              '<span class="list-row__video-settings" style="display:inline-flex; gap:10px; align-items:center; margin-top:4px;">' +
+                '<label class="field field--inline" style="display:inline-flex; align-items:center; gap:4px;"><span class="muted" style="font-size:12px;">Разрешение</span>' +
+                '<select data-dest-resolution="' + dest.id + '">' + resolutionOptionsHtml(dest.resolution) + '</select></label>' +
+                '<label class="field field--inline" style="display:inline-flex; align-items:center; gap:4px;"><span class="muted" style="font-size:12px;">Битрейт, kbps</span>' +
+                '<input type="number" min="0" max="50000" step="100" placeholder="как в OBS" data-dest-bitrate="' + dest.id + '" value="' + (dest.videoBitrateKbps || '') + '" style="width:90px;" /></label>' +
+                (dest.transcoded ? '<span class="muted" style="font-size:12px;" title="Видео этой площадки перекодируется отдельно — грузит CPU сильнее, чем прямая копия">⚙ своё перекодирование</span>' : '') +
+              '</span>';
+
             row.innerHTML =
               '<button type="button" class="toggle-switch ' + (dest.enabled ? 'is-on' : '') + '" data-dest-toggle="' + dest.id + '" aria-pressed="' + (dest.enabled ? 'true' : 'false') + '" title="Включить/выключить"></button>' +
               '<span class="list-row__main"><span class="list-row__title">' + escapeHtml(dest.name) + '</span>' +
               '<span class="list-row__sub">' + escapeHtml(dest.viaRelay ? relayLabel(dest) : dest.url) + '</span>' +
               (detail ? '<span class="list-row__sub">' + escapeHtml(detail) + '</span>' : '') +
               (relayBox ? '<br>' + relayBox : '') +
+              '<br>' + videoSettings +
               '</span>' +
               '<span class="badge' + (dest.status === 'error' ? ' badge--danger' : dest.status === 'live' ? ' badge--live' : '') + '">' + escapeHtml(badge) + '</span>' +
               '<button class="button button--ghost" type="button" data-dest-delete="' + dest.id + '">Удалить</button>';
@@ -7984,15 +8137,35 @@
           }
         });
 
-        // Галочка «через мой сервер»: адрес площадки меняется на ходу, рестрим
-        // перезапускает только её процесс — эфир и соседи не рвутся.
+        // Галочка «через мой сервер», разрешение и битрейт видео площадки: любая
+        // меняет только адрес/аргументы её процесса, рестрим перезапускает
+        // именно её — эфир и соседние площадки не рвутся.
         destList?.addEventListener('change', async (event) => {
           const relayBox = event.target.closest('[data-dest-relay]');
-          if (!relayBox) return;
-          const destinations = (state?.destinations || []).map((d) =>
-            destPayload(d, d.id === relayBox.dataset.destRelay ? { viaRelay: relayBox.checked } : {}),
-          );
-          render(await window.tchat.saveRestreamConfig({ destinations }));
+          if (relayBox) {
+            const destinations = (state?.destinations || []).map((d) =>
+              destPayload(d, d.id === relayBox.dataset.destRelay ? { viaRelay: relayBox.checked } : {}),
+            );
+            render(await window.tchat.saveRestreamConfig({ destinations }));
+            return;
+          }
+
+          const resSelect = event.target.closest('[data-dest-resolution]');
+          if (resSelect) {
+            const destinations = (state?.destinations || []).map((d) =>
+              destPayload(d, d.id === resSelect.dataset.destResolution ? { resolution: resSelect.value } : {}),
+            );
+            render(await window.tchat.saveRestreamConfig({ destinations }));
+            return;
+          }
+
+          const bitrateInput = event.target.closest('[data-dest-bitrate]');
+          if (bitrateInput) {
+            const destinations = (state?.destinations || []).map((d) =>
+              destPayload(d, d.id === bitrateInput.dataset.destBitrate ? { videoBitrateKbps: Number(bitrateInput.value) || 0 } : {}),
+            );
+            render(await window.tchat.saveRestreamConfig({ destinations }));
+          }
         });
 
         relaySaveButton?.addEventListener('click', async () => {

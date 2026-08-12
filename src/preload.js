@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('tchat', {
   openChatWindow: () => ipcRenderer.invoke('app:open-chat-window'),
   openBackoffice: () => ipcRenderer.invoke('app:open-backoffice'),
   updateChatChannels: (payload) => ipcRenderer.invoke('chat:update-channels', payload),
+  reconnectChat: () => ipcRenderer.invoke('chat:reconnect'),
   getYoutubeProxy: () => ipcRenderer.invoke('youtube-proxy:get'),
   saveYoutubeProxy: (payload) => ipcRenderer.invoke('youtube-proxy:save', payload),
   getChatStatus: () => ipcRenderer.invoke('chat:get-status'),

@@ -481,6 +481,56 @@ check('music builds rutube and vk embed fallbacks', () => {
   }
 });
 
+check('youtube chat follows the channel live broadcast', () => {
+  const body = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  // Чат обязан переспрашивать канал сам: эфир, начатый в Студии уже после
+  // запуска TChat, должен подцепиться без «сохранить» и без перезапуска.
+  if (!body.includes('function syncYouTubeChat') || !body.includes('await syncYouTubeChat(youtubeState.liveId)')) {
+    throw new Error('youtube chat is not reconciled against the channel poll');
+  }
+  // Онлайн и чат должны читать одну и ту же страницу, иначе счётчик снова
+  // будет видеть эфир, к которому чат так и не подключился.
+  if (!body.includes('function fetchYouTubeLiveState') || body.includes('fetchYouTubeViewerCount')) {
+    throw new Error('youtube viewers and chat must share one live-state request');
+  }
+  if (!body.includes('youtubeClient && youtubeLiveId === liveId')) {
+    throw new Error('youtube chat must track which broadcast it is attached to');
+  }
+  // Сетевой сбой — не повод считать, что эфир закончился.
+  if (!body.includes('fetchYouTubeLiveState(currentChannels.youtube).catch(() => null)')) {
+    throw new Error('a failed youtube poll must not detach a running chat');
+  }
+  if (!body.includes('if (youtubeClient !== client) return;')) {
+    throw new Error('stale youtube client events must not clobber the current one');
+  }
+});
+
+check('connections tab can reconnect chats without a restart', () => {
+  const backoffice = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  if (!backoffice.includes('id="reconnectButton"') || !backoffice.includes('function reconnectChannels')) {
+    throw new Error('reconnect button missing from the connections tab');
+  }
+  if (!backoffice.includes("querySelector('#reconnectButton').addEventListener('click', reconnectChannels)")) {
+    throw new Error('reconnect button is not wired up');
+  }
+  // Кнопка обязана переподключать на сохранённых каналах, а не перезаписывать
+  // настройки полями формы — иначе она превратится во второй «Подключить».
+  if (!backoffice.includes('window.tchat.reconnectChat()')) {
+    throw new Error('reconnect button must call the dedicated reconnect bridge');
+  }
+
+  const main = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  if (!main.includes("ipcMain.handle('chat:reconnect'")) {
+    throw new Error('chat:reconnect handler missing');
+  }
+  // Мост нужен в обеих сборках: Electron-preload и headless-шим.
+  const preload = fs.readFileSync(path.join(projectRoot, 'src', 'preload.js'), 'utf8');
+  const shim = fs.readFileSync(path.join(projectRoot, 'src', 'headless', 'tchat-web-shim.js'), 'utf8');
+  if (!preload.includes('reconnectChat:') || !shim.includes('reconnectChat:')) {
+    throw new Error('reconnectChat bridge missing from preload or web shim');
+  }
+});
+
 check('backoffice exposes giveaway in the active widget toolbar', async () => {
   const body = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
   if (

@@ -129,6 +129,41 @@ function installAxiosProxy(proxyUrl) {
     axios.defaults.httpsAgent = agent;
     axios.defaults.proxy = false; // отключаем встроенную логику proxy, работаем через agent
     console.log('[ytProxy] axios (youtube-chat) -> ' + proxyUrl);
+
+    // Тот же откат, что и у fetch. Без него выключенный локальный прокси
+    // (Xray не поднялся, порт закрыт) молча убивал ИМЕННО чат: метаданные
+    // уходили напрямую и онлайн был виден, а чат ютуба не подключался вовсе.
+    const proxyHost = new URL(proxyUrl).hostname.toLowerCase();
+    if (!['127.0.0.1', 'localhost', '::1'].includes(proxyHost)) {
+      return;
+    }
+
+    const http = require('node:http');
+    const https = require('node:https');
+    const directHttp = new http.Agent();
+    const directHttps = new https.Agent();
+    let warnedAboutFallback = false;
+
+    axios.interceptors.response.use(undefined, (error) => {
+      const config = error && error.config;
+      // Ответ есть — прокси жив, а ругается сам YouTube: это не наш случай.
+      if (!config || config.__tchatDirectRetry || (error && error.response)) {
+        return Promise.reject(error);
+      }
+
+      config.__tchatDirectRetry = true;
+      // Агенты задаём явно: undefined в конфиге запроса вернул бы прокси из
+      // axios.defaults, и повтор ушёл бы туда же, откуда только что упал.
+      config.httpAgent = directHttp;
+      config.httpsAgent = directHttps;
+
+      if (!warnedAboutFallback) {
+        warnedAboutFallback = true;
+        console.warn('[ytProxy] локальный прокси недоступен, чат YouTube подключается напрямую');
+      }
+
+      return axios.request(config);
+    });
   } catch (error) {
     console.error('[ytProxy] axios proxy не выставлен:', error.message);
   }

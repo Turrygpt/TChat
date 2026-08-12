@@ -79,6 +79,9 @@
     updateChatChannels: function (p) {
       return invoke('chat:update-channels', p);
     },
+    reconnectChat: function () {
+      return invoke('chat:reconnect');
+    },
     getChatStatus: function () {
       return invoke('chat:get-status');
     },

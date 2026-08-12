@@ -122,7 +122,10 @@ let httpServer = null;
 let socketServer = null;
 let twitchClient = null;
 let youtubeClient = null;
-let youtubeRetryTimer = null;
+// Эфир, к чьему чату мы сейчас подключены: по нему сверяем, не сменилась ли
+// трансляция на канале (новая трансляция = новый videoId = новый чат).
+let youtubeLiveId = '';
+let youtubeAttaching = false;
 let vkPollTimer = null;
 let viewerPollTimer = null;
 let vkChatBootstrapped = false;
@@ -5177,95 +5180,140 @@ async function connectTwitchChat(channel) {
   }
 }
 
-// Как часто переспрашивать YouTube, пока эфир ещё не начался (или уже
-// закончился): достаточно редко, чтобы не долбить площадку, но достаточно
-// часто, чтобы чат подключился сам вскоре после начала трансляции.
-const YOUTUBE_SEARCH_RETRY_MS = 30000;
-
-async function connectYouTubeChat(channelUrl) {
-  clearTimeout(youtubeRetryTimer);
-  youtubeRetryTimer = null;
-
-  if (youtubeClient) {
-    youtubeClient.stop();
-    youtubeClient = null;
+// Отцепляем чат от эфира. Сначала забываем клиента, потом останавливаем: его
+// обработчики сверяются с youtubeClient и после этого молчат, поэтому «конец»
+// старого эфира уже не собьёт статус только что подключённого нового.
+function detachYouTubeChat() {
+  if (!youtubeClient) {
+    return;
   }
 
-  if (!channelUrl) {
+  const client = youtubeClient;
+  youtubeClient = null;
+  youtubeLiveId = '';
+
+  try {
+    client.stop();
+  } catch (error) {
+    console.error(`Не удалось остановить YouTube-чат: ${error.message}`);
+  }
+}
+
+async function attachYouTubeChat(liveId) {
+  detachYouTubeChat();
+
+  chatStats.platformStatus.youtube = 'подключаем чат эфира';
+  broadcastChatStatus();
+
+  const client = new LiveChat({ liveId });
+
+  client.on('start', () => {
+    if (youtubeClient !== client) return;
+    chatStats.platformStatus.youtube = 'подключён';
+    logInfo(`YouTube-чат подключён к эфиру ${liveId}`);
+    broadcastChatStatus();
+  });
+
+  client.on('end', (reason) => {
+    if (youtubeClient !== client) return;
+    youtubeClient = null;
+    youtubeLiveId = '';
+    chatStats.platformStatus.youtube = `отключён: ${reason || 'эфир завершён'}`;
+    broadcastChatStatus();
+    // Заново искать эфир не нужно: следующий опрос канала (раз в 10 с) сам
+    // увидит новую трансляцию и подцепит её чат.
+  });
+
+  client.on('error', (error) => {
+    if (youtubeClient !== client) return;
+    chatStats.platformStatus.youtube = `ошибка: ${error.message || error}`;
+    broadcastChatStatus();
+  });
+
+  client.on('chat', async (chatItem) => {
+    if (youtubeClient !== client) return;
+
+    const parts = await buildYouTubeMessageParts(chatItem.message || []);
+    const text = parts.map((part) => part.text || part.alt || '').join('');
+    const badges = await buildYouTubeBadges(chatItem);
+
+    broadcastChatMessage({
+      platform: 'youtube',
+      platformIcon: getPlatformIconUrl('youtube'),
+      user: chatItem.author?.name || 'Зритель',
+      text,
+      parts,
+      badges,
+      createdAt: (chatItem.timestamp || new Date()).toISOString(),
+    });
+  });
+
+  // Запоминаем клиента до start(): событие «подключились» прилетает уже внутри.
+  youtubeClient = client;
+  youtubeLiveId = liveId;
+
+  const ok = await client.start();
+  if (!ok) {
+    if (youtubeClient === client) {
+      youtubeClient = null;
+      youtubeLiveId = '';
+    }
+    chatStats.platformStatus.youtube = 'не удалось подключить чат эфира';
+    broadcastChatStatus();
+  }
+}
+
+// Сверяет, к чему подключён чат, с тем, что реально идёт на канале из настроек.
+// Вызывается на каждом опросе канала, поэтому эфир, начатый уже после запуска
+// TChat, подхватывается сам — без «сохранить» в бэкофисе и без перезапуска.
+async function syncYouTubeChat(liveId) {
+  if (!currentChannels.youtube) {
+    detachYouTubeChat();
     chatStats.platformStatus.youtube = 'канал не задан';
     broadcastChatStatus();
     return;
   }
 
-  // Канал ещё не в эфире (или уже закончил) — переспрашиваем позже сами,
-  // без повторного нажатия «сохранить» в бэкофисе.
-  const scheduleSearchRetry = () => {
-    clearTimeout(youtubeRetryTimer);
-    youtubeRetryTimer = setTimeout(() => {
-      youtubeRetryTimer = null;
-      if (currentChannels.youtube === channelUrl) {
-        connectYouTubeChat(channelUrl);
-      }
-    }, YOUTUBE_SEARCH_RETRY_MS);
-  };
+  if (!liveId) {
+    // Эфира на канале нет. Если чат к чему-то подключён — эта трансляция
+    // закончилась, отцепляемся и ждём следующую.
+    if (youtubeClient) {
+      detachYouTubeChat();
+    }
+    chatStats.platformStatus.youtube = 'ждём начала эфира';
+    broadcastChatStatus();
+    return;
+  }
 
-  chatStats.platformStatus.youtube = 'ищем эфир';
-  broadcastChatStatus();
+  // Уже там, где надо.
+  if (youtubeClient && youtubeLiveId === liveId) {
+    return;
+  }
 
+  // Подключение занимает несколько запросов к YouTube — не начинаем второе
+  // поверх незаконченного первого, иначе опросы будут гасить друг друга.
+  if (youtubeAttaching) {
+    return;
+  }
+
+  youtubeAttaching = true;
   try {
-    const liveId = await resolveYouTubeLiveId(channelUrl);
-
-    if (!liveId) {
-      chatStats.platformStatus.youtube = 'ждём начала эфира';
-      broadcastChatStatus();
-      scheduleSearchRetry();
-      return;
-    }
-
-    youtubeClient = new LiveChat({ liveId });
-    youtubeClient.on('start', () => {
-      chatStats.platformStatus.youtube = 'подключён';
-      broadcastChatStatus();
-    });
-    youtubeClient.on('end', (reason) => {
-      chatStats.platformStatus.youtube = `отключён: ${reason || 'эфир завершён'}`;
-      broadcastChatStatus();
-      youtubeClient = null;
-      // Эфир закончился — снова ищем канал на случай следующей трансляции.
-      scheduleSearchRetry();
-    });
-    youtubeClient.on('error', (error) => {
-      chatStats.platformStatus.youtube = `ошибка: ${error.message || error}`;
-      broadcastChatStatus();
-    });
-    youtubeClient.on('chat', async (chatItem) => {
-      const parts = await buildYouTubeMessageParts(chatItem.message || []);
-      const text = parts.map((part) => part.text || part.alt || '').join('');
-      const badges = await buildYouTubeBadges(chatItem);
-
-      broadcastChatMessage({
-        platform: 'youtube',
-        platformIcon: getPlatformIconUrl('youtube'),
-        user: chatItem.author?.name || 'Зритель',
-        text,
-        parts,
-        badges,
-        createdAt: (chatItem.timestamp || new Date()).toISOString(),
-      });
-    });
-
-    const ok = await youtubeClient.start();
-    if (!ok) {
-      chatStats.platformStatus.youtube = 'не удалось подключить';
-      broadcastChatStatus();
-      youtubeClient = null;
-      scheduleSearchRetry();
-    }
+    await attachYouTubeChat(liveId);
   } catch (error) {
     chatStats.platformStatus.youtube = `ошибка: ${error.message}`;
     broadcastChatStatus();
-    scheduleSearchRetry();
+  } finally {
+    youtubeAttaching = false;
   }
+}
+
+// Настройки сохранили: канал мог смениться, поэтому старый эфир отпускаем.
+// К активной трансляции подключит ближайший опрос канала — он идёт следом в
+// connectChatSources и дальше сам следит за сменой эфиров.
+async function connectYouTubeChat(channelUrl) {
+  detachYouTubeChat();
+  chatStats.platformStatus.youtube = channelUrl ? 'ищем эфир' : 'канал не задан';
+  broadcastChatStatus();
 }
 
 // Роли, которые мы выводим текстовой буквой, и слова, которыми ту же роль
@@ -5325,42 +5373,85 @@ async function buildYouTubeBadges(chatItem) {
   return dedupeBadges([...dropRolesCoveredByImages(roleBadges, imageBadges), ...imageBadges]);
 }
 
-async function resolveYouTubeLiveId(channelUrl) {
+// Идёт ли сейчас эфир и какой именно. Доверяем ТОЛЬКО canonical-ссылке и блоку
+// videoDetails самого плеера: любой другой videoId на странице (сетка прошлых
+// видео, рекомендации) не имеет отношения к эфиру и подключил бы чат
+// случайного старого ролика вместо реальной трансляции.
+function parseYouTubeLiveId(html) {
+  // Запись закончившегося эфира выглядит как обычная страница видео: canonical
+  // и videoDetails на месте, но isLiveNow там уже false.
+  if (/["']isReplay["']\s*:\s*true/.test(html)) {
+    return '';
+  }
+
+  const liveNow = html.match(/"isLiveNow"\s*:\s*(true|false)/);
+  if (liveNow && liveNow[1] !== 'true') {
+    return '';
+  }
+
+  const canonical = html.match(
+    /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/,
+  );
+  if (canonical) {
+    return canonical[1];
+  }
+
+  const details = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+  return details ? details[1] : '';
+}
+
+function parseYouTubeViewers(html) {
+  // ВАЖНО: нужны ТЕКУЩИЕ зрители эфира (concurrent), а НЕ суммарные просмотры
+  // видео. Поле "viewCount" в videoDetails — это накопленные просмотры за всё
+  // время (даёт нереалистично большую цифру), поэтому его здесь НЕ используем.
+  const concurrent =
+    html.match(/"concurrentViewers":"(\d+)"/) ||
+    html.match(/"originalViewCount":"(\d+)"/);
+  if (concurrent) {
+    return Number(concurrent[1]) || 0;
+  }
+
+  // Фолбэк: текст вида "1 234 смотрят" / "1,234 watching now" (только с меткой «смотрят/watching»).
+  const watching =
+    html.match(/"simpleText":"([\d\s., ]+)\s*(?:watching|смотр)/i) ||
+    html.match(/"text":"([\d\s., ]+)"\}[^}]*"text":"\s*(?:watching|смотр)/i);
+  if (watching) {
+    const n = Number(String(watching[1]).replace(/[^\d]/g, '') || 0);
+    if (n > 0) {
+      return n;
+    }
+  }
+
+  // Нет активного эфира — онлайн 0 (не показываем суммарные просмотры).
+  return 0;
+}
+
+// Одна и та же страница /live отвечает сразу на два вопроса: какой эфир идёт на
+// канале и сколько на нём зрителей. Раньше это были два независимых запроса —
+// и счётчик показывал «онлайн», пока чат так и не подключался к трансляции.
+async function fetchYouTubeLiveState(channelUrl) {
   const value = String(channelUrl || '').trim();
 
   if (!value) {
-    return '';
+    return { liveId: '', viewers: 0 };
   }
 
-  if (/^[a-zA-Z0-9_-]{11}$/.test(value)) {
-    return value;
-  }
+  const target = /^[a-zA-Z0-9_-]{11}$/.test(value)
+    ? `https://www.youtube.com/watch?v=${value}`
+    : value.startsWith('http')
+    ? value
+    : `https://www.youtube.com/${value}`;
 
-  const url = value.startsWith('http') ? value : `https://www.youtube.com/${value}`;
+  // Ссылку на канал приводим к /live: только она редиректит на страницу
+  // текущего эфира — и только пока трансляция реально идёт.
+  const pageUrl = /\/watch|\/live(\/|\?|$)/.test(target)
+    ? target
+    : `${target.replace(/\/$/, '')}/live`;
 
-  // Явная ссылка на видео — доверяем ей напрямую, поиск эфира тут не нужен.
-  if (url.includes('/watch')) {
-    const response = await fetch(url);
-    const html = await response.text();
-    const watchMatch = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/) || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-    return watchMatch ? watchMatch[1] : '';
-  }
-
-  // Идентификатор канала: /live редиректит на страницу самого эфира, только
-  // когда трансляция реально идёт, — иначе отдаёт обычную страницу канала.
-  // Доверяем ТОЛЬКО canonical-ссылке на watch: любой другой videoId на этой
-  // странице (сетка прошлых видео, рекомендации) не имеет отношения к эфиру
-  // и подключил бы чат случайного старого видео вместо реальной трансляции.
-  const liveUrl = `${url.replace(/\/$/, '')}/live`;
-  const response = await fetch(liveUrl);
+  const response = await fetch(pageUrl);
   const html = await response.text();
-  const canonicalMatch = html.match(
-    /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/,
-  );
-  if (!canonicalMatch || /["']isReplay["']\s*:\s*true/.test(html)) {
-    return '';
-  }
-  return canonicalMatch[1];
+
+  return { liveId: parseYouTubeLiveId(html), viewers: parseYouTubeViewers(html) };
 }
 
 async function buildYouTubeMessageParts(messageParts) {
@@ -5477,21 +5568,30 @@ function startChatPolling() {
 }
 
 async function refreshViewerCounts() {
-  const [twitchViewers, vkViewers, youtubeViewers, rutubeViewers] = await Promise.all([
+  const [twitchViewers, vkViewers, youtubeState, rutubeViewers] = await Promise.all([
     fetchTwitchViewerCount(parseTwitchChannel(currentChannels.twitch)).catch(() => chatStats.viewers.twitch || 0),
     currentChannels.vk
       ? fetchVkViewerCount(currentChannels.vk).catch(() => vkConnectionState.lastViewers || 0)
       : Promise.resolve(0),
-    fetchYouTubeViewerCount(currentChannels.youtube).catch(() => 0),
+    // null = до YouTube не достучались. Это не то же самое, что «эфира нет»:
+    // по обрыву связи чат отцеплять нельзя, иначе каждая сетевая икота
+    // выбрасывала бы нас из идущей трансляции.
+    fetchYouTubeLiveState(currentChannels.youtube).catch(() => null),
     fetchRutubeViewerCount(currentChannels.rutube).catch(() => 0),
   ]);
 
   chatStats.viewers.twitch = twitchViewers;
   chatStats.viewers.vk = vkViewers;
-  chatStats.viewers.youtube = youtubeViewers;
+  chatStats.viewers.youtube = youtubeState ? youtubeState.viewers : 0;
   chatStats.viewers.rutube = rutubeViewers;
   vkConnectionState.lastViewers = vkViewers;
   broadcastChatStatus();
+
+  if (youtubeState) {
+    await syncYouTubeChat(youtubeState.liveId).catch((error) => {
+      console.error(`Не удалось подцепить чат YouTube: ${error.message}`);
+    });
+  }
 }
 
 async function fetchTwitchViewerCount(channel) {
@@ -5516,42 +5616,6 @@ async function fetchTwitchViewerCount(channel) {
   const payload = await response.json();
 
   return Number(payload?.data?.user?.stream?.viewersCount || 0);
-}
-
-async function fetchYouTubeViewerCount(channelUrl) {
-  if (!channelUrl) {
-    return 0;
-  }
-
-  const value = String(channelUrl).trim();
-  const url = value.startsWith('http') ? value : `https://www.youtube.com/${value}`;
-  const liveUrl = url.includes('/live') || url.includes('/watch') ? url : `${url.replace(/\/$/, '')}/live`;
-  const response = await fetch(liveUrl);
-  const html = await response.text();
-
-  // ВАЖНО: нужны ТЕКУЩИЕ зрители эфира (concurrent), а НЕ суммарные просмотры видео.
-  // Поле "viewCount" в videoDetails — это накопленные просмотры за всё время (даёт
-  // нереалистично большую цифру), поэтому его здесь НЕ используем.
-  const concurrent =
-    html.match(/"concurrentViewers":"(\d+)"/) ||
-    html.match(/"originalViewCount":"(\d+)"/);
-  if (concurrent) {
-    return Number(concurrent[1]) || 0;
-  }
-
-  // Фолбэк: текст вида "1 234 смотрят" / "1,234 watching now" (только с меткой «смотрят/watching»).
-  const watching =
-    html.match(/"simpleText":"([\d\s., ]+)\s*(?:watching|смотр)/i) ||
-    html.match(/"text":"([\d\s., ]+)"\}[^}]*"text":"\s*(?:watching|смотр)/i);
-  if (watching) {
-    const n = Number(String(watching[1]).replace(/[^\d]/g, '') || 0);
-    if (n > 0) {
-      return n;
-    }
-  }
-
-  // Нет активного эфира — онлайн 0 (не показываем суммарные просмотры).
-  return 0;
 }
 
 async function pollVkChat() {
@@ -6044,10 +6108,7 @@ app.on('before-quit', async () => {
   if (twitchClient) {
     await twitchClient.disconnect().catch(() => {});
   }
-  if (youtubeClient) {
-    youtubeClient.stop();
-  }
-  clearTimeout(youtubeRetryTimer);
+  detachYouTubeChat();
   restream.shutdown();
   incoming.shutdown();
   await stopLocalServer();
@@ -6785,6 +6846,26 @@ ipcMain.handle('chat:update-channels', async (_event, channels) => {
     rutube: channels?.rutube || currentChannels.rutube,
   });
   saveChatChannels();
+});
+
+// Кнопка «Переподключиться» в бэкофисе: пересобираем подключения к чатам на уже
+// сохранённых каналах. Нужна, когда площадка отвалилась молча, — чтобы чинить
+// это кнопкой, а не перезапуском всего приложения.
+ipcMain.handle('chat:reconnect', async () => {
+  logInfo('Переподключение чатов по кнопке из бэкофиса');
+
+  // Сразу помечаем площадки «в работе» и отдаём это в бэкофис: иначе на
+  // быстрых площадках переподключение промелькнуло бы незаметно, и кнопка
+  // выглядела бы так, будто ничего не сделала.
+  for (const platform of Object.keys(chatStats.platformStatus)) {
+    if (currentChannels[platform]) {
+      chatStats.platformStatus[platform] = 'переподключаем…';
+    }
+  }
+  broadcastChatStatus();
+
+  await connectChatSources(currentChannels);
+  return getChatStatusPayload();
 });
 
 ipcMain.handle('chat:get-status', () => getChatStatusPayload());
