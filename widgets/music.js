@@ -16,6 +16,7 @@ let finishingTrackId = '';
 let vkSoundEnabled = false;
 let rutubeSoundEnabled = false;
 let rutubeSoundRetryTimers = [];
+let vkSoundRetryTimers = [];
 let playbackStartedAt = 0;
 let lastKnownDuration = 0;
 const knownReadyIds = new Set();
@@ -32,6 +33,7 @@ let leaderHeartbeatTimer = null;
 let startingTrackId = '';
 let youtubeSoundConfirmed = false; // плеер сам подтвердил, что звук включён
 let youtubeSoundRetryTimers = [];
+let youtubeSoundWatchdogTimer = null;
 let lastReportedTitle = '';
 
 function readPlaybackLeader() {
@@ -182,8 +184,13 @@ function upsertQueueItem(item) {
 function renderMusicState(state) {
   const nextVolume = Number(state?.settings?.volume);
   if (Number.isFinite(nextVolume)) {
-    musicVolumePercent = Math.min(Math.max(Math.round(nextVolume), 0), 100);
-    applyMusicVolume();
+    const clamped = Math.min(Math.max(Math.round(nextVolume), 0), 100);
+    // Состояние очереди прилетает часто, а громкость в нём меняется редко —
+    // переспрашиваем плеер только когда значение действительно другое.
+    if (clamped !== musicVolumePercent) {
+      musicVolumePercent = clamped;
+      applyMusicVolume();
+    }
   }
 
   queue = Array.isArray(state?.queue) ? state.queue : [];
@@ -252,6 +259,7 @@ function startPlayback(item) {
   youtubeSoundConfirmed = false;
   lastReportedTitle = '';
   clearRutubeSoundRetries();
+  clearVkSoundRetries();
   clearYouTubeSoundRetries();
 
   currentId = item.id;
@@ -457,6 +465,14 @@ function initVkVideoPlayer(item) {
 // не сразу и молча роняет всё, что пришло до инициализации iframe API — из-за
 // одной попытки звук появлялся с задержкой в несколько секунд. Поэтому шлём
 // серию попыток и прекращаем, только когда плеер сам отчитается, что не в муте.
+//
+// Серия попыток раньше заканчивалась через пять секунд после load самого
+// iframe. В OBS источник стартует «на холодную» и внутренний скрипт ютуба
+// поднимается дольше — все команды падали в пустоту, ответов не приходило,
+// и трек доигрывал в муте до конца. Помогало только открыть страницу виджета
+// руками: там кеш уже прогрет и плеер успевал в это окно. Поэтому попытки
+// теперь не имеют срока — они идут, пока плеер не подтвердит звук или пока
+// трек не закончится.
 function enableYouTubeSound() {
   if (musicVolumePercent === 0) {
     sendYouTubeCommand('setVolume', [0]);
@@ -473,34 +489,51 @@ function enableYouTubeSound() {
 function clearYouTubeSoundRetries() {
   youtubeSoundRetryTimers.forEach((timerId) => window.clearTimeout(timerId));
   youtubeSoundRetryTimers = [];
+
+  if (youtubeSoundWatchdogTimer) {
+    window.clearInterval(youtubeSoundWatchdogTimer);
+    youtubeSoundWatchdogTimer = null;
+  }
+}
+
+function pokeYouTubeSound() {
+  if (!currentId || !isYouTubeItem({ embedUrl: musicPlayer.src })) {
+    return;
+  }
+
+  if (youtubeSoundConfirmed) {
+    clearYouTubeSoundRetries();
+    return;
+  }
+
+  // Рукопожатие повторяем вместе с командой: без него плеер не шлёт ответов,
+  // а значит и подтвердить снятие мута нечем.
+  registerYouTubePlayerEvents();
+  enableYouTubeSound();
+  // Просим плеер отчитаться о громкости — по ответу поймём, снялся ли мут.
+  sendYouTubeCommand('getVolume');
 }
 
 function scheduleYouTubeSoundRetries() {
   clearYouTubeSoundRetries();
 
-  for (const delay of [0, 150, 400, 900, 1800, 3000, 5000]) {
-    youtubeSoundRetryTimers.push(
-      window.setTimeout(() => {
-        if (!currentId || youtubeSoundConfirmed) {
-          return;
-        }
-
-        enableYouTubeSound();
-        // Просим плеер отчитаться о громкости — по ответу поймём, снялся ли мут.
-        sendYouTubeCommand('getVolume');
-      }, delay),
-    );
+  // Частая серия в первые секунды — чтобы звук появился сразу, когда плеер
+  // поднялся быстро.
+  for (const delay of [0, 150, 400, 900, 1800, 3000]) {
+    youtubeSoundRetryTimers.push(window.setTimeout(pokeYouTubeSound, delay));
   }
+
+  // Дальше — бессрочный дозор на случай медленного старта в OBS.
+  youtubeSoundWatchdogTimer = window.setInterval(pokeYouTubeSound, 1000);
 }
 
 function registerYouTubePlayerEvents() {
   const target = musicPlayer.contentWindow;
 
-  if (!target || musicPlayer.dataset.youtubeListening === '1') {
+  if (!target) {
     return;
   }
 
-  musicPlayer.dataset.youtubeListening = '1';
   target.postMessage(JSON.stringify({ event: 'listening' }), '*');
   target.postMessage(JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }), '*');
 }
@@ -646,6 +679,7 @@ function stopPlayback(continueQueue) {
   youtubeSoundConfirmed = false;
   lastReportedTitle = '';
   clearRutubeSoundRetries();
+  clearVkSoundRetries();
   clearYouTubeSoundRetries();
   playbackStartedAt = 0;
   lastKnownDuration = 0;
@@ -653,7 +687,6 @@ function stopPlayback(continueQueue) {
   musicPlayer.onload = null;
   delete musicPlayer.dataset.trackId;
   delete musicPlayer.dataset.embedUrl;
-  delete musicPlayer.dataset.youtubeListening;
   musicPlayer.hidden = true;
   musicPlayer.removeAttribute('src');
   musicPlayer.src = '';
@@ -704,7 +737,9 @@ function enableRutubeSound(force = false) {
 function scheduleRutubeSoundRetries() {
   clearRutubeSoundRetries();
 
-  for (const delay of [200, 600, 1500, 3000, 6000]) {
+  // Верхняя граница здесь тоже растянута: холодный старт источника в OBS
+  // спокойно съедает первые секунды, а до инициализации плеер команды теряет.
+  for (const delay of [200, 600, 1500, 3000, 6000, 10000, 15000, 20000, 30000]) {
     rutubeSoundRetryTimers.push(
       window.setTimeout(() => {
         if (!currentId || !isRutubeItem({ embedUrl: musicPlayer.src })) {
@@ -728,14 +763,35 @@ function sendVkCommand(method, extra = {}) {
   musicPlayer.contentWindow?.postMessage({ method, ...extra }, '*');
 }
 
-function enableVkSound() {
-  if (vkSoundEnabled) {
+function enableVkSound(force = false) {
+  if (vkSoundEnabled && !force) {
     return;
   }
 
   vkSoundEnabled = true;
   sendVkCommand(musicVolumePercent === 0 ? 'mute' : 'unmute');
   sendVkCommand('set_volume', { volume: musicVolumePercent / 100 });
+}
+
+function clearVkSoundRetries() {
+  vkSoundRetryTimers.forEach((timerId) => window.clearTimeout(timerId));
+  vkSoundRetryTimers = [];
+}
+
+function scheduleVkSoundRetries() {
+  clearVkSoundRetries();
+
+  for (const delay of [200, 600, 1500, 3000, 6000, 10000, 15000, 20000, 30000]) {
+    vkSoundRetryTimers.push(
+      window.setTimeout(() => {
+        if (!currentId || !isVkItem({ embedUrl: musicPlayer.src })) {
+          return;
+        }
+
+        enableVkSound(true);
+      }, delay),
+    );
+  }
 }
 
 function applyMusicVolume() {
@@ -745,7 +801,9 @@ function applyMusicVolume() {
 
   if (isYouTubeItem({ embedUrl: musicPlayer.src })) {
     youtubeSoundConfirmed = false;
-    enableYouTubeSound();
+    // Новую громкость шлём тем же надёжным путём: одиночная команда так же
+    // может потеряться, как и первое снятие мута.
+    scheduleYouTubeSoundRetries();
   } else if (isRutubeItem({ embedUrl: musicPlayer.src })) {
     rutubeSoundEnabled = false;
     enableRutubeSound(true);
@@ -759,6 +817,7 @@ function startVkPlayback() {
   sendVkCommand('init');
   sendVkCommand('play');
   enableVkSound();
+  scheduleVkSoundRetries();
 }
 
 function ensureAutoplayUrl(url = '', platform = '') {

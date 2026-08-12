@@ -95,17 +95,26 @@ function save() {
   }
 }
 
-// Первый внешний IPv4 — его вставляют в приложение на телефоне как адрес приёма.
+// Виртуальные адаптеры (Docker/WSL/VPN/VirtualBox и т.п.) часто попадают в
+// список раньше настоящего Wi-Fi/Ethernet и подсовывают IP, недоступный с
+// телефона или другого ПК в локальной сети (например, 172.19.0.1 от vEthernet
+// WSL вместо реального 192.168.x.x).
+const VIRTUAL_IFACE_PATTERN = /virtual|vethernet|docker|wsl|vmware|virtualbox|hyper-v|tailscale|zerotier|tap-|tun\d|loopback|npcap|vpn/i;
+
+// Первый внешний IPv4 физического адаптера — его вставляют в приложение на
+// телефоне как адрес приёма.
 function localLanIp() {
   const nets = os.networkInterfaces();
+  const candidates = [];
   for (const name of Object.keys(nets)) {
     for (const net of nets[name] || []) {
       if (net.family === 'IPv4' && !net.internal) {
-        return net.address;
+        candidates.push({ name, address: net.address });
       }
     }
   }
-  return '127.0.0.1';
+  const physical = candidates.find((c) => !VIRTUAL_IFACE_PATTERN.test(c.name));
+  return (physical || candidates[0])?.address || '127.0.0.1';
 }
 
 function ingestUrlFor(stream, host) {

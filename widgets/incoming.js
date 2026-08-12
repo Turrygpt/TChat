@@ -16,8 +16,7 @@
   if (params.get('placeholder') === '0') {
     document.body.classList.add('no-placeholder');
   }
-  const wantSound = params.get('muted') === '0';
-  video.muted = !wantSound;
+  video.muted = params.get('muted') === '1';
 
   if (!id) {
     if (placeholderText) placeholderText.textContent = 'Не указан ?id потока';

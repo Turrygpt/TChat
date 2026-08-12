@@ -239,6 +239,14 @@ check('music widget autostart helpers', async () => {
   if (!body.includes("sendYouTubeCommand('unMute')") || !body.includes('enableYouTubeSound')) {
     throw new Error('music widget must unmute YouTube after load');
   }
+  // Холодный старт источника в OBS может пережить любое конечное окно попыток:
+  // снимать мут нужно, пока плеер сам не подтвердит звук.
+  if (!body.includes('youtubeSoundWatchdogTimer = window.setInterval(pokeYouTubeSound')) {
+    throw new Error('music widget stops retrying the YouTube unmute too early');
+  }
+  if (/musicPlayer\.dataset\.youtubeListening/.test(body)) {
+    throw new Error('YouTube listening handshake must be repeatable, not one-shot');
+  }
   if (!body.includes('claimPlaybackLeadership') || !body.includes('canPlayAudio')) {
     throw new Error('music widget playback leader election missing');
   }

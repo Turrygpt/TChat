@@ -122,6 +122,7 @@ let httpServer = null;
 let socketServer = null;
 let twitchClient = null;
 let youtubeClient = null;
+let youtubeRetryTimer = null;
 let vkPollTimer = null;
 let viewerPollTimer = null;
 let vkChatBootstrapped = false;
@@ -5176,7 +5177,15 @@ async function connectTwitchChat(channel) {
   }
 }
 
+// Как часто переспрашивать YouTube, пока эфир ещё не начался (или уже
+// закончился): достаточно редко, чтобы не долбить площадку, но достаточно
+// часто, чтобы чат подключился сам вскоре после начала трансляции.
+const YOUTUBE_SEARCH_RETRY_MS = 30000;
+
 async function connectYouTubeChat(channelUrl) {
+  clearTimeout(youtubeRetryTimer);
+  youtubeRetryTimer = null;
+
   if (youtubeClient) {
     youtubeClient.stop();
     youtubeClient = null;
@@ -5188,15 +5197,28 @@ async function connectYouTubeChat(channelUrl) {
     return;
   }
 
-  chatStats.platformStatus.youtube = 'подключаем';
+  // Канал ещё не в эфире (или уже закончил) — переспрашиваем позже сами,
+  // без повторного нажатия «сохранить» в бэкофисе.
+  const scheduleSearchRetry = () => {
+    clearTimeout(youtubeRetryTimer);
+    youtubeRetryTimer = setTimeout(() => {
+      youtubeRetryTimer = null;
+      if (currentChannels.youtube === channelUrl) {
+        connectYouTubeChat(channelUrl);
+      }
+    }, YOUTUBE_SEARCH_RETRY_MS);
+  };
+
+  chatStats.platformStatus.youtube = 'ищем эфир';
   broadcastChatStatus();
 
   try {
     const liveId = await resolveYouTubeLiveId(channelUrl);
 
     if (!liveId) {
-      chatStats.platformStatus.youtube = 'эфир не найден';
+      chatStats.platformStatus.youtube = 'ждём начала эфира';
       broadcastChatStatus();
+      scheduleSearchRetry();
       return;
     }
 
@@ -5208,6 +5230,9 @@ async function connectYouTubeChat(channelUrl) {
     youtubeClient.on('end', (reason) => {
       chatStats.platformStatus.youtube = `отключён: ${reason || 'эфир завершён'}`;
       broadcastChatStatus();
+      youtubeClient = null;
+      // Эфир закончился — снова ищем канал на случай следующей трансляции.
+      scheduleSearchRetry();
     });
     youtubeClient.on('error', (error) => {
       chatStats.platformStatus.youtube = `ошибка: ${error.message || error}`;
@@ -5233,10 +5258,13 @@ async function connectYouTubeChat(channelUrl) {
     if (!ok) {
       chatStats.platformStatus.youtube = 'не удалось подключить';
       broadcastChatStatus();
+      youtubeClient = null;
+      scheduleSearchRetry();
     }
   } catch (error) {
     chatStats.platformStatus.youtube = `ошибка: ${error.message}`;
     broadcastChatStatus();
+    scheduleSearchRetry();
   }
 }
 
@@ -5309,11 +5337,30 @@ async function resolveYouTubeLiveId(channelUrl) {
   }
 
   const url = value.startsWith('http') ? value : `https://www.youtube.com/${value}`;
-  const liveUrl = url.includes('/live') || url.includes('/watch') ? url : `${url.replace(/\/$/, '')}/live`;
+
+  // Явная ссылка на видео — доверяем ей напрямую, поиск эфира тут не нужен.
+  if (url.includes('/watch')) {
+    const response = await fetch(url);
+    const html = await response.text();
+    const watchMatch = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/) || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+    return watchMatch ? watchMatch[1] : '';
+  }
+
+  // Идентификатор канала: /live редиректит на страницу самого эфира, только
+  // когда трансляция реально идёт, — иначе отдаёт обычную страницу канала.
+  // Доверяем ТОЛЬКО canonical-ссылке на watch: любой другой videoId на этой
+  // странице (сетка прошлых видео, рекомендации) не имеет отношения к эфиру
+  // и подключил бы чат случайного старого видео вместо реальной трансляции.
+  const liveUrl = `${url.replace(/\/$/, '')}/live`;
   const response = await fetch(liveUrl);
   const html = await response.text();
-  const watchMatch = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/) || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-  return watchMatch ? watchMatch[1] : '';
+  const canonicalMatch = html.match(
+    /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/,
+  );
+  if (!canonicalMatch || /["']isReplay["']\s*:\s*true/.test(html)) {
+    return '';
+  }
+  return canonicalMatch[1];
 }
 
 async function buildYouTubeMessageParts(messageParts) {
@@ -6000,6 +6047,7 @@ app.on('before-quit', async () => {
   if (youtubeClient) {
     youtubeClient.stop();
   }
+  clearTimeout(youtubeRetryTimer);
   restream.shutdown();
   incoming.shutdown();
   await stopLocalServer();
