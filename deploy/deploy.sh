@@ -45,7 +45,9 @@ rsync -az --delete -e "$RSYNC_RSH" \
   ./ "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/"
 
 echo ">> Настраиваю сервер (Node.js, зависимости, systemd, nginx)"
-$SSH "${SERVER_USER}@${SERVER_HOST}" "REMOTE_DIR='${REMOTE_DIR}' PORT='${PORT}' bash -s" < deploy/remote-setup.sh
+# Через sed — на случай, когда деплой запускают из WSL по рабочей копии Windows:
+# там скрипт может лежать с CRLF, и bash на сервере падает на `set: pipefail\r`.
+sed 's/\r//g' deploy/remote-setup.sh | $SSH "${SERVER_USER}@${SERVER_HOST}" "REMOTE_DIR='${REMOTE_DIR}' PORT='${PORT}' bash -s"
 
 echo ""
 echo "Готово. Проверьте:"

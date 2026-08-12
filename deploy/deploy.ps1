@@ -51,7 +51,11 @@ scp -o StrictHostKeyChecking=accept-new "$Tar" "${Target}:/tmp/tchat-deploy.tgz"
 if ($LASTEXITCODE -ne 0) { Write-Host "scp failed" -ForegroundColor Red; exit 1 }
 
 Write-Host ">> Installing on server (enter password again if asked)..."
-$RemoteCmd = "mkdir -p $RemoteDir && tar -xzf /tmp/tchat-deploy.tgz -C $RemoteDir && rm -f /tmp/tchat-deploy.tgz && REMOTE_DIR='$RemoteDir' PORT='$Port' bash $RemoteDir/deploy/remote-setup.sh"
+# Рабочая копия на Windows может лежать с CRLF (core.autocrlf=true), а в тарболл
+# скрипты уезжают как есть — bash на сервере на таком спотыкается:
+# `set: pipefail\r: invalid option name`. Срезаем возвраты каретки на месте,
+# чтобы деплой не зависел от настроек git на конкретной машине.
+$RemoteCmd = "mkdir -p $RemoteDir && tar -xzf /tmp/tchat-deploy.tgz -C $RemoteDir && rm -f /tmp/tchat-deploy.tgz && sed -i 's/\r//g' $RemoteDir/deploy/*.sh && REMOTE_DIR='$RemoteDir' PORT='$Port' bash $RemoteDir/deploy/remote-setup.sh"
 ssh -o StrictHostKeyChecking=accept-new "$Target" "$RemoteCmd"
 if ($LASTEXITCODE -ne 0) { Write-Host "remote setup failed" -ForegroundColor Red; exit 1 }
 

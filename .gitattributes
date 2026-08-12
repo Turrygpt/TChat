@@ -1,0 +1,13 @@
+# Скрипты выполняются на Linux-сервере, поэтому переводы строк у них всегда LF —
+# даже когда репозиторий выкачан на Windows с core.autocrlf=true. Иначе деплой
+# упаковывает рабочую копию с CRLF, и bash на сервере спотыкается о хвостовой
+# возврат каретки: `set: pipefail\r: invalid option name`.
+*.sh text eol=lf
+
+# Серверные конфиги, которые кладутся на Linux как есть.
+deploy/remote-setup.sh text eol=lf
+
+# Windows-запускалки остаются с CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
