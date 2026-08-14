@@ -3,6 +3,8 @@ const chatMessages = document.querySelector('#chatMessages');
 const query = new URLSearchParams(window.location.search);
 const isAndroidClient = query.get('client') === 'android';
 const maxMessages = isAndroidClient ? 20 : 8;
+const CHAT_HIDE_MS = 15000;
+const CHAT_REMOVE_MS = CHAT_HIDE_MS + 950;
 let chatSettings = {
   direction: 'top-down',
 };
@@ -139,11 +141,11 @@ function addMessage(message) {
   if (!isAndroidClient) {
     window.setTimeout(() => {
       item.classList.add('chat-message--old');
-    }, 14000);
+    }, CHAT_HIDE_MS);
 
     window.setTimeout(() => {
       item.remove();
-    }, 18000);
+    }, CHAT_REMOVE_MS);
   }
 }
 

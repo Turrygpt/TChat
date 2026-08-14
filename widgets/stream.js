@@ -27,6 +27,20 @@ let latestVdvState = null;
 let pollTickTimer = null;
 let countdownRenderTimer = null;
 
+function normalizedWidgetScale(widget = {}) {
+  return Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3);
+}
+
+function applyWidgetScale(node, widget = {}) {
+  if (!node) return;
+  node.style.scale = String(normalizedWidgetScale(widget));
+  node.style.transformOrigin = 'top left';
+}
+
+function widgetScaleCss(widget = {}) {
+  return `scale: ${normalizedWidgetScale(widget)}; transform-origin: top left;`;
+}
+
 function applyWidgetHeight(node, widget) {
   if (!node) return;
 
@@ -183,6 +197,10 @@ function applyVdvState(state = {}) {
   const frame = streamEmbeddedWidgets?.querySelector('.stream-embedded-widget--vdv');
   const revealing = Number(state.revealIndex) >= 0;
   frame?.classList.toggle('is-revealing', revealing);
+  if (frame) {
+    const widget = latestState.items.find((item) => item.type === 'vdv');
+    applyWidgetScale(frame, revealing ? { scale: 1 } : widget);
+  }
   streamEmbeddedWidgets?.classList.toggle('has-vdv-reveal', revealing && Boolean(frame));
 }
 
@@ -191,7 +209,7 @@ function applyVdvState(state = {}) {
 // самостоятельном chat.html. Здесь только показываем/прячем панель и ставим её
 // по координатам виджета builtin-chat.
 let chatWidgetEnabled = false;
-let chatHideMs = 0; // 0 — сообщения не исчезают
+let chatHideMs = 15000;
 
 function applyChatWidgetLayout(items) {
   if (!streamChat) return;
@@ -205,12 +223,13 @@ function applyChatWidgetLayout(items) {
     return;
   }
 
-  chatHideMs = Math.max(Number(widget.hideSeconds) || 0, 0) * 1000;
+  chatHideMs = Math.max(Number(widget.hideSeconds) || 15, 3) * 1000;
 
   streamChat.hidden = false;
   streamChat.style.left = `${Number(widget.x ?? 4)}%`;
   streamChat.style.top = `${Number(widget.y ?? 48)}%`;
   streamChat.style.width = `${Number(widget.width ?? 30)}%`;
+  applyWidgetScale(streamChat, widget);
   // opacity — прозрачность в процентах: 0 — панель непрозрачна, 100 — полностью прозрачна.
   const transparency = Math.min(Math.max(Number(widget.opacity) || 0, 0), 100);
   streamChat.style.opacity = String(1 - transparency / 100);
@@ -260,10 +279,8 @@ function addChatMessage(message = {}) {
 
   // Автоскрытие: если задано время, плавно гасим (класс --old даёт переход
   // прозрачности) и убираем из DOM.
-  if (chatHideMs > 0) {
-    setTimeout(() => item.classList.add('chat-message--old'), chatHideMs);
-    setTimeout(() => item.remove(), chatHideMs + 950); // ждём конца дым-анимации
-  }
+  setTimeout(() => item.classList.add('chat-message--old'), chatHideMs);
+  setTimeout(() => item.remove(), chatHideMs + 950); // ждём конца дым-анимации
 }
 
 function applyAlertWidgetLayout() {
@@ -273,6 +290,7 @@ function applyAlertWidgetLayout() {
   alertBox.style.setProperty('--alert-left', `${Number(widget.x ?? 34)}%`);
   alertBox.style.setProperty('--alert-top', `${Number(widget.y ?? 34)}%`);
   alertBox.style.setProperty('--alert-width', `${Number(widget.width ?? 42)}%`);
+  applyWidgetScale(alertBox, widget);
   const height = Number(widget.height);
   if (Number.isFinite(height) && height > 0) {
     alertBox.style.setProperty('--alert-height', `${height}%`);
@@ -288,7 +306,7 @@ function renderGoals(items) {
       const target = Math.max(Number(goal.target || 1), 1);
       const current = Math.max(Number(goal.current || 0), 0);
       const percent = Math.min((current / target) * 100, 100);
-      const style = `left: ${Number(goal.x || 18)}%; top: ${Number(goal.y || 6)}%; width: ${Number(goal.width || 64)}%; ${widgetHeightCss(goal)}`;
+      const style = `left: ${Number(goal.x || 18)}%; top: ${Number(goal.y || 6)}%; width: ${Number(goal.width || 64)}%; ${widgetHeightCss(goal)} ${widgetScaleCss(goal)}`;
       return `
         <article class="stream-goal" style="${style}">
           <div class="stream-goal__top">
@@ -381,6 +399,7 @@ function updateCountdownNode(node, widget) {
   node.style.width = 'max-content';
   node.style.maxWidth = `${Number(widget.width || 18)}%`;
   applyWidgetHeight(node, widget);
+  applyWidgetScale(node, widget);
 
   node.classList.toggle('stream-countdown--finished', isFinished);
   node.classList.toggle('stream-countdown--urgent', isUrgent);
@@ -516,6 +535,7 @@ function updateTextNode(node, widget) {
   node.style.left = `${Number(widget.x || 8)}%`;
   node.style.top = `${Number(widget.y || 18)}%`;
   applyTextNodeSizing(node);
+  applyWidgetScale(node, widget);
   node.hidden = !content;
 
   if (!content) {
@@ -601,6 +621,7 @@ function updateTaskNode(node, widget) {
   node.style.top = `${Number(widget.y || 8)}%`;
   node.style.width = `${Number(widget.width || 26)}%`;
   applyWidgetHeight(node, widget);
+  applyWidgetScale(node, widget);
   node.hidden = getTaskItems(widget).length === 0;
 
   const nextHtml = renderTaskBoardHtml(widget);
@@ -662,7 +683,8 @@ function renderEmbeddedWidgets(items) {
     const y = Number(widget.y ?? 10);
     const width = Number(widget.width ?? 28);
     const src = embeddedWidgetSrc(widget);
-    const style = `left: ${x}%; top: ${y}%; width: ${width}%; ${widgetHeightCss(widget)}`;
+    const revealingVdv = widget.type === 'vdv' && Number(latestVdvState?.revealIndex) >= 0;
+    const style = `left: ${x}%; top: ${y}%; width: ${width}%; ${widgetHeightCss(widget)} ${widgetScaleCss(revealingVdv ? { scale: 1 } : widget)}`;
     let node = streamEmbeddedWidgets.querySelector(`[data-embedded-widget-id="${widget.id}"]`);
 
     if (node) {
@@ -743,6 +765,7 @@ function renderPoll(poll) {
   streamPoll.style.top = `${Number(pollWidget.y ?? 56)}%`;
   streamPoll.style.width = `${Number(pollWidget.width ?? 34)}%`;
   applyWidgetHeight(streamPoll, pollWidget);
+  applyWidgetScale(streamPoll, pollWidget);
   streamPoll.style.right = 'auto';
   streamPoll.style.bottom = 'auto';
   drawPoll(poll);

@@ -776,6 +776,7 @@
         cursor: grab;
         user-select: none;
         pointer-events: auto;
+        transform-origin: top left;
       }
 
       .preview-widget > .stream-goal,
@@ -916,7 +917,7 @@
         box-shadow: 0 4px 14px rgb(0 0 0 / 45%);
         cursor: nwse-resize;
         /* Компенсируем масштаб сцены, чтобы ручка оставалась одного размера на экране. */
-        transform: scale(var(--preview-inv-scale, 1));
+        transform: scale(calc(var(--preview-inv-scale, 1) * var(--widget-inv-scale, 1)));
         transform-origin: center;
       }
 
@@ -3524,7 +3525,7 @@
         <header class="preview-modal__head">
           <div>
             <strong>Превью стрима</strong>
-            <span class="muted">Перетаскивайте и растягивайте виджеты мышкой — как они будут видны в OBS</span>
+            <span class="muted">Перетаскивайте виджеты и тяните угловую кнопку, чтобы масштабировать их целиком в OBS</span>
           </div>
           <button id="closePreviewButton" class="button button--ghost" type="button" data-preview-close>Закрыть</button>
         </header>
@@ -5343,13 +5344,14 @@
             const x = Number(widget.x ?? 10);
             const y = Number(widget.y ?? 10);
             const width = Number(widget.width ?? 30);
+            const widgetScale = Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3);
             const hasHeight = Number.isFinite(Number(widget.height)) && Number(widget.height) > 0;
             return `
               <div class="preview-widget is-sized ${widget.enabled === false ? 'is-hidden' : ''}${hasHeight ? ' has-explicit-height' : ''}"
                 data-preview-widget="${escapeHtml(widget.id)}"
-                style="left:${x}%; top:${y}%; ${getPreviewSizeStyle(widget, width)}">
+                style="left:${x}%; top:${y}%; ${getPreviewSizeStyle(widget, width)} scale:${widgetScale}; --widget-inv-scale:${1 / widgetScale};">
                 ${renderPreviewWidgetContent(widget)}
-                <button class="preview-resize-handle" type="button" aria-label="Изменить размер" data-resize-widget="${escapeHtml(widget.id)}"></button>
+                <button class="preview-resize-handle" type="button" aria-label="Изменить масштаб всего виджета" title="Масштаб всего виджета" data-resize-widget="${escapeHtml(widget.id)}"></button>
               </div>
             `;
           })
@@ -5888,8 +5890,8 @@
               <label class="field">Прозрачность, %
                 <input data-config-field="opacity" type="number" min="0" max="100" step="1" value="${escapeHtml(widget.opacity ?? 0)}" />
               </label>
-              <label class="field">Скрывать через, сек (0 — не скрывать)
-                <input data-config-field="hideSeconds" type="number" min="0" step="1" value="${escapeHtml(widget.hideSeconds ?? 0)}" />
+              <label class="field">Растворять через, сек
+                <input data-config-field="hideSeconds" type="number" min="3" step="1" value="${escapeHtml(widget.hideSeconds || 15)}" />
               </label>
             </div>
             <div class="button-row">
@@ -5930,7 +5932,7 @@
             return;
           }
 
-          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds'].includes(key) ? Number(input.value || 0) : input.value.trim();
+          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds', 'scale'].includes(key) ? Number(input.value || 0) : input.value.trim();
         });
         return patch;
       }
@@ -6014,20 +6016,19 @@
 
         const stageRect = previewStage.getBoundingClientRect();
         const nodeRect = node.getBoundingClientRect();
-        const minPercent = getWidgetMinWidthPercent(widget.type);
-        const minHeightPercent = getWidgetMinHeightPercent();
+        const startScale = Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3);
+        const originX = nodeRect.left;
+        const originY = nodeRect.top;
         previewResize = {
           id: widget.id,
           type: widget.type,
           stageRect,
           startX: event.clientX,
           startY: event.clientY,
-          startWidth: nodeRect.width,
-          startHeight: nodeRect.height,
-          minWidth: stageRect.width * (minPercent / 100),
-          maxWidth: stageRect.width * 5,
-          minHeight: stageRect.height * (minHeightPercent / 100),
-          maxHeight: stageRect.height * 5,
+          startScale,
+          originX,
+          originY,
+          startDistance: Math.max(Math.hypot(event.clientX - originX, event.clientY - originY), 1),
         };
         node.classList.add('is-resizing');
         beginPreviewPointerTracking();
@@ -6040,19 +6041,10 @@
         const node = previewStage.querySelector(`[data-preview-widget="${CSS.escape(previewResize.id)}"]`);
         if (!node) return;
 
-        const widget = widgetsState.items.find((item) => item.id === previewResize.id);
-        const minPercent = getWidgetMinWidthPercent(widget?.type || previewResize.type);
-        const minHeightPercent = getWidgetMinHeightPercent();
-        const widthPx = Math.min(Math.max(previewResize.startWidth + event.clientX - previewResize.startX, previewResize.minWidth), previewResize.maxWidth);
-        const heightPx = Math.min(Math.max(previewResize.startHeight + event.clientY - previewResize.startY, previewResize.minHeight), previewResize.maxHeight);
-        const widthPercent = (widthPx / previewResize.stageRect.width) * 100;
-        const heightPercent = (heightPx / previewResize.stageRect.height) * 100;
-        if (widget) {
-          applyPreviewSize(node, widget, widthPercent, heightPercent);
-        } else {
-          node.style.width = `${Math.max(widthPercent, minPercent)}%`;
-          node.style.height = `${Math.max(heightPercent, minHeightPercent)}%`;
-        }
+        const distance = Math.max(Math.hypot(event.clientX - previewResize.originX, event.clientY - previewResize.originY), 1);
+        const scale = Math.min(Math.max(previewResize.startScale * distance / previewResize.startDistance, 0.25), 3);
+        node.style.scale = String(scale);
+        node.style.setProperty('--widget-inv-scale', String(1 / scale));
       }
 
       function endPreviewResize(event) {
@@ -6060,16 +6052,8 @@
 
         const node = previewStage.querySelector(`[data-preview-widget="${CSS.escape(previewResize.id)}"]`);
         const widget = widgetsState.items.find((item) => item.id === previewResize.id);
-        const widthSource =
-          widget?.type === 'countdown' || widget?.type === 'texts' ? node?.style.maxWidth : node?.style.width;
-        const width = Number.parseFloat(widthSource || String(widget?.width || 30));
-        const height = Number.parseFloat(node?.style.height || '');
-        const patch = { width };
-        if (Number.isFinite(height) && height > 0) {
-          patch.height = roundWidgetCoord(height);
-        } else {
-          patch.height = null;
-        }
+        const scale = Math.min(Math.max(Number.parseFloat(node?.style.scale || '1'), 0.25), 3);
+        const patch = { scale: Math.round(scale * 100) / 100 };
         node?.classList.remove('is-resizing');
         if (widget) {
           updateWorkspaceWidget(previewResize.id, patch);

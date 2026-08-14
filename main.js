@@ -612,6 +612,7 @@ function createDefaultStreamWidgets() {
       x: 34,
       y: 34,
       width: 42,
+      scale: 1,
       createdAt: new Date().toISOString(),
     },
     {
@@ -622,8 +623,9 @@ function createDefaultStreamWidgets() {
       x: 4,
       y: 48,
       width: 30,
+      scale: 1,
       opacity: 0,
-      hideSeconds: 0,
+      hideSeconds: 15,
       createdAt: new Date().toISOString(),
     },
     {
@@ -1022,6 +1024,7 @@ function normalizeStreamWidget(widget = {}) {
     x: normalizeWidgetCoord(position.x, defaultWidgetPosition(type).x),
     y: normalizeWidgetCoord(position.y, defaultWidgetPosition(type).y),
     width: Math.max(Number(legacyVdvSize ? defaultWidgetPosition(type).width : widget.width ?? defaultWidgetPosition(type).width), minWidgetWidth),
+    scale: Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3),
     createdAt: widget.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -1030,7 +1033,7 @@ function normalizeStreamWidget(widget = {}) {
     base.height = height;
   }
 
-  const widgetSource = { ...widget };
+  const widgetSource = { ...widget, scale: base.scale };
   if (height != null) {
     widgetSource.height = height;
   } else {
@@ -1091,11 +1094,11 @@ function normalizeStreamWidget(widget = {}) {
 
   if (type === 'chat') {
     // opacity — прозрачность панели в процентах (0 — непрозрачная, 100 — полностью
-    // прозрачная). hideSeconds — через сколько секунд сообщение исчезает (0 — не исчезает).
+    // прозрачная). Сообщения всегда плавно исчезают; hideSeconds задаёт задержку перед анимацией.
     return {
       ...base,
       opacity: Math.min(Math.max(Number(widget.opacity) || 0, 0), 100),
-      hideSeconds: Math.max(Math.round(Number(widget.hideSeconds) || 0), 0),
+      hideSeconds: Math.max(Math.round(Number(widget.hideSeconds) || 15), 3),
     };
   }
 
