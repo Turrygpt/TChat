@@ -734,7 +734,8 @@ function loadStreamWidgets() {
 
 function mergeDefaultStreamWidgets(items = []) {
   const existingIds = new Set(items.map((item) => item.id));
-  const defaults = createDefaultStreamWidgets().filter((item) => !existingIds.has(item.id));
+  const requiredIds = new Set(['builtin-alerts', 'builtin-chat', 'builtin-music']);
+  const defaults = createDefaultStreamWidgets().filter((item) => requiredIds.has(item.id) && !existingIds.has(item.id));
   return [...defaults, ...items];
 }
 
@@ -1001,7 +1002,7 @@ function normalizeGiveawayWidget(widget = {}) {
 }
 
 function normalizeStreamWidget(widget = {}) {
-  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv', 'custom']);
+  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv', 'sticker', 'video-overlay', 'custom']);
   const persistedId = String(widget.id || '');
   const migratedType = persistedId === 'builtin-vdv'
     ? 'vdv'
@@ -1071,6 +1072,18 @@ function normalizeStreamWidget(widget = {}) {
     });
   }
 
+  if (type === 'sticker') {
+    return normalizeStickerWidget({
+      ...base,
+      ...widgetSource,
+      id: base.id,
+      type: 'sticker',
+      title: String(widget.title || 'Стикер').trim() || 'Стикер',
+      content: String(widget.content || widget.title || 'Стикер').trim() || 'Стикер',
+      createdAt: widget.createdAt || base.createdAt,
+    });
+  }
+
   if (type === 'tasks') {
     return normalizeTasksWidget({
       ...base,
@@ -1099,6 +1112,14 @@ function normalizeStreamWidget(widget = {}) {
       ...base,
       opacity: Math.min(Math.max(Number(widget.opacity) || 0, 0), 100),
       hideSeconds: Math.max(Math.round(Number(widget.hideSeconds) || 15), 3),
+    };
+  }
+
+  if (type === 'video-overlay') {
+    return {
+      ...base,
+      intervalMinutes: Math.min(Math.max(Number(widget.intervalMinutes || 5), 0.1), 1440),
+      durationSeconds: Math.min(Math.max(Number(widget.durationSeconds || 15), 1), 3600),
     };
   }
 
@@ -1437,6 +1458,43 @@ function ensureCountdownTicking() {
   }, 1000);
 }
 
+const STICKER_WIDGET_FONTS = [
+  { id: 'unbounded', label: 'Unbounded', family: '"Unbounded", "Exo 2", sans-serif' },
+  { id: 'russo', label: 'Russo One', family: '"Russo One", "Exo 2", sans-serif' },
+  { id: 'rubik-mono', label: 'Rubik Mono One', family: '"Rubik Mono One", "Exo 2", sans-serif' },
+  { id: 'montserrat', label: 'Montserrat Alternates', family: '"Montserrat Alternates", "Exo 2", sans-serif' },
+  { id: 'yanone', label: 'Yanone Kaffeesatz', family: '"Yanone Kaffeesatz", "Exo 2", sans-serif' },
+  { id: 'exo', label: 'Exo 2', family: '"Exo 2", "Segoe UI", sans-serif' },
+];
+
+const STICKER_WIDGET_STYLES = [
+  { id: 'sunset', label: 'Жаркий закат', background: 'linear-gradient(135deg, #ff2d75 0%, #ff6b1a 48%, #ffd84a 100%)', text: '#fff8ee', fontPreset: 'unbounded' },
+  { id: 'neon', label: 'Кибер-неон', background: 'linear-gradient(135deg, #5b21ff 0%, #006dff 48%, #00f5d4 100%)', text: '#ffffff', fontPreset: 'russo' },
+  { id: 'berry', label: 'Малина-поп', background: 'linear-gradient(135deg, #ff156f 0%, #ff4fd8 52%, #9b5cff 100%)', text: '#ffffff', fontPreset: 'montserrat' },
+  { id: 'lime', label: 'Кислотный', background: 'linear-gradient(135deg, #dfff00 0%, #55f26f 50%, #00d4aa 100%)', text: '#092319', fontPreset: 'rubik-mono' },
+  { id: 'violet', label: 'Глубокий космос', background: 'linear-gradient(135deg, #261447 0%, #7028e4 48%, #e94dff 100%)', text: '#ffffff', fontPreset: 'yanone' },
+  { id: 'gold', label: 'Золотой люкс', background: 'linear-gradient(135deg, #ff7a00 0%, #ffc400 48%, #fff0a6 100%)', text: '#301500', fontPreset: 'russo' },
+];
+
+function normalizeStickerWidget(widget = {}) {
+  const style = STICKER_WIDGET_STYLES.find((item) => item.id === widget.variant) || STICKER_WIDGET_STYLES[0];
+  const font = STICKER_WIDGET_FONTS.find((item) => item.id === widget.fontPreset)
+    || STICKER_WIDGET_FONTS.find((item) => item.id === style.fontPreset)
+    || STICKER_WIDGET_FONTS[0];
+  return {
+    ...widget,
+    type: 'sticker',
+    title: String(widget.title || 'Стикер').trim() || 'Стикер',
+    content: String(widget.content || widget.title || 'Стикер').trim() || 'Стикер',
+    variant: style.id,
+    fontPreset: font.id,
+    fontSize: Math.min(Math.max(Number(widget.fontSize || 56), 24), 180),
+    textColor: style.text,
+    background: style.background,
+    fontFamily: font.family,
+  };
+}
+
 function widgetTitleByType(type) {
   return {
     alerts: 'Оповещения',
@@ -1450,6 +1508,8 @@ function widgetTitleByType(type) {
     tasks: 'Задачи на стрим',
     lastdonation: 'Последний донат',
     vdv: 'День ВДВ',
+    sticker: 'Стикер',
+    'video-overlay': 'Видео по таймеру',
     custom: 'Кастомный виджет',
   }[type] || 'Виджет';
 }
@@ -1467,6 +1527,8 @@ function defaultWidgetPosition(type) {
     tasks: { x: 4, y: 8, width: 26 },
     lastdonation: { x: 66, y: 34, width: 26 },
     vdv: { x: 66, y: 34, width: 17.33 },
+    sticker: { x: 46, y: 24, width: 30 },
+    'video-overlay': { x: 38, y: 8, width: 24 },
     custom: { x: 12, y: 18, width: 32 },
   }[type] || { x: 10, y: 10, width: 32 };
 }
@@ -1489,6 +1551,7 @@ function getStreamWidgetsPayload() {
       tasks: `http://localhost:${SERVER_PORT}/widgets/tasks.html`,
       lastdonation: `http://localhost:${SERVER_PORT}/widgets/lastdonation.html`,
       vdv: `http://localhost:${SERVER_PORT}/widgets/vdv.html`,
+      videoOverlay: `http://localhost:${SERVER_PORT}/widgets/video-overlay.html`,
     },
   };
 }
@@ -1531,6 +1594,10 @@ function updateStreamWidget(id, payload = {}) {
 
 function deleteStreamWidget(id) {
   const widgetId = String(id || '');
+  const widget = streamWidgets.find((item) => item.id === widgetId);
+  if (widget && ['alerts', 'chat', 'music'].includes(widget.type)) {
+    return getStreamWidgetsPayload();
+  }
   clearTimeout(giveawayFinishTimers.get(widgetId));
   giveawayFinishTimers.delete(widgetId);
   clearTimeout(giveawayHideTimers.get(widgetId));
@@ -2875,6 +2942,7 @@ function createLocalServer() {
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
         vdv: '/widgets/vdv.html',
+        videoOverlay: '/widgets/video-overlay.html',
         remote: '/widgets/remote.html',
       },
     });

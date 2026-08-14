@@ -105,7 +105,7 @@ check('health endpoint', async () => {
 });
 
 check('widget pages are served', async () => {
-  const pages = ['/widgets/music.html', '/widgets/alerts.html', '/widgets/chat.html', '/widgets/goal.html', '/widgets/giveaway.html', '/widgets/tasks.html', '/widgets/stream.html'];
+  const pages = ['/widgets/music.html', '/widgets/alerts.html', '/widgets/chat.html', '/widgets/goal.html', '/widgets/giveaway.html', '/widgets/tasks.html', '/widgets/stream.html', '/widgets/video-overlay.html'];
   for (const page of pages) {
     const { response, body } = await request(page, { method: 'GET', headers: {} });
     if (!response.ok || typeof body !== 'string' || !body.includes('<html')) {
@@ -170,6 +170,57 @@ check('stream overlay renders task widget', async () => {
   }
   if (!styleResponse.response.ok || !styleResponse.body.includes('stream-task-panel')) {
     throw new Error('stream task styles missing');
+  }
+});
+
+check('timed video overlay has chroma key and configurable timing', async () => {
+  const script = await request('/widgets/video-overlay.js', { method: 'GET', headers: {} });
+  const video = await fetch(`${baseUrl}/widgets/video/generated_video.mp4`, { method: 'HEAD' });
+  if (!script.response.ok ||
+      !script.body.includes("readNumber('interval', 5") ||
+      !script.body.includes("readNumber('duration', 15") ||
+      !script.body.includes('generated_video%20(1).mp4') ||
+      !script.body.includes('greenScreenChroma')) {
+    throw new Error('timed video overlay configuration or chroma key is missing');
+  }
+  if (!video.ok || !String(video.headers.get('content-type')).startsWith('video/')) {
+    throw new Error('timed video overlay source is unavailable');
+  }
+  const backoffice = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  const stream = await request('/widgets/stream.js', { method: 'GET', headers: {} });
+  if (!backoffice.includes('quickCreateVideoOverlayButton') ||
+      !backoffice.includes('createVideoOverlayWidget') ||
+      !backoffice.includes('data-config-field="intervalMinutes"')) {
+    throw new Error('timed video overlay is missing from the widget workspace');
+  }
+  if (!stream.response.ok || !stream.body.includes("'video-overlay'") || !stream.body.includes('/widgets/video-overlay.html?embedded=1')) {
+    throw new Error('timed video overlay is missing from the combined stream overlay');
+  }
+});
+
+check('stream overlay renders configurable sticker widgets', async () => {
+  const [htmlResponse, scriptResponse, styleResponse] = await Promise.all([
+    request('/widgets/stream.html', { method: 'GET', headers: {} }),
+    request('/widgets/stream.js', { method: 'GET', headers: {} }),
+    request('/widgets/widget.css', { method: 'GET', headers: {} }),
+  ]);
+  const backoffice = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  const mainSource = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+
+  if (!htmlResponse.response.ok || !htmlResponse.body.includes('streamStickerWidgets')) {
+    throw new Error('stream sticker widget container missing');
+  }
+  if (!scriptResponse.response.ok || !scriptResponse.body.includes('renderStickerWidgets')) {
+    throw new Error('stream sticker widget renderer missing');
+  }
+  if (!styleResponse.response.ok || !styleResponse.body.includes('.stream-sticker-widget')) {
+    throw new Error('stream sticker widget styles missing');
+  }
+  if (!backoffice.includes('Обязательные') || !backoffice.includes('Добавленные') || !backoffice.includes('createStickerWidget')) {
+    throw new Error('widget groups or sticker controls missing in backoffice');
+  }
+  if (!mainSource.includes("requiredIds = new Set(['builtin-alerts', 'builtin-chat', 'builtin-music'])")) {
+    throw new Error('required widget protection missing');
   }
 });
 

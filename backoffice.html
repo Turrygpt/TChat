@@ -6,7 +6,7 @@
     <title>TChat - бэкоффис</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=Montserrat+Alternates:wght@700;800;900&family=Rubik+Mono+One&family=Russo+One&family=Unbounded:wght@700;800;900&family=Yanone+Kaffeesatz:wght@600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./widgets/widget.css" />
     <style>
       :root {
@@ -656,6 +656,32 @@
         padding-right: 4px;
       }
 
+      .control-card-group {
+        display: grid;
+        gap: 8px;
+      }
+
+      .control-card-group + .control-card-group {
+        margin-top: 8px;
+        padding-top: 14px;
+        border-top: 1px solid var(--border);
+      }
+
+      .control-card-group__title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--text);
+        font-size: var(--fs-md);
+        font-weight: 900;
+      }
+
+      .control-card-group__title small {
+        color: var(--muted);
+        font-weight: 500;
+      }
+
       .control-card {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -689,6 +715,12 @@
       .control-card__meta span {
         color: var(--muted);
         font-size: var(--fs-md);
+      }
+
+      .control-card__actions {
+        display: flex;
+        align-items: center;
+        gap: 7px;
       }
 
       .toggle-switch {
@@ -1158,8 +1190,75 @@
       .workspace-form {
         display: grid;
         gap: 12px;
+        align-content: start;
         overflow: auto;
         padding-right: 4px;
+      }
+
+      .preview-video-overlay-frame {
+        min-height: 0;
+        aspect-ratio: 464 / 688;
+      }
+
+      .sticker-preset-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .sticker-preset-card {
+        position: relative;
+        isolation: isolate;
+        min-height: 104px;
+        align-content: end;
+        overflow: hidden;
+        border: 3px solid rgb(255 255 255 / 78%);
+        border-radius: 24px 14px 22px 16px;
+        padding: 16px 18px;
+        box-shadow: inset 0 -7px 0 rgb(0 0 0 / 12%), 0 12px 28px rgb(0 0 0 / 22%);
+        transform: rotate(-0.7deg) scale(0.98);
+        transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+      }
+
+      .sticker-preset-card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background:
+          radial-gradient(circle at 82% 20%, rgb(255 255 255 / 42%) 0 3px, transparent 4px),
+          radial-gradient(circle at 88% 28%, rgb(255 255 255 / 25%) 0 7px, transparent 8px),
+          linear-gradient(120deg, transparent 12%, rgb(255 255 255 / 25%) 34%, transparent 55%);
+      }
+
+      .workspace-skin-option:hover .sticker-preset-card {
+        transform: rotate(0) translateY(-3px) scale(1);
+        filter: saturate(1.12);
+      }
+
+      .workspace-skin-option input:checked + .sticker-preset-card {
+        border-color: #fff;
+        box-shadow: 0 0 0 3px var(--cyan), 0 16px 34px rgb(0 0 0 / 35%);
+        transform: rotate(0) scale(1);
+      }
+
+      .sticker-preset-card .workspace-skin-name {
+        color: inherit;
+        font: 900 11px/1 "Segoe UI", sans-serif;
+        letter-spacing: 0.16em;
+        opacity: 0.82;
+        text-transform: uppercase;
+      }
+
+      .sticker-preset-sample {
+        color: inherit;
+        font-family: inherit;
+        font-size: clamp(22px, 2.1vw, 36px);
+        font-weight: 900;
+        line-height: 0.92;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        text-shadow: 0 3px 0 rgb(0 0 0 / 22%), 0 8px 18px rgb(0 0 0 / 24%);
+        -webkit-text-stroke: 1px rgb(0 0 0 / 12%);
       }
 
       .compact-grid {
@@ -2790,6 +2889,8 @@
                 <button id="quickCreateTasksButton" class="mini-button" type="button">+ Задачи</button>
                 <button id="quickCreateLastDonationButton" class="mini-button" type="button">+ Последний донат</button>
                 <button id="quickCreateVdvButton" class="mini-button" type="button">+ День ВДВ</button>
+                <button id="quickCreateStickerButton" class="mini-button" type="button">+ Стикер</button>
+                <button id="quickCreateVideoOverlayButton" class="mini-button" type="button">+ Видео</button>
               </div>
             </div>
             <div id="workspaceWidgetCards" class="control-card-list"></div>
@@ -2859,6 +2960,14 @@
                     <strong>День ВДВ</strong>
                     <span>8 испытаний и кумулятивный норматив.</span>
                   </button>
+                  <button class="widget-type-card" type="button" data-widget-type="sticker">
+                    <strong>Стикер</strong>
+                    <span>Большая наклейка с текстом на красивом фоне.</span>
+                  </button>
+                  <button class="widget-type-card" type="button" data-widget-type="video-overlay">
+                    <strong>Видео по таймеру</strong>
+                    <span>Ролики по очереди с автоматическим удалением зелёного фона.</span>
+                  </button>
                 </div>
                 <div id="goalWidgetForm">
                   <label class="field">
@@ -2910,6 +3019,14 @@
                 <div id="vdvWidgetHint" hidden>
                   <p class="muted">Полноэкранный праздничный виджет появится в общем overlay. Карточки и испытания настраиваются в панели «День ВДВ» ниже.</p>
                   <button id="createVdvWidgetButton" class="button" type="button">Добавить День ВДВ</button>
+                </div>
+                <div id="stickerWidgetHint" hidden>
+                  <p class="muted">Наклейка с крупным текстом появится в общих виджетах. Выберите фон и шрифт и настройте текст прямо ниже.</p>
+                  <button id="createStickerWidgetButton" class="button" type="button">Добавить стикер</button>
+                </div>
+                <div id="videoOverlayWidgetHint" hidden>
+                  <p class="muted">Видео из папки widgets/video будут показываться по очереди в общем overlay.</p>
+                  <button id="createVideoOverlayWidgetButton" class="button" type="button">Добавить видео</button>
                 </div>
                 <p id="widgetsStudioState" class="muted">Готово к настройке.</p>
               </div>
@@ -3959,15 +4076,6 @@
           <label class="field">Название
             <input data-config-field="title" type="text" value="${escapeHtml(widget.title || 'Последний донат')}" />
           </label>
-          <div class="compact-grid">
-            <label class="field">X, %
-              <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 66)}" />
-            </label>
-            <label class="field">Y, %
-              <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 34)}" />
-            </label>
-          </div>
-          ${renderWorkspaceSizeFields(widget, { defaultWidth: 26 })}
           <div class="button-row">
             <button class="button" type="button" data-save-config>Сохранить</button>
             <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
@@ -4704,8 +4812,14 @@
           tasks: 'Задачи',
           lastdonation: 'Последний донат',
           vdv: 'День ВДВ',
+          sticker: 'Стикер',
+          'video-overlay': 'Видео по таймеру',
           custom: 'Кастомный виджет',
         }[type] || 'Виджет';
+      }
+
+      function isRequiredWidgetType(type) {
+        return ['alerts', 'chat', 'music'].includes(type);
       }
 
       function getCountdownRemaining(widget = {}) {
@@ -4847,22 +4961,7 @@
                 .join('')}
             </div>
           </div>
-          <div class="compact-grid">
-            <label class="field">X, %
-              <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x || 4)}" />
-            </label>
-            <label class="field">Y, %
-              <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y || 8)}" />
-            </label>
-          </div>
-          <label class="field">Ширина, %
-            <input data-config-field="width" type="number" min="14" step="0.1" value="${escapeHtml(widget.width || 26)}" />
-          </label>
-          <label class="field">Высота, %
-            <input data-config-field="height" type="number" min="5" step="0.1" value="${escapeHtml(widget.height ?? '')}" placeholder="авто" />
-          </label>
           <div class="button-row">
-            <button class="button" type="button" data-save-config>Сохранить позицию</button>
             <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать на стриме' : 'Скрыть на стриме'}</button>
           </div>
         `;
@@ -5151,6 +5250,10 @@
         if (widget.type === 'alerts') return widget.enabled ? 'Алерты вылетают в общем overlay' : 'Алерты скрыты в overlay';
         if (widget.type === 'chat') return widget.enabled ? 'Чат показан в превью' : 'Чат скрыт';
         if (widget.type === 'music') return widget.enabled ? 'Музыка в overlay' : 'Музыка скрыта';
+        if (widget.type === 'video-overlay') {
+          if (widget.enabled === false) return 'Видео скрыто в overlay';
+          return `Каждые ${Number(widget.intervalMinutes || 5)} мин · показ ${Number(widget.durationSeconds || 15)} сек`;
+        }
         if (widget.type === 'poll') {
           if (widget.enabled === false) return 'Голосование скрыто в overlay';
           if (!widgetsState.poll) return 'Голосование не запущено';
@@ -5220,17 +5323,33 @@
       function renderWorkspaceCards() {
         if (!workspaceWidgetCards) return;
 
-        workspaceWidgetCards.innerHTML = widgetsState.items
+        const renderCards = (items) => items
           .map((widget) => `
             <article class="control-card ${widget.id === selectedWorkspaceWidgetId ? 'is-selected' : ''}" data-workspace-widget="${escapeHtml(widget.id)}">
               <div class="control-card__meta">
                 <strong>${escapeHtml(widget.title || widgetTypeLabel(widget.type))}</strong>
                 <span>${escapeHtml(widgetTypeLabel(widget.type))} · ${escapeHtml(widgetStatusText(widget))}</span>
               </div>
-              <button class="toggle-switch ${widget.enabled !== false ? 'is-on' : ''}" type="button" aria-label="Показать или скрыть" data-toggle-widget="${escapeHtml(widget.id)}"></button>
+              <div class="control-card__actions">
+                ${isRequiredWidgetType(widget.type) ? '' : `<button class="mini-button" type="button" data-remove-workspace-widget="${escapeHtml(widget.id)}">Удалить</button>`}
+                <button class="toggle-switch ${widget.enabled !== false ? 'is-on' : ''}" type="button" aria-label="Показать или скрыть" data-toggle-widget="${escapeHtml(widget.id)}"></button>
+              </div>
             </article>
           `)
           .join('');
+
+        const required = widgetsState.items.filter((widget) => isRequiredWidgetType(widget.type));
+        const optional = widgetsState.items.filter((widget) => !isRequiredWidgetType(widget.type));
+        workspaceWidgetCards.innerHTML = `
+          <section class="control-card-group">
+            <div class="control-card-group__title"><span>Обязательные</span><small>можно скрыть</small></div>
+            ${renderCards(required)}
+          </section>
+          <section class="control-card-group">
+            <div class="control-card-group__title"><span>Добавленные</span><small>можно удалить</small></div>
+            ${renderCards(optional) || '<p class="muted">Добавьте нужный виджет кнопками выше.</p>'}
+          </section>
+        `;
       }
 
       function getWidgetMinWidthPercent(type = '') {
@@ -5239,22 +5358,6 @@
 
       function getWidgetMinHeightPercent() {
         return 5;
-      }
-
-      function renderWorkspaceSizeFields(widget, options = {}) {
-        const minWidth = options.minWidth ?? getWidgetMinWidthPercent(widget.type);
-        const width = widget.width ?? options.defaultWidth ?? 30;
-
-        return `
-          <div class="compact-grid">
-            <label class="field">Ширина, %
-              <input data-config-field="width" type="number" min="${minWidth}" step="0.1" value="${escapeHtml(width)}" />
-            </label>
-            <label class="field">Высота, %
-              <input data-config-field="height" type="number" min="${getWidgetMinHeightPercent()}" step="0.1" value="${escapeHtml(widget.height ?? '')}" placeholder="авто" />
-            </label>
-          </div>
-        `;
       }
 
       function getPreviewSizeStyle(widget, width) {
@@ -5426,6 +5529,18 @@
           `;
         }
 
+        if (widget.type === 'video-overlay') {
+          const source = `${widgetsState.urls?.videoOverlay || 'http://localhost:3000/widgets/video-overlay.html'}?preview=1&start=immediate&interval=${encodeURIComponent(widget.intervalMinutes || 5)}&duration=${encodeURIComponent(widget.durationSeconds || 15)}`;
+          return `
+            <iframe
+              class="preview-giveaway-frame preview-video-overlay-frame"
+              src="${escapeHtml(source)}"
+              title="${escapeHtml(widget.title || 'Видео по таймеру')}"
+              allow="autoplay"
+              allowtransparency="true"></iframe>
+          `;
+        }
+
         if (widget.type === 'poll') {
           return renderPreviewPollHtml(widgetsState.poll);
         }
@@ -5456,6 +5571,16 @@
                 <div class="stream-text__glow" aria-hidden="true"></div>
                 <p class="stream-text__content" style="--stream-text-size:${fontSize}px;font-size:${fontSize}px">${formatStreamTextPreviewHtml(content)}</p>
               </div>
+            </article>
+          `;
+        }
+
+        if (widget.type === 'sticker') {
+          return `
+            <article class="stream-sticker-widget" data-variant="${escapeHtml(widget.variant || 'sunset')}"
+              style="position:relative;left:auto;top:auto;width:100%;--sticker-bg:${escapeHtml(widget.background || '#ffb347')};--sticker-color:${escapeHtml(widget.textColor || '#1d0c1d')};--sticker-font:${escapeHtml(widget.fontFamily || 'Exo 2, sans-serif')};--sticker-font-size:${Math.min(Math.max(Number(widget.fontSize || 56), 24), 180)}px">
+              <span class="stream-sticker-widget__tape" aria-hidden="true"></span>
+              <strong class="stream-sticker-widget__text">${escapeHtml(widget.content || widget.title || 'Стикер')}</strong>
             </article>
           `;
         }
@@ -5510,6 +5635,82 @@
         selectedWidgetBadge.textContent = widgetTypeLabel(widget.type);
         workspaceConfigurator.className = 'workspace-form';
 
+        if (widget.type === 'video-overlay') {
+          workspaceConfigurator.innerHTML = `
+            <label class="field">Название
+              <input data-config-field="title" type="text" value="${escapeHtml(widget.title || 'Видео по таймеру')}" />
+            </label>
+            <div class="compact-grid">
+              <label class="field">Интервал, минут
+                <input data-config-field="intervalMinutes" type="number" min="0.1" max="1440" step="0.1" value="${escapeHtml(widget.intervalMinutes || 5)}" />
+              </label>
+              <label class="field">Длительность, секунд
+                <input data-config-field="durationSeconds" type="number" min="1" max="3600" step="1" value="${escapeHtml(widget.durationSeconds || 15)}" />
+              </label>
+            </div>
+            <p class="muted">Ролики воспроизводятся по очереди. Новый отсчёт начинается при загрузке общего overlay.</p>
+            <div class="button-row">
+              <button class="button" type="button" data-save-config>Сохранить</button>
+              <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
+              <button class="button button--danger" type="button" data-delete-selected>Удалить</button>
+            </div>
+          `;
+          return;
+        }
+
+        if (widget.type === 'sticker') {
+          const styles = [
+            { id: 'sunset', label: 'Жаркий закат', sample: 'Огонь!', background: 'linear-gradient(135deg, #ff2d75 0%, #ff6b1a 48%, #ffd84a 100%)', text: '#fff8ee', font: '"Unbounded", "Exo 2", sans-serif' },
+            { id: 'neon', label: 'Кибер-неон', sample: 'В эфире', background: 'linear-gradient(135deg, #5b21ff 0%, #006dff 48%, #00f5d4 100%)', text: '#ffffff', font: '"Russo One", "Exo 2", sans-serif' },
+            { id: 'berry', label: 'Малина-поп', sample: 'Спасибо!', background: 'linear-gradient(135deg, #ff156f 0%, #ff4fd8 52%, #9b5cff 100%)', text: '#ffffff', font: '"Montserrat Alternates", "Exo 2", sans-serif' },
+            { id: 'lime', label: 'Кислотный', sample: 'Погнали!', background: 'linear-gradient(135deg, #dfff00 0%, #55f26f 50%, #00d4aa 100%)', text: '#092319', font: '"Rubik Mono One", "Exo 2", sans-serif' },
+            { id: 'violet', label: 'Глубокий космос', sample: 'Космос', background: 'linear-gradient(135deg, #261447 0%, #7028e4 48%, #e94dff 100%)', text: '#ffffff', font: '"Yanone Kaffeesatz", "Exo 2", sans-serif' },
+            { id: 'gold', label: 'Золотой люкс', sample: 'Топ!', background: 'linear-gradient(135deg, #ff7a00 0%, #ffc400 48%, #fff0a6 100%)', text: '#301500', font: '"Russo One", "Exo 2", sans-serif' },
+          ];
+          const fonts = [
+            { id: 'unbounded', label: 'Unbounded' },
+            { id: 'russo', label: 'Russo One' },
+            { id: 'rubik-mono', label: 'Rubik Mono One' },
+            { id: 'montserrat', label: 'Montserrat Alternates' },
+            { id: 'yanone', label: 'Yanone Kaffeesatz' },
+            { id: 'exo', label: 'Exo 2' },
+          ];
+          const currentVariant = styles.find((item) => item.id === (widget.variant || 'sunset')) || styles[0];
+          workspaceConfigurator.innerHTML = `
+            <label class="field">Текст наклейки
+              <input data-sticker-field="content" type="text" value="${escapeHtml(widget.content || widget.title || 'Стикер')}" maxlength="60" />
+            </label>
+            <label class="field">Размер шрифта, px
+              <input data-sticker-field="fontSize" type="number" min="24" max="180" value="${escapeHtml(widget.fontSize || 56)}" />
+            </label>
+            <label class="field">Шрифт
+              <select data-sticker-field="fontPreset">
+                ${fonts.map((font) => `<option value="${font.id}" ${font.id === (widget.fontPreset || 'unbounded') ? 'selected' : ''}>${escapeHtml(font.label)}</option>`).join('')}
+              </select>
+            </label>
+            <div class="field">
+              <span>Стиль наклейки</span>
+              <div class="workspace-skin-grid sticker-preset-grid">
+                ${styles.map((style) => `
+                  <label class="workspace-skin-option">
+                    <input type="radio" name="sticker-variant" data-sticker-field="variant" value="${escapeHtml(style.id)}" ${currentVariant.id === style.id ? 'checked' : ''} />
+                    <span class="workspace-skin-card sticker-preset-card" data-variant="${escapeHtml(style.id)}" style="background:${style.background}; color:${style.text}; font-family:${style.font};">
+                      <span class="sticker-preset-sample">${escapeHtml(style.sample)}</span>
+                      <span class="workspace-skin-name">${escapeHtml(style.label)}</span>
+                    </span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+            <div class="button-row">
+              <button class="button" type="button" data-sticker-save>Сохранить</button>
+              <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
+              <button class="button button--danger" type="button" data-delete-selected>Удалить</button>
+            </div>
+          `;
+          return;
+        }
+
         if (widget.type === 'goal') {
           workspaceConfigurator.innerHTML = `
             <div class="compact-grid">
@@ -5529,17 +5730,9 @@
               <button class="mini-button" type="button" data-quick-money="1000">+1000</button>
               <button class="mini-button" type="button" data-reset-money>Сброс</button>
             </div>
-            <div class="compact-grid">
-              <label class="field">Валюта
-                <input data-config-field="currency" type="text" value="${escapeHtml(widget.currency || 'RUB')}" />
-              </label>
-              <label class="field">Ширина, %
-                <input data-config-field="width" type="number" min="14" step="0.1" value="${escapeHtml(widget.width || 64)}" />
-              </label>
-              <label class="field">Высота, %
-                <input data-config-field="height" type="number" min="5" step="0.1" value="${escapeHtml(widget.height ?? '')}" placeholder="авто" />
-              </label>
-            </div>
+            <label class="field">Валюта
+              <input data-config-field="currency" type="text" value="${escapeHtml(widget.currency || 'RUB')}" />
+            </label>
             <div class="button-row">
               <button class="button" type="button" data-save-config>Сохранить</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
@@ -5587,17 +5780,7 @@
               <button class="button button--danger" type="button" data-workspace-poll-hide>Скрыть</button>
               <button class="button button--ghost" type="button" data-workspace-poll-clear>Сбросить</button>
             </div>
-            <div class="compact-grid">
-              <label class="field">X, %
-                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x || 60)}" />
-              </label>
-              <label class="field">Y, %
-                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y || 56)}" />
-              </label>
-            </div>
-            ${renderWorkspaceSizeFields(widget, { defaultWidth: 34 })}
             <div class="button-row">
-              <button class="button" type="button" data-save-config>Сохранить позицию</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
             </div>
           `;
@@ -5653,17 +5836,7 @@
                     .join(', ')}</p>`
                 : ''
             }
-            <div class="compact-grid">
-              <label class="field">X, %
-                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 28)}" />
-              </label>
-              <label class="field">Y, %
-                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 20)}" />
-              </label>
-            </div>
-            ${renderWorkspaceSizeFields(widget, { defaultWidth: 44 })}
             <div class="button-row">
-              <button class="button" type="button" data-save-config>Сохранить позицию</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
             </div>
             <div class="workspace-poll-status">
@@ -5735,17 +5908,7 @@
               <button class="button button--ghost" type="button" data-countdown-pause>Пауза</button>
               <button class="button button--ghost" type="button" data-countdown-reset>Сброс 2 ч</button>
             </div>
-            <div class="compact-grid">
-              <label class="field">X, %
-                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x || 72)}" />
-              </label>
-              <label class="field">Y, %
-                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y || 4)}" />
-              </label>
-            </div>
-            ${renderWorkspaceSizeFields(widget, { defaultWidth: 18, minWidth: 5 })}
             <div class="button-row">
-              <button class="button" type="button" data-save-config>Сохранить позицию</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
             </div>
           `;
@@ -5790,20 +5953,8 @@
               <button class="button" type="button" data-texts-save>Сохранить</button>
               <button class="button button--ghost" type="button" data-texts-delete ${textItems.length ? '' : 'disabled'}>Удалить</button>
             </div>
-            <div class="compact-grid">
-              <label class="field">X, %
-                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x || 8)}" />
-              </label>
-              <label class="field">Y, %
-                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y || 18)}" />
-              </label>
-            </div>
-            <label class="field">Высота, %
-              <input data-config-field="height" type="number" min="5" step="0.1" value="${escapeHtml(widget.height ?? '')}" placeholder="авто" />
-            </label>
-            <p class="muted">Ширина подстраивается под длину текста.</p>
+            <p class="muted">Ширина подстраивается под длину текста. Позиция и размер редактируются в WYSIWYG-макете.</p>
             <div class="button-row">
-              <button class="button" type="button" data-save-config>Сохранить позицию</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать на стриме' : 'Скрыть на стриме'}</button>
             </div>
           `;
@@ -5855,17 +6006,7 @@
             <div class="button-row">
               <button class="button" type="button" data-workspace-vdv-add>Добавить сумму</button>
             </div>
-            <div class="compact-grid">
-              <label class="field">X, %
-                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 66)}" />
-              </label>
-              <label class="field">Y, %
-                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 34)}" />
-              </label>
-            </div>
-            ${renderWorkspaceSizeFields(widget, { defaultWidth: 17.33 })}
             <div class="button-row">
-              <button class="button" type="button" data-save-config>Сохранить позицию</button>
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
             </div>
           `;
@@ -5877,15 +6018,6 @@
             <label class="field">Название
               <input data-config-field="title" type="text" value="${escapeHtml(widget.title || 'Чат на экране')}" />
             </label>
-            <div class="compact-grid">
-              <label class="field">X, %
-                <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x ?? 4)}" />
-              </label>
-              <label class="field">Y, %
-                <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y ?? 48)}" />
-              </label>
-            </div>
-            ${renderWorkspaceSizeFields(widget, { defaultWidth: 30 })}
             <div class="compact-grid">
               <label class="field">Прозрачность, %
                 <input data-config-field="opacity" type="number" min="0" max="100" step="1" value="${escapeHtml(widget.opacity ?? 0)}" />
@@ -5906,15 +6038,6 @@
           <label class="field">Название
             <input data-config-field="title" type="text" value="${escapeHtml(widget.title || widgetTypeLabel(widget.type))}" />
           </label>
-          <div class="compact-grid">
-            <label class="field">X, %
-              <input data-config-field="x" type="number" min="-100" step="0.1" value="${escapeHtml(widget.x || 0)}" />
-            </label>
-            <label class="field">Y, %
-              <input data-config-field="y" type="number" min="-100" step="0.1" value="${escapeHtml(widget.y || 0)}" />
-            </label>
-          </div>
-          ${renderWorkspaceSizeFields(widget, { defaultWidth: 30 })}
           <div class="button-row">
             <button class="button" type="button" data-save-config>Сохранить</button>
             <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button>
@@ -5932,7 +6055,7 @@
             return;
           }
 
-          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds', 'scale'].includes(key) ? Number(input.value || 0) : input.value.trim();
+          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds', 'scale', 'intervalMinutes', 'durationSeconds'].includes(key) ? Number(input.value || 0) : input.value.trim();
         });
         return patch;
       }
@@ -6116,7 +6239,7 @@
                 <div class="button-row">
                   <button class="mini-button" type="button" data-open-url="${escapeHtml(url)}">Открыть</button>
                   ${widget.type === 'goal' ? `<button class="mini-button" type="button" data-add-widget-money="${escapeHtml(widget.id)}">+100</button>` : ''}
-                  <button class="mini-button" type="button" data-delete-widget="${escapeHtml(widget.id)}">Удалить</button>
+                  ${isRequiredWidgetType(widget.type) ? '<span class="pill">Обязательный</span>' : `<button class="mini-button" type="button" data-delete-widget="${escapeHtml(widget.id)}">Удалить</button>`}
                 </div>
               </article>
             `;
@@ -6475,6 +6598,51 @@
         renderWidgetsState(payload);
       }
 
+      async function createStickerWidget() {
+        const payload = await window.tchat.createWidget({
+          type: 'sticker',
+          title: 'Поддержка',
+          content: 'ПОДДЕРЖКА',
+          variant: 'sunset',
+          fontPreset: 'unbounded',
+          fontSize: 64,
+          enabled: true,
+          x: 50,
+          y: 42,
+          width: 28,
+        });
+        const stickerWidget = payload.items.find((item) => item.type === 'sticker');
+        selectedWorkspaceWidgetId = stickerWidget?.id || selectedWorkspaceWidgetId;
+        widgetsStudioState.textContent = 'Стикер добавлен в overlay.';
+        renderWidgetsState(payload);
+      }
+
+      async function createVideoOverlayWidget() {
+        const existing = widgetsState.items.find((item) => item.type === 'video-overlay');
+        if (existing) {
+          selectedWorkspaceWidgetId = existing.id;
+          const payload = await window.tchat.updateWidget({ ...existing, enabled: true, id: existing.id });
+          widgetsStudioState.textContent = 'Видео уже было в списке, включил его в overlay.';
+          renderWidgetsState(payload);
+          return;
+        }
+
+        const payload = await window.tchat.createWidget({
+          type: 'video-overlay',
+          title: 'Видео по таймеру',
+          intervalMinutes: 5,
+          durationSeconds: 15,
+          enabled: true,
+          x: 38,
+          y: 8,
+          width: 24,
+        });
+        const videoWidget = payload.items.find((item) => item.type === 'video-overlay');
+        selectedWorkspaceWidgetId = videoWidget?.id || selectedWorkspaceWidgetId;
+        widgetsStudioState.textContent = 'Видео добавлено в общий overlay.';
+        renderWidgetsState(payload);
+      }
+
       async function saveTasksWidget(widgetId, options = {}) {
         const widget = widgetsState.items.find((item) => item.id === widgetId);
         if (!widget) return;
@@ -6598,6 +6766,11 @@
       }
 
       async function deleteWidget(id) {
+        const widget = widgetsState.items.find((item) => item.id === id);
+        if (widget && isRequiredWidgetType(widget.type)) {
+          widgetsStudioState.textContent = 'Обязательный виджет нельзя удалить. Можно только скрыть.';
+          return;
+        }
         const payload = await window.tchat.deleteWidget({ id });
         widgetsStudioState.textContent = 'Виджет удалён.';
         renderWidgetsState(payload);
@@ -6614,7 +6787,7 @@
       }
 
       function selectWidgetType(type) {
-        selectedWidgetType = ['poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv'].includes(type) ? type : 'goal';
+        selectedWidgetType = ['poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv', 'sticker', 'video-overlay'].includes(type) ? type : 'goal';
         document.querySelectorAll('[data-widget-type]').forEach((button) => {
           button.classList.toggle('is-active', button.dataset.widgetType === selectedWidgetType);
         });
@@ -6636,6 +6809,12 @@
         }
         if (document.querySelector('#vdvWidgetHint')) {
           document.querySelector('#vdvWidgetHint').hidden = selectedWidgetType !== 'vdv';
+        }
+        if (document.querySelector('#stickerWidgetHint')) {
+          document.querySelector('#stickerWidgetHint').hidden = selectedWidgetType !== 'sticker';
+        }
+        if (document.querySelector('#videoOverlayWidgetHint')) {
+          document.querySelector('#videoOverlayWidgetHint').hidden = selectedWidgetType !== 'video-overlay';
         }
       }
 
@@ -6763,6 +6942,8 @@
       document.querySelector('#quickCreateTasksButton').addEventListener('click', createTasksWidget);
       document.querySelector('#quickCreateLastDonationButton').addEventListener('click', createLastDonationWidget);
       document.querySelector('#quickCreateVdvButton').addEventListener('click', createVdvWidget);
+      document.querySelector('#quickCreateStickerButton').addEventListener('click', createStickerWidget);
+      document.querySelector('#quickCreateVideoOverlayButton').addEventListener('click', createVideoOverlayWidget);
       document.querySelector('#createMusicWidgetButton').addEventListener('click', createMusicWidget);
       document.querySelector('#createPollWidgetButton')?.addEventListener('click', createPollWidget);
       document.querySelector('#createGiveawayWidgetButton')?.addEventListener('click', createGiveawayWidget);
@@ -6771,6 +6952,8 @@
       document.querySelector('#createTasksWidgetButton')?.addEventListener('click', createTasksWidget);
       document.querySelector('#createLastDonationWidgetButton')?.addEventListener('click', createLastDonationWidget);
       document.querySelector('#createVdvWidgetButton')?.addEventListener('click', createVdvWidget);
+      document.querySelector('#createStickerWidgetButton')?.addEventListener('click', createStickerWidget);
+      document.querySelector('#createVideoOverlayWidgetButton')?.addEventListener('click', createVideoOverlayWidget);
       document.querySelector('#addPollOptionButton').addEventListener('click', () => {
         collectPollOptions();
         pollOptionDraft.push(`Вариант ${pollOptionDraft.length + 1}`);
@@ -6789,6 +6972,7 @@
         const bumpButton = event.target.closest('[data-add-widget-money]');
         const openButton = event.target.closest('[data-open-url]');
         const workspaceCard = event.target.closest('[data-workspace-widget]');
+        const removeWorkspaceWidgetButton = event.target.closest('[data-remove-workspace-widget]');
         const toggleButton = event.target.closest('[data-toggle-widget]');
         const quickMoneyButton = event.target.closest('[data-quick-money]');
         const resetMoneyButton = event.target.closest('[data-reset-money]');
@@ -6961,6 +7145,22 @@
         const textsDeleteButton = event.target.closest('[data-texts-delete]');
         const textsFontPresetButton = event.target.closest('[data-texts-font-preset]');
         const textsFontAdjustButton = event.target.closest('[data-texts-font-adjust]');
+        const stickerSaveButton = event.target.closest('[data-sticker-save]');
+
+        if (stickerSaveButton && selectedWorkspaceWidgetId) {
+          const widget = widgetsState.items.find((item) => item.id === selectedWorkspaceWidgetId);
+          const variant = workspaceConfigurator?.querySelector('[data-sticker-field="variant"]:checked')?.value || 'sunset';
+          const next = {
+            ...widget,
+            title: workspaceConfigurator?.querySelector('[data-sticker-field="content"]')?.value.trim() || 'Стикер',
+            content: workspaceConfigurator?.querySelector('[data-sticker-field="content"]')?.value.trim() || 'Стикер',
+            variant,
+            fontPreset: workspaceConfigurator?.querySelector('[data-sticker-field="fontPreset"]')?.value || 'unbounded',
+            fontSize: Number(workspaceConfigurator?.querySelector('[data-sticker-field="fontSize"]')?.value || 56),
+          };
+          void updateWorkspaceWidget(selectedWorkspaceWidgetId, next);
+          return;
+        }
 
         if (textSelectButton && selectedWorkspaceWidgetId) {
           selectTextsEntry(selectedWorkspaceWidgetId, textSelectButton.dataset.textSelect);
@@ -7049,6 +7249,12 @@
           event.stopPropagation();
           const widget = widgetsState.items.find((item) => item.id === toggleButton.dataset.toggleWidget);
           if (widget) updateWorkspaceWidget(widget.id, { enabled: widget.enabled === false });
+          return;
+        }
+
+        if (removeWorkspaceWidgetButton) {
+          event.stopPropagation();
+          deleteWidget(removeWorkspaceWidgetButton.dataset.removeWorkspaceWidget);
           return;
         }
 

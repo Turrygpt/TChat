@@ -3,6 +3,7 @@ const socket = io();
 const streamGoals = document.querySelector('#streamGoals');
 const streamCountdowns = document.querySelector('#streamCountdowns');
 const streamTexts = document.querySelector('#streamTexts');
+const streamStickerWidgets = document.querySelector('#streamStickerWidgets');
 const streamTasks = document.querySelector('#streamTasks');
 const streamEmbeddedWidgets = document.querySelector('#streamEmbeddedWidgets');
 const streamPoll = document.querySelector('#streamPoll');
@@ -186,6 +187,7 @@ function applyWidgetsState(state = {}) {
   renderGoals(latestState.items);
   renderCountdowns(latestState.items);
   renderTexts(latestState.items);
+  renderStickerWidgets(latestState.items);
   renderTasks(latestState.items);
   renderEmbeddedWidgets(latestState.items);
   renderPoll(latestState.poll);
@@ -573,6 +575,42 @@ function renderTexts(items) {
   });
 }
 
+function renderStickerWidgets(items) {
+  if (!streamStickerWidgets) return;
+
+  const widgets = items.filter((item) => item.type === 'sticker' && item.enabled !== false);
+  const activeIds = new Set(widgets.map((widget) => widget.id));
+
+  streamStickerWidgets.querySelectorAll('[data-sticker-widget-id]').forEach((node) => {
+    if (!activeIds.has(node.dataset.stickerWidgetId)) node.remove();
+  });
+
+  widgets.forEach((widget) => {
+    let node = streamStickerWidgets.querySelector(`[data-sticker-widget-id="${CSS.escape(widget.id)}"]`);
+    if (!node) {
+      node = document.createElement('article');
+      node.className = 'stream-sticker-widget';
+      node.dataset.stickerWidgetId = widget.id;
+      node.innerHTML = '<span class="stream-sticker-widget__tape" aria-hidden="true"></span><strong class="stream-sticker-widget__text"></strong>';
+      streamStickerWidgets.appendChild(node);
+    }
+
+    node.dataset.variant = widget.variant || 'sunset';
+    node.style.left = `${Number(widget.x ?? 46)}%`;
+    node.style.top = `${Number(widget.y ?? 24)}%`;
+    node.style.width = `${Number(widget.width ?? 30)}%`;
+    node.style.setProperty('--sticker-bg', widget.background || '#ffb347');
+    node.style.setProperty('--sticker-color', widget.textColor || '#1d0c1d');
+    node.style.setProperty('--sticker-font', widget.fontFamily || '"Exo 2", sans-serif');
+    node.style.setProperty('--sticker-font-size', `${Math.min(Math.max(Number(widget.fontSize || 56), 24), 180)}px`);
+    applyWidgetHeight(node, widget);
+    applyWidgetScale(node, widget);
+
+    const text = node.querySelector('.stream-sticker-widget__text');
+    text.textContent = String(widget.content || widget.title || 'Стикер').toUpperCase();
+  });
+}
+
 function getTaskItems(widget = {}) {
   return (Array.isArray(widget.taskItems) ? widget.taskItems : []).filter((item) => String(item.text || '').trim());
 }
@@ -663,13 +701,18 @@ function embeddedWidgetSrc(widget) {
   if (widget.type === 'vdv') {
     return '/widgets/vdv.html?embedded=1';
   }
+  if (widget.type === 'video-overlay') {
+    const interval = Math.min(Math.max(Number(widget.intervalMinutes || 5), 0.1), 1440);
+    const duration = Math.min(Math.max(Number(widget.durationSeconds || 15), 1), 3600);
+    return `/widgets/video-overlay.html?embedded=1&interval=${encodeURIComponent(interval)}&duration=${encodeURIComponent(duration)}`;
+  }
   return `/widgets/giveaway.html?embedded=1&id=${encodeURIComponent(widget.id)}`;
 }
 
 function renderEmbeddedWidgets(items) {
   if (!streamEmbeddedWidgets) return;
 
-  const widgets = items.filter((item) => ['music', 'giveaway', 'lastdonation', 'vdv'].includes(item.type) && item.enabled !== false);
+  const widgets = items.filter((item) => ['music', 'giveaway', 'lastdonation', 'vdv', 'video-overlay'].includes(item.type) && item.enabled !== false);
   const activeIds = new Set(widgets.map((widget) => widget.id));
 
   streamEmbeddedWidgets.querySelectorAll('[data-embedded-widget-id]').forEach((node) => {

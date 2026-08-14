@@ -262,6 +262,138 @@ body {
   pointer-events: none;
 }
 
+.stream-sticker-widgets {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  pointer-events: none;
+}
+
+.stream-sticker-widget {
+  position: absolute;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  min-width: 180px;
+  min-height: 88px;
+  padding: clamp(12px, 1.4vw, 22px) clamp(16px, 1.8vw, 30px);
+  box-sizing: border-box;
+  color: var(--sticker-color, #1d0c1d);
+  background: var(--sticker-bg, linear-gradient(135deg, #ff2d75, #ffb11b));
+  border: 5px solid rgb(255 255 255 / 92%);
+  border-radius: var(--sticker-radius, 34px 18px 30px 22px);
+  box-shadow:
+    0 7px 0 rgb(18 12 38 / 28%),
+    0 24px 48px rgb(0 0 0 / 38%),
+    inset 0 -10px 0 rgb(0 0 0 / 12%),
+    inset 0 2px 0 rgb(255 255 255 / 42%);
+  transform: rotate(var(--sticker-angle, -2deg));
+  filter: saturate(1.12) drop-shadow(0 0 18px rgb(255 80 150 / 18%));
+}
+
+.stream-sticker-widget::before,
+.stream-sticker-widget::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.stream-sticker-widget::before {
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 82% 19%, rgb(255 255 255 / 60%) 0 3px, transparent 4px),
+    radial-gradient(circle at 88% 27%, rgb(255 255 255 / 33%) 0 8px, transparent 9px),
+    radial-gradient(circle at 12% 82%, rgb(255 255 255 / 22%) 0 11px, transparent 12px),
+    linear-gradient(115deg, transparent 5%, rgb(255 255 255 / 30%) 32%, transparent 54%);
+}
+
+.stream-sticker-widget::after {
+  content: "✦";
+  top: -24px;
+  right: -17px;
+  color: #fff;
+  font: 900 clamp(34px, 3vw, 62px)/1 "Unbounded", sans-serif;
+  text-shadow: 0 5px 0 rgb(25 13 58 / 28%), 0 0 20px rgb(255 255 255 / 70%);
+  transform: rotate(12deg);
+}
+
+.stream-sticker-widget__text {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+  font-family: var(--sticker-font, "Exo 2", sans-serif);
+  font-size: clamp(24px, var(--sticker-font-size, 56px), 180px);
+  font-weight: 900;
+  line-height: 0.94;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  -webkit-text-stroke: var(--sticker-stroke, 1px rgb(0 0 0 / 18%));
+  paint-order: stroke fill;
+  text-shadow: var(--sticker-text-shadow, 0 4px 0 rgb(50 12 45 / 30%), 0 10px 22px rgb(0 0 0 / 24%));
+}
+
+.stream-sticker-widget__tape {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 18px;
+  width: 42%;
+  max-width: 160px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 78%), rgb(255 255 255 / 8%));
+  box-shadow: 0 1px 0 rgb(255 255 255 / 38%);
+  transform: rotate(-1deg);
+}
+
+.stream-sticker-widget[data-variant="sunset"] {
+  --sticker-angle: -2deg;
+  --sticker-radius: 38px 18px 34px 22px;
+  --sticker-stroke: 2px rgb(111 18 54 / 36%);
+}
+
+.stream-sticker-widget[data-variant="neon"] {
+  --sticker-angle: 1.5deg;
+  --sticker-radius: 18px 42px 20px 34px;
+  --sticker-stroke: 2px rgb(24 8 96 / 40%);
+  --sticker-text-shadow: 0 0 8px rgb(255 255 255 / 68%), 0 5px 0 rgb(20 14 82 / 40%), 0 0 28px #00f5d4;
+  filter: saturate(1.25) drop-shadow(0 0 24px rgb(0 213 255 / 42%));
+}
+
+.stream-sticker-widget[data-variant="berry"] {
+  --sticker-angle: -1deg;
+  --sticker-radius: 44px 20px 38px 26px;
+  --sticker-stroke: 2px rgb(90 10 86 / 34%);
+}
+
+.stream-sticker-widget[data-variant="lime"] {
+  --sticker-angle: 2deg;
+  --sticker-radius: 20px 38px 18px 34px;
+  --sticker-stroke: 1px rgb(255 255 255 / 45%);
+  --sticker-text-shadow: 0 3px 0 rgb(255 255 255 / 36%), 0 9px 18px rgb(0 79 48 / 28%);
+}
+
+.stream-sticker-widget[data-variant="violet"] {
+  --sticker-angle: -2.5deg;
+  --sticker-radius: 40px 18px 32px 24px;
+  --sticker-stroke: 2px rgb(35 7 79 / 45%);
+  --sticker-text-shadow: 0 0 12px rgb(233 77 255 / 58%), 0 5px 0 rgb(28 7 67 / 52%), 0 14px 26px rgb(0 0 0 / 34%);
+  filter: saturate(1.22) drop-shadow(0 0 24px rgb(189 55 255 / 35%));
+}
+
+.stream-sticker-widget[data-variant="gold"] {
+  --sticker-angle: 1deg;
+  --sticker-radius: 20px 38px 24px 42px;
+  --sticker-stroke: 1px rgb(255 255 255 / 36%);
+  --sticker-text-shadow: 0 3px 0 rgb(255 255 255 / 34%), 0 8px 16px rgb(111 48 0 / 30%);
+  filter: saturate(1.12) drop-shadow(0 0 22px rgb(255 190 0 / 30%));
+}
+
 .stream-embedded-widgets {
   position: absolute;
   inset: 0;
@@ -324,6 +456,14 @@ body {
   background: transparent !important;
   background-color: rgb(0 0 0 / 0%) !important;
   color-scheme: normal;
+}
+
+.stream-embedded-widget--video-overlay {
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 464 / 688;
+  overflow: hidden;
+  background: transparent !important;
 }
 
 .stream-goal {

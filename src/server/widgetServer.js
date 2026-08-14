@@ -87,6 +87,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         tasks: '/widgets/tasks.html',
         stickers: '/widgets/stickers.html',
         vdv: '/widgets/vdv.html',
+        videoOverlay: '/widgets/video-overlay.html',
       },
     });
   });
@@ -125,6 +126,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         texts: `http://localhost:${port}/widgets/texts.html`,
         tasks: `http://localhost:${port}/widgets/tasks.html`,
         stickers: `http://localhost:${port}/widgets/stickers.html`,
+        videoOverlay: `http://localhost:${port}/widgets/video-overlay.html`,
       },
     });
   });
@@ -412,6 +414,8 @@ function renderLandingPage() {
     ['texts', 'Тексты', 'Бегущие сообщения'],
     ['tasks', 'Задачи', 'План на эфир'],
   ];
+
+  widgets.push(['video-overlay', 'Видео по таймеру', 'Видео с удалением зелёного фона']);
 
   const cards = widgets
     .map(function (w) {

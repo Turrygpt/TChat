@@ -6,8 +6,8 @@
     <title>TChat Stream Overlay</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./widget.css?v=7" />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=Montserrat+Alternates:wght@700;800;900&family=Rubik+Mono+One&family=Russo+One&family=Unbounded:wght@700;800;900&family=Yanone+Kaffeesatz:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./widget.css?v=8" />
     <link rel="stylesheet" href="./stickers.css?v=2" />
   </head>
   <body class="widget-page widget-page--stream">
@@ -25,6 +25,7 @@
       <section id="streamGoals" class="stream-goals" aria-live="polite"></section>
       <section id="streamCountdowns" class="stream-countdowns" aria-live="polite"></section>
       <section id="streamTexts" class="stream-texts" aria-live="polite"></section>
+      <section id="streamStickerWidgets" class="stream-sticker-widgets" aria-live="polite"></section>
       <section id="streamTasks" class="stream-tasks" aria-live="polite"></section>
       <section id="streamEmbeddedWidgets" class="stream-embedded-widgets" aria-live="polite"></section>
       <section id="streamPoll" class="stream-poll" aria-live="polite" hidden></section>
@@ -33,6 +34,6 @@
     <div id="stickerLayer" class="sticker-layer" aria-hidden="true"></div>
     <script src="/socket.io/socket.io.js"></script>
     <script src="./stickers.js?v=2"></script>
-    <script src="./stream.js?v=6"></script>
+    <script src="./stream.js?v=7"></script>
   </body>
 </html>
