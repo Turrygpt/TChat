@@ -133,6 +133,7 @@ let vkConnectionState = {
   consecutiveFailures: 0,
   lastSuccessAt: 0,
   lastViewers: 0,
+  zeroViewerStreak: 0,
   lastChatAvailable: false,
   lastError: '',
   lastChatMessageId: 0,
@@ -4675,18 +4676,6 @@ function extractVkViewerCount(stream = {}) {
   return Number.isFinite(topLevel) ? Math.max(topLevel, 0) : 0;
 }
 
-async function fetchVkViewerCount(channelUrl) {
-  const slug = parseVkChannelSlug(channelUrl);
-  if (!slug) {
-    return 0;
-  }
-
-  const streamPath = `/blog/${encodeURIComponent(slug)}/public_video_stream`;
-  const payload = await fetchJsonWithRetry(`${VK_API_BASE}${streamPath}`, 15000, {}, 2);
-  const stream = unwrapVkStreamPayload(payload);
-  return extractVkViewerCount(stream);
-}
-
 function parseVkChannelSlug(channelUrl = '') {
   const raw = String(channelUrl || '').trim();
   if (!raw) {
@@ -5141,6 +5130,7 @@ async function connectChatSources(channels = currentChannels) {
       consecutiveFailures: 0,
       lastSuccessAt: 0,
       lastViewers: 0,
+      zeroViewerStreak: 0,
       lastChatAvailable: false,
       lastError: '',
       lastChatMessageId: 0,
@@ -5639,11 +5629,8 @@ function startChatPolling() {
 }
 
 async function refreshViewerCounts() {
-  const [twitchViewers, vkViewers, youtubeState, rutubeViewers] = await Promise.all([
+  const [twitchViewers, youtubeState, rutubeViewers] = await Promise.all([
     fetchTwitchViewerCount(parseTwitchChannel(currentChannels.twitch)).catch(() => chatStats.viewers.twitch || 0),
-    currentChannels.vk
-      ? fetchVkViewerCount(currentChannels.vk).catch(() => vkConnectionState.lastViewers || 0)
-      : Promise.resolve(0),
     // null = до YouTube не достучались. Это не то же самое, что «эфира нет»:
     // по обрыву связи чат отцеплять нельзя, иначе каждая сетевая икота
     // выбрасывала бы нас из идущей трансляции.
@@ -5652,10 +5639,13 @@ async function refreshViewerCounts() {
   ]);
 
   chatStats.viewers.twitch = twitchViewers;
-  chatStats.viewers.vk = vkViewers;
+  // VK-счётчик отдельно не опрашиваем: pollVkChat уже дёргает тот же VK API
+  // каждые 5с со сглаживанием дребезга (см. zeroViewerStreak). Второй,
+  // несинхронизированный опрос того же эндпойнта раз в 10с мог перезаписать
+  // счётчик своим собственным глюком в обход этого сглаживания.
+  chatStats.viewers.vk = vkConnectionState.lastViewers;
   chatStats.viewers.youtube = youtubeState ? youtubeState.viewers : 0;
   chatStats.viewers.rutube = rutubeViewers;
-  vkConnectionState.lastViewers = vkViewers;
   broadcastChatStatus();
 
   if (youtubeState) {
@@ -5720,9 +5710,21 @@ async function pollVkChat() {
   }
 
   const { messages, viewers, chatAvailable } = vkState;
-  vkConnectionState.lastViewers = viewers;
+  // VK's public_video_stream иногда на один опрос отдаёт count.viewers=0 или
+  // вовсе без него, хотя эфир идёт — это дрёбезг API, а не реальный уход
+  // зрителей. Принимаем 0 только если он подтвердился два опроса подряд,
+  // иначе держим последнее известное значение и не мигаем счётчиком.
+  if (viewers > 0) {
+    vkConnectionState.zeroViewerStreak = 0;
+    vkConnectionState.lastViewers = viewers;
+  } else if (vkConnectionState.lastViewers > 0 && vkConnectionState.zeroViewerStreak < 1) {
+    vkConnectionState.zeroViewerStreak += 1;
+  } else {
+    vkConnectionState.zeroViewerStreak = 0;
+    vkConnectionState.lastViewers = 0;
+  }
   vkConnectionState.lastChatAvailable = chatAvailable;
-  chatStats.viewers.vk = viewers;
+  chatStats.viewers.vk = vkConnectionState.lastViewers;
   chatStats.platformStatus.vk = getVkPlatformStatus(chatAvailable);
 
   if (!vkChatBootstrapped) {

@@ -6,7 +6,6 @@ const confetti = document.querySelector('#confetti');
 const requestedId = new URLSearchParams(window.location.search).get('id');
 let latestWidget = null;
 let tickTimer = null;
-let revealedId = '';
 let renderedSignature = '';
 let timerKey = '';
 let autoHideTimer = null;
@@ -50,9 +49,29 @@ function applyState(state = {}) {
     tickTimer = nextTimerKey ? setInterval(updateTimer, 1000) : null;
   }
 
-  if (widget?.status === 'finished' && widget.revealId && widget.revealId !== revealedId) {
-    revealedId = widget.revealId;
+  if (widget?.status === 'finished' && widget.revealId && !isRevealCelebrated(widget)) {
+    markRevealCelebrated(widget);
     celebrate();
+  }
+}
+
+function celebratedStorageKey(widget) {
+  return `tchat:giveaway:celebrated:${widget.id}`;
+}
+
+function isRevealCelebrated(widget) {
+  try {
+    return window.localStorage.getItem(celebratedStorageKey(widget)) === widget.revealId;
+  } catch {
+    return false;
+  }
+}
+
+function markRevealCelebrated(widget) {
+  try {
+    window.localStorage.setItem(celebratedStorageKey(widget), widget.revealId);
+  } catch {
+    // localStorage may be unavailable (e.g. OBS private mode); celebration may replay on reload.
   }
 }
 

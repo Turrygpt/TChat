@@ -19,6 +19,10 @@ assets/tts/
 # Стикеры, выбранные пользователем (рантайм, у каждого свои)
 assets/stickers/
 
+# Кеш эмоуты/бейджи чата, скачанные во время рантайма
+assets/chat/badges/
+assets/chat/emotes/
+
 # Android build artifacts
 android/.gradle/
 android/build/
@@ -35,3 +39,5 @@ releases/
 
 # Кеш котлин-тулинга Android-проекта
 android/.kotlin/
+
+/house.zip
