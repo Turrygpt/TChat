@@ -133,7 +133,7 @@ let vkConnectionState = {
   consecutiveFailures: 0,
   lastSuccessAt: 0,
   lastViewers: 0,
-  zeroViewerStreak: 0,
+  zeroViewerSince: 0,
   lastChatAvailable: false,
   lastError: '',
   lastChatMessageId: 0,
@@ -4536,6 +4536,7 @@ async function fetchTextWithTimeout(url, timeoutMs = 8000, options = {}) {
 }
 
 const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
+const VK_ZERO_VIEWER_GRACE_MS = 30000;
 const VK_FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   Accept: 'application/json',
@@ -5130,7 +5131,7 @@ async function connectChatSources(channels = currentChannels) {
       consecutiveFailures: 0,
       lastSuccessAt: 0,
       lastViewers: 0,
-      zeroViewerStreak: 0,
+      zeroViewerSince: 0,
       lastChatAvailable: false,
       lastError: '',
       lastChatMessageId: 0,
@@ -5640,7 +5641,7 @@ async function refreshViewerCounts() {
 
   chatStats.viewers.twitch = twitchViewers;
   // VK-счётчик отдельно не опрашиваем: pollVkChat уже дёргает тот же VK API
-  // каждые 5с со сглаживанием дребезга (см. zeroViewerStreak). Второй,
+  // каждые 5с со сглаживанием дребезга (см. zeroViewerSince). Второй,
   // несинхронизированный опрос того же эндпойнта раз в 10с мог перезаписать
   // счётчик своим собственным глюком в обход этого сглаживания.
   chatStats.viewers.vk = vkConnectionState.lastViewers;
@@ -5710,17 +5711,24 @@ async function pollVkChat() {
   }
 
   const { messages, viewers, chatAvailable } = vkState;
-  // VK's public_video_stream иногда на один опрос отдаёт count.viewers=0 или
-  // вовсе без него, хотя эфир идёт — это дрёбезг API, а не реальный уход
-  // зрителей. Принимаем 0 только если он подтвердился два опроса подряд,
-  // иначе держим последнее известное значение и не мигаем счётчиком.
+  // VK's public_video_stream иногда отдаёт count.viewers=0 или вовсе без него
+  // на несколько опросов подряд, хотя эфир идёт — это дрёбезг API, а не
+  // реальный уход зрителей. Раньше 0 принимался после двух опросов подряд
+  // (10с), но реальный дребезг у VK бывает дольше, и счётчик всё равно мигал.
+  // Держим последнее известное значение, пока 0 не продержится непрерывно
+  // дольше VK_ZERO_VIEWER_GRACE_MS.
   if (viewers > 0) {
-    vkConnectionState.zeroViewerStreak = 0;
+    vkConnectionState.zeroViewerSince = 0;
     vkConnectionState.lastViewers = viewers;
-  } else if (vkConnectionState.lastViewers > 0 && vkConnectionState.zeroViewerStreak < 1) {
-    vkConnectionState.zeroViewerStreak += 1;
+  } else if (vkConnectionState.lastViewers > 0) {
+    if (!vkConnectionState.zeroViewerSince) {
+      vkConnectionState.zeroViewerSince = Date.now();
+    } else if (Date.now() - vkConnectionState.zeroViewerSince > VK_ZERO_VIEWER_GRACE_MS) {
+      vkConnectionState.zeroViewerSince = 0;
+      vkConnectionState.lastViewers = 0;
+    }
   } else {
-    vkConnectionState.zeroViewerStreak = 0;
+    vkConnectionState.zeroViewerSince = 0;
     vkConnectionState.lastViewers = 0;
   }
   vkConnectionState.lastChatAvailable = chatAvailable;
