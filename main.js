@@ -138,6 +138,10 @@ let vkConnectionState = {
   lastError: '',
   lastChatMessageId: 0,
 };
+let twitchViewerState = {
+  lastViewers: 0,
+  zeroViewerSince: 0,
+};
 let donationAlertsTimer = null;
 let donationAlertsToken = '';
 let donationAlertsRefreshToken = '';
@@ -4536,7 +4540,9 @@ async function fetchTextWithTimeout(url, timeoutMs = 8000, options = {}) {
 }
 
 const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
-const VK_ZERO_VIEWER_GRACE_MS = 30000;
+// Общее окно сглаживания одиночных нулей от API площадок (VK, Twitch): реальные
+// зрители не пропадают за один опрос, а вот сам API иногда отдаёт 0 на секунду.
+const ZERO_VIEWER_GRACE_MS = 30000;
 const VK_FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   Accept: 'application/json',
@@ -5156,6 +5162,8 @@ async function connectTwitchChat(channel) {
     }
   }
 
+  twitchViewerState = { lastViewers: 0, zeroViewerSince: 0 };
+
   if (!channel) {
     chatStats.platformStatus.twitch = 'канал не задан';
     broadcastChatStatus();
@@ -5639,7 +5647,24 @@ async function refreshViewerCounts() {
     fetchRutubeViewerCount(currentChannels.rutube).catch(() => 0),
   ]);
 
-  chatStats.viewers.twitch = twitchViewers;
+  // Twitch's GQL иногда на один опрос отдаёт stream:null, хотя эфир идёт —
+  // тот же дребезг, что и у VK. Держим последнее известное значение, пока
+  // 0 не продержится непрерывно дольше ZERO_VIEWER_GRACE_MS.
+  if (twitchViewers > 0) {
+    twitchViewerState.zeroViewerSince = 0;
+    twitchViewerState.lastViewers = twitchViewers;
+  } else if (twitchViewerState.lastViewers > 0) {
+    if (!twitchViewerState.zeroViewerSince) {
+      twitchViewerState.zeroViewerSince = Date.now();
+    } else if (Date.now() - twitchViewerState.zeroViewerSince > ZERO_VIEWER_GRACE_MS) {
+      twitchViewerState.zeroViewerSince = 0;
+      twitchViewerState.lastViewers = 0;
+    }
+  } else {
+    twitchViewerState.zeroViewerSince = 0;
+    twitchViewerState.lastViewers = 0;
+  }
+  chatStats.viewers.twitch = twitchViewerState.lastViewers;
   // VK-счётчик отдельно не опрашиваем: pollVkChat уже дёргает тот же VK API
   // каждые 5с со сглаживанием дребезга (см. zeroViewerSince). Второй,
   // несинхронизированный опрос того же эндпойнта раз в 10с мог перезаписать
@@ -5723,7 +5748,7 @@ async function pollVkChat() {
   } else if (vkConnectionState.lastViewers > 0) {
     if (!vkConnectionState.zeroViewerSince) {
       vkConnectionState.zeroViewerSince = Date.now();
-    } else if (Date.now() - vkConnectionState.zeroViewerSince > VK_ZERO_VIEWER_GRACE_MS) {
+    } else if (Date.now() - vkConnectionState.zeroViewerSince > ZERO_VIEWER_GRACE_MS) {
       vkConnectionState.zeroViewerSince = 0;
       vkConnectionState.lastViewers = 0;
     }
