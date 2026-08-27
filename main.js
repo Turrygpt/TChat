@@ -3391,11 +3391,24 @@ function broadcastUpdaterStatus(payload) {
   mainWindow?.webContents.send('updater:status', payload);
 }
 
+function getPublishConfig() {
+  return require('./package.json')?.build?.publish?.[0] || {};
+}
+
 // Прямая ссылка на установщик — запасной путь, если автообновление не дошло.
 // Адрес раздачи берём оттуда же, откуда его берёт electron-updater.
 function getInstallerDownloadUrl(version = '') {
-  const base = String(require('./package.json')?.build?.publish?.[0]?.url || '').trim();
-  if (!base || !version) {
+  if (!version) {
+    return '';
+  }
+
+  const publish = getPublishConfig();
+  if (publish.provider === 'github' && publish.owner && publish.repo) {
+    return `https://github.com/${publish.owner}/${publish.repo}/releases/download/v${version}/TChat-Setup-${version}.exe`;
+  }
+
+  const base = String(publish.url || '').trim();
+  if (!base) {
     return '';
   }
 
@@ -3417,11 +3430,17 @@ function readLocalPatchnotes() {
 async function resolveUpdatePolicy(version) {
   const targetVersion = String(version || '').trim();
   let notes = readLocalPatchnotes();
-  const feedUrl = String(require('./package.json')?.build?.publish?.[0]?.url || '').replace(/\/+$/, '');
+  const publish = getPublishConfig();
+  const patchnotesUrl =
+    publish.provider === 'github' && publish.owner && publish.repo
+      ? `https://raw.githubusercontent.com/${publish.owner}/${publish.repo}/main/patchnotes.json`
+      : String(publish.url || '').replace(/\/+$/, '')
+        ? `${String(publish.url).replace(/\/+$/, '')}/patchnotes.json`
+        : '';
 
-  if (feedUrl) {
+  if (patchnotesUrl) {
     try {
-      const response = await fetch(`${feedUrl}/patchnotes.json`, { cache: 'no-store' });
+      const response = await fetch(patchnotesUrl, { cache: 'no-store' });
       if (response.ok) {
         const remote = await response.json();
         if (Array.isArray(remote?.notes)) {
@@ -6915,12 +6934,20 @@ ipcMain.handle('app:get-oauth-info', () => ({
 
 ipcMain.handle('app:complete-setup', () => saveSetupState(true));
 
-ipcMain.handle('app:get-patchnotes', () => ({
-  current: app.getVersion(),
-  notes: readLocalPatchnotes(),
+ipcMain.handle('app:get-patchnotes', () => {
+  const publish = getPublishConfig();
   // Адрес раздачи: бэкоффис дотянется до заметок о версии, которой у нас ещё нет.
-  feedUrl: String(require('./package.json')?.build?.publish?.[0]?.url || '').replace(/\/+$/, ''),
-}));
+  const feedUrl =
+    publish.provider === 'github' && publish.owner && publish.repo
+      ? `https://raw.githubusercontent.com/${publish.owner}/${publish.repo}/main`
+      : String(publish.url || '').replace(/\/+$/, '');
+
+  return {
+    current: app.getVersion(),
+    notes: readLocalPatchnotes(),
+    feedUrl,
+  };
+});
 
 ipcMain.handle('app:get-server-status', () => serverStatus);
 ipcMain.handle('app:get-info', () => ({

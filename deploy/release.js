@@ -1,17 +1,24 @@
 'use strict';
 
-// Собирает установщик и заливает релиз на VPS одной командой.
+// Собирает установщик, публикует релиз на GitHub (оттуда его теперь берёт
+// автообновление) и заливает виджеты/патчноуты на VPS одной командой.
 //
 // Использование:
-//   PowerShell:  $env:TCHAT_DEPLOY_PASS='<пароль root>'; npm run release
-//   cmd:         set "TCHAT_DEPLOY_PASS=<пароль root>" && npm run release
+//   PowerShell:  $env:GH_TOKEN='<personal access token>'; $env:TCHAT_DEPLOY_PASS='<пароль root>'; npm run release
+//   cmd:         set "GH_TOKEN=<токен>" && set "TCHAT_DEPLOY_PASS=<пароль root>" && npm run release
+//
+// GH_TOKEN нужен personal access token с правами repo (Settings → Developer
+// settings → Personal access tokens на github.com) — им electron-builder
+// создаёт GitHub Release и заливает в него установщик и latest.yml.
 //
 // Что делает по шагам:
-//   1. проверяет, что задан пароль сервера (падаем сразу, до долгой сборки);
+//   1. проверяет, что заданы GH_TOKEN и пароль VPS (падаем сразу, до долгой сборки);
 //   2. ставит ssh2, если его нет (нужен upload-release.js);
-//   3. npm run dist — собирает NSIS-установщик текущей версии из package.json;
-//   4. node deploy/upload-release.js — заливает установщик, latest.yml,
-//      патчноуты и виджеты на сервер и перезапускает сервис.
+//   3. npm run dist:publish — собирает установщик и публикует его в GitHub
+//      Releases (latest.yml оттуда же читает автообновление);
+//   4. node deploy/upload-release.js — обновляет widgetServer.js, патчноуты
+//      и виджеты на VPS (это отдельный, живой сервис, не связанный с
+//      автообновлением) и перезапускает его.
 //
 // Важно: поднимите version в package.json ДО запуска — иначе автообновление
 // не увидит новый релиз (соберётся установщик со старым номером).
@@ -28,6 +35,15 @@ const releaseNote = patchnotes.notes?.find((note) => String(note.version) === St
 if (!releaseNote || typeof releaseNote.critical !== 'boolean') {
   console.error(
     `Релиз ${version} не помечен в patchnotes.json. Добавьте к записи версии "critical": true или false.`,
+  );
+  process.exit(1);
+}
+
+if (!process.env.GH_TOKEN) {
+  console.error(
+    'Не задан GitHub-токен. Задайте GH_TOKEN (personal access token с правами repo) и запустите снова:\n' +
+      "  PowerShell:  $env:GH_TOKEN='<токен>'; npm run release\n" +
+      '  cmd:         set "GH_TOKEN=<токен>" && npm run release',
   );
   process.exit(1);
 }
@@ -67,10 +83,10 @@ if (!fs.existsSync(path.join(projectDir, 'node_modules', 'ssh2'))) {
   run('установка ssh2', 'npm', ['install', '--no-save', 'ssh2']);
 }
 
-// 2. сборка установщика
-run(`сборка TChat ${version}`, 'npm', ['run', 'dist'], WINCODESIGN_HINT);
+// 2. сборка установщика и публикация в GitHub Releases
+run(`сборка и публикация TChat ${version}`, 'npm', ['run', 'dist:publish'], WINCODESIGN_HINT);
 
-// 3. заливка на сервер
-run('заливка релиза', 'node', ['deploy/upload-release.js']);
+// 3. синхронизация виджет-сервера на VPS (не связано с автообновлением)
+run('обновление виджет-сервера на VPS', 'node', ['deploy/upload-release.js']);
 
-console.log(`\nГотово: TChat ${version} собран и залит на сервер.`);
+console.log(`\nГотово: TChat ${version} опубликован на GitHub и виджет-сервер обновлён.`);

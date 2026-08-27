@@ -9,6 +9,7 @@
     "server:check": "node scripts/check-server.js",
     "smoke:test": "node scripts/smoke-test.js",
     "dist": "electron-builder --win",
+    "dist:publish": "electron-builder --win --publish always",
     "pack": "electron-builder --dir",
     "release": "node deploy/release.js"
   },
@@ -86,8 +87,9 @@
     },
     "publish": [
       {
-        "provider": "generic",
-        "url": "http://195.62.49.244/tchat/download/"
+        "provider": "github",
+        "owner": "Turrygpt",
+        "repo": "TChat"
       }
     ]
   }
