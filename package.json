@@ -89,7 +89,8 @@
       {
         "provider": "github",
         "owner": "Turrygpt",
-        "repo": "TChat"
+        "repo": "TChat",
+        "releaseType": "release"
       }
     ]
   }
