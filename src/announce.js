@@ -8,9 +8,9 @@ const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
 const MAX_API_BASE = 'https://botapi.max.ru';
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
-// Рассылку ведёт наш сервер (postbot), а не приложение напрямую: из России
+// Telegram шлём через наш relay-сервер, а не приложение напрямую: из России
 // api.telegram.org недоступен, поэтому TChat отдаёт готовый пост серверу, а тот
-// шлёт его в Telegram и MAX своими токенами. Значения можно переопределить через
+// шлёт его в Telegram своим токеном. Значения можно переопределить через
 // переменные окружения, по умолчанию — наш VPS.
 const RELAY_URL = process.env.TCHAT_RELAY_URL || 'http://195.62.49.244:8088/api/announce';
 const RELAY_AUTH = process.env.TCHAT_RELAY_AUTH || 'admin:admin';
@@ -527,33 +527,20 @@ async function buildAnnouncement(rawSettings) {
           sourceUrl: image.sourceUrl,
         }
       : null,
-    // Рассылку ведёт сервер своими токенами, поэтому обе площадки доступны
-    // независимо от того, заданы ли токены локально.
+    // Telegram шлёт relay-сервер своим токеном — доступен независимо от
+    // локальных настроек. MAX теперь шлём напрямую (см. sendAnnouncement),
+    // так что он доступен только если задан свой токен и chat_id.
     targets: {
       telegram: true,
-      max: true,
+      max: Boolean(settings.max.token && settings.max.chatId),
     },
   };
 }
 
-async function sendAnnouncement(rawSettings, prepared = {}) {
-  const text = String(prepared.text || '').trim();
-  if (!text) {
-    return { ok: false, error: 'пустой текст поста' };
-  }
-
-  // Картинку отдаём серверу в base64 — так же, как она пришла из предпросмотра.
-  const image =
-    prepared.image && prepared.image.b64
-      ? { b64: prepared.image.b64, contentType: prepared.image.contentType || 'image/jpeg' }
-      : null;
-
-  // По умолчанию шлём в обе площадки; сервер сам пропустит ту, у которой нет токена.
-  const targets = {
-    telegram: prepared.targets?.telegram !== false,
-    max: prepared.targets?.max !== false,
-  };
-
+// Telegram остаётся через relay — api.telegram.org недоступен из России вне
+// зависимости от того, какой сервер релеит. MAX шлём напрямую (см. ниже):
+// botapi.max.ru не заблокирован в РФ и, по опыту, глючит именно из-под VPN.
+async function sendTelegramViaRelay({ text, image }) {
   try {
     const response = await fetchWithTimeout(
       RELAY_URL,
@@ -563,7 +550,7 @@ async function sendAnnouncement(rawSettings, prepared = {}) {
           'Content-Type': 'application/json',
           Authorization: `Basic ${Buffer.from(RELAY_AUTH).toString('base64')}`,
         },
-        body: JSON.stringify({ text, image, targets }),
+        body: JSON.stringify({ text, image, targets: { telegram: true, max: false } }),
       },
       30000,
     );
@@ -577,24 +564,47 @@ async function sendAnnouncement(rawSettings, prepared = {}) {
 
     if (!response.ok || !data) {
       const message = (data && (data.error || data.message)) || `HTTP ${response.status}`;
-      return {
-        ok: false,
-        error: `сервер рассылки: ${message}`,
-        telegram: { ok: false, error: message },
-        max: { ok: false, error: message },
-      };
+      return { ok: false, error: `сервер рассылки: ${message}` };
     }
 
-    return data; // { ok, telegram, max }
+    return data.telegram || { ok: false, error: 'сервер рассылки не вернул статус Telegram' };
   } catch (error) {
-    const message = error?.message || String(error);
-    return {
-      ok: false,
-      error: `сервер рассылки недоступен: ${message}`,
-      telegram: { ok: false, error: message },
-      max: { ok: false, error: message },
-    };
+    return { ok: false, error: `сервер рассылки недоступен: ${error?.message || String(error)}` };
   }
+}
+
+async function sendAnnouncement(rawSettings, prepared = {}) {
+  const settings = normalizeSettings(rawSettings);
+  const text = String(prepared.text || '').trim();
+  if (!text) {
+    return { ok: false, error: 'пустой текст поста' };
+  }
+
+  const relayImage =
+    prepared.image && prepared.image.b64
+      ? { b64: prepared.image.b64, contentType: prepared.image.contentType || 'image/jpeg' }
+      : null;
+  const maxImage = relayImage
+    ? { buffer: Buffer.from(relayImage.b64, 'base64'), contentType: relayImage.contentType }
+    : null;
+
+  const wantTelegram = prepared.targets?.telegram !== false;
+  const wantMax = prepared.targets?.max !== false;
+
+  const [telegramResult, maxResult] = await Promise.all([
+    wantTelegram
+      ? sendTelegramViaRelay({ text, image: relayImage })
+      : Promise.resolve({ ok: false, skipped: true, error: 'Telegram отключён для этой рассылки' }),
+    wantMax
+      ? sendMax({ token: settings.max.token, chatId: settings.max.chatId, text, image: maxImage })
+      : Promise.resolve({ ok: false, skipped: true, error: 'MAX отключён для этой рассылки' }),
+  ]);
+
+  return {
+    ok: telegramResult.ok || maxResult.ok,
+    telegram: telegramResult,
+    max: maxResult,
+  };
 }
 
 module.exports = {
