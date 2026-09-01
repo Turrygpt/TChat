@@ -130,6 +130,18 @@ function installAxiosProxy(proxyUrl) {
     axios.defaults.proxy = false; // отключаем встроенную логику proxy, работаем через agent
     console.log('[ytProxy] axios (youtube-chat) -> ' + proxyUrl);
 
+    // https-proxy-agent открывает CONNECT-туннель отдельным сокетом ДО того,
+    // как http-модуль назначит его запросу — таймаут axios (config.timeout)
+    // на этот этап не действует, поэтому мёртвый/недоступный прокси (сервер
+    // лёг, порт зарубило на фаерволе) вешает чат навсегда, а не роняет
+    // ошибкой. AbortSignal.timeout работает на уровне запроса и это чинит.
+    axios.interceptors.request.use((requestConfig) => {
+      if (!requestConfig.signal) {
+        requestConfig.signal = AbortSignal.timeout(15000);
+      }
+      return requestConfig;
+    });
+
     // Тот же откат, что и у fetch. Без него выключенный локальный прокси
     // (Xray не поднялся, порт закрыт) молча убивал ИМЕННО чат: метаданные
     // уходили напрямую и онлайн был виден, а чат ютуба не подключался вовсе.
@@ -211,7 +223,26 @@ function installFetchProxy(proxyUrl) {
   }
 }
 
+// Логин/пароль из "http://user:pass@host:port" — нужны для app.on('login'),
+// иначе Chromium на каждую YouTube-страницу показывает системный диалог
+// авторизации прокси (PAC не умеет передавать креды).
+function proxyAuthInfo(proxyUrl) {
+  try {
+    const u = new URL(proxyUrl);
+    if (!u.username) return null;
+    return {
+      host: u.hostname,
+      port: Number(u.port) || (u.protocol === 'https:' ? 443 : 80),
+      username: decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password || ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
 let installed = false;
+let currentProxyAuth = null;
 
 function install(opts) {
   opts = opts || {};
@@ -222,9 +253,16 @@ function install(opts) {
     return;
   }
   installed = true;
+  currentProxyAuth = proxyAuthInfo(cfg.proxy);
   installChromiumProxy(opts.app, cfg.proxy);
   installAxiosProxy(cfg.proxy);
   installFetchProxy(cfg.proxy);
 }
 
-module.exports = { install, isYouTubeHost, YT_SUFFIXES };
+// Креды текущего прокси (или null, если их нет/прокси выключен) — для
+// app.on('login') в main.js.
+function getProxyAuth() {
+  return currentProxyAuth;
+}
+
+module.exports = { install, isYouTubeHost, YT_SUFFIXES, getProxyAuth };

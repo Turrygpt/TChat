@@ -6,16 +6,34 @@
 
 ## Как это устроено
 
-- `youtube-proxy.json` — выключатель и адрес локального прокси.
+- `youtube-proxy.json` — выключатель и адрес прокси (`proxy`).
 - `src/net/ytProxy.js` — на старте TChat:
   - Chromium (плеер/iframe): PAC-правило `scripts/yt.generated.pac` — на прокси уходят только youtube-домены;
-  - `youtube-chat` (axios) и метаданные (fetch) — проксируются только для youtube-хостов.
-- `youtube-bypass/` — backend обхода (локальный HTTP-прокси `127.0.0.1:1080`).
+  - `youtube-chat` (axios) и метаданные (fetch) — проксируются только для youtube-хостов;
+  - если у прокси есть логин/пароль в URL, `main.js` сам отвечает на диалог
+    авторизации Chromium (`app.on('login')`) — руками пароль вводить не нужно.
 
 Проксируемые домены: `youtube.com`, `youtu.be`, `youtube-nocookie.com`, `googlevideo.com`,
 `ytimg.com`, `ggpht.com`, `youtubei.googleapis.com`.
 
-## Установка (backend — твой VLESS через Xray)
+## Backend по умолчанию — свой VPS, без VPN и без сторонних прокси
+
+`youtube-proxy.json` по умолчанию указывает на **свой сервер**
+(`195.62.49.244:18899`, tinyproxy) — доступ по логину/паролю, на сервере разрешены
+только youtube-домены (`/etc/tinyproxy/filter`, `FilterDefaultDeny Yes`), CONNECT
+ограничен портом 443. Никакого VPN-клиента или платной VLESS-подписки на своей
+машине запускать не нужно — просто запусти `start.bat` (без `start-with-youtube.bat`
+и без `youtube-bypass\run-xray.bat`).
+
+Реквизиты и настройка tinyproxy на сервере — [[vps-restream-server]] в памяти
+проекта / история чата с настройкой. Если понадобится сменить пароль или порт —
+правь `/etc/tinyproxy/tinyproxy.conf` на сервере и `proxy` в `youtube-proxy.json`
+на клиенте.
+
+## Альтернативный backend — свой VLESS через Xray (локально)
+
+Если свой сервер недоступен (в отпуске выключил VPS и т.п.), можно вернуться на
+старую схему — локальный Xray с VLESS-подпиской:
 
 Ничего скачивать вручную не нужно — **Xray ставится сам при первом запуске**.
 `run-xray.bat` (его дёргает `start-with-youtube.bat`) при отсутствии `xray.exe`
@@ -29,9 +47,8 @@ Reality / SNI `max.ru` / flow `xtls-rprx-vision`, наружу только YouT
 вручную с https://github.com/XTLS/Xray-core/releases и положи `xray.exe`,
 `geosite.dat`, `geoip.dat` в папку `youtube-bypass/`.
 
-## Запуск
-
-Одной кнопкой (поднимает прокси, затем TChat):
+Чтобы переключиться на этот backend, в `youtube-proxy.json` поставь
+`"proxy": "http://127.0.0.1:10810"` и запускай:
 
 ```
 start-with-youtube.bat
@@ -46,10 +63,10 @@ start.bat                     :: затем TChat
 
 ## Проверка, что работает
 
-1. В окне Xray нет ошибок, слушает `127.0.0.1:10810`.
-2. В логе TChat при старте видно:
-   `[ytProxy] Chromium: YouTube -> http://127.0.0.1:10810 (PAC), остальное DIRECT`
-   Быстрая диагностика: `youtube-bypass\test-proxy.bat`.
+1. Если backend локальный (Xray/ByeDPI) — его окно без ошибок, слушает `127.0.0.1:10810`.
+2. В логе TChat при старте видно, например:
+   `[ytProxy] Chromium: YouTube -> http://tchat:***@195.62.49.244:18899 (PAC), остальное DIRECT`
+   (адрес — тот, что в `youtube-proxy.json`).
 3. Плеер/музыка с YouTube проигрываются без вечного буфера; live-чат подключается.
 4. VK/Twitch/Rutube/DonationAlerts работают как раньше (они не проксируются).
 

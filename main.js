@@ -34,7 +34,23 @@ try {
 // Точечный обход только для YouTube и только для TChat (плеер + чат + метаданные).
 // Всё остальное (VK, Twitch, Rutube, DonationAlerts, localhost) идёт напрямую.
 try {
-  require('./src/net/ytProxy').install({ app });
+  const ytProxy = require('./src/net/ytProxy');
+  ytProxy.install({ app });
+
+  // Прокси теперь может быть авторизованным (наш сервер, а не локальный
+  // Xray без пароля) — PAC этого не передаёт, поэтому Chromium на каждую
+  // youtube-страницу показывал бы системный логин-диалог. Отвечаем сами,
+  // и только если запрос именно к нашему прокси (проверка host+port),
+  // чтобы не перехватывать чужую HTTP-авторизацию.
+  const proxyAuth = ytProxy.getProxyAuth();
+  if (proxyAuth) {
+    app.on('login', (event, _webContents, _details, authInfo, callback) => {
+      if (authInfo.isProxy && authInfo.host === proxyAuth.host && authInfo.port === proxyAuth.port) {
+        event.preventDefault();
+        callback(proxyAuth.username, proxyAuth.password);
+      }
+    });
+  }
 } catch (error) {
   console.error('[ytProxy] не удалось инициализировать:', error && error.message);
 }
