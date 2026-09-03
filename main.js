@@ -434,6 +434,7 @@ function setupDonationAlertsStorage() {
   botConfigFile = path.join(storageDir, 'bot-config.json');
   channelsFile = path.join(storageDir, 'channels.json');
   loadDonationAlertsToken();
+  migrateUploadedAssetsToUserData();
   loadAlertSettings();
   loadStickerSettings();
   loadWindowState();
@@ -2404,7 +2405,9 @@ async function pickAlertAsset(kind = 'image') {
     properties: ['openFile'],
     filters: isSound
       ? [{ name: 'Аудио', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac'] }]
-      : [{ name: 'Картинки', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+      // mp4/webm тоже годятся как «картинка» алерта — оверлей и превью в
+      // бэкоффисе играют их через <video>.
+      : [{ name: 'Картинки и видео', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm'] }],
   });
 
   if (result.canceled || !result.filePaths[0]) {
@@ -2415,7 +2418,7 @@ async function pickAlertAsset(kind = 'image') {
   const extension = path.extname(sourcePath).toLowerCase() || (isSound ? '.mp3' : '.png');
   const safeName = `${kind}-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`;
   const relativePath = path.join('alerts', safeName);
-  const targetPath = path.join(__dirname, 'assets', relativePath);
+  const targetPath = path.join(getUserAssetsDir(), relativePath);
 
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.copyFileSync(sourcePath, targetPath);
@@ -2526,7 +2529,7 @@ async function pickStickerAsset() {
   const extension = path.extname(sourcePath).toLowerCase() || '.png';
   const safeName = `sticker-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`;
   const relativePath = path.join('stickers', safeName);
-  const targetPath = path.join(__dirname, 'assets', relativePath);
+  const targetPath = path.join(getUserAssetsDir(), relativePath);
 
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.copyFileSync(sourcePath, targetPath);
@@ -2784,6 +2787,50 @@ function getAssetPublicUrl(relativePath) {
   return `http://localhost:${SERVER_PORT}/assets/${relativePath.replaceAll('\\', '/')}`;
 }
 
+// Картинки и звуки, которые человек выбрал сам, копируются сюда, а не в папку
+// приложения: её затирает каждое обновление и переустановка, да и у дев-запуска
+// она своя. Настройки алертов лежат в том же userData, так что ссылки в них
+// переживают апдейт. Раздаётся тем же /assets/... — см. createLocalServer.
+function getUserAssetsDir() {
+  return path.join(app.getPath('userData'), 'assets');
+}
+
+// Апгрейд со старых версий: то, что успело скопироваться рядом с приложением,
+// переносим в userData, иначе ссылки в правилах указывают в никуда. Папку
+// defaults/ не трогаем — она едет в сборке и отдаётся оттуда же.
+function migrateUploadedAssetsToUserData() {
+  for (const group of ['alerts', 'stickers']) {
+    const sourceDir = path.join(__dirname, 'assets', group);
+    const targetDir = path.join(getUserAssetsDir(), group);
+    let entries = [];
+
+    try {
+      entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const targetPath = path.join(targetDir, entry.name);
+
+      if (fs.existsSync(targetPath)) {
+        continue;
+      }
+
+      try {
+        fs.mkdirSync(targetDir, { recursive: true });
+        fs.copyFileSync(path.join(sourceDir, entry.name), targetPath);
+      } catch (error) {
+        console.error(`Не удалось перенести ${group}/${entry.name} в userData: ${error.message}`);
+      }
+    }
+  }
+}
+
 function getPlatformIconUrl(platform) {
   const safePlatform = String(platform || 'demo').toLowerCase();
   const knownPlatforms = new Set(['twitch', 'vk', 'youtube', 'rutube', 'demo']);
@@ -2921,6 +2968,9 @@ function createLocalServer() {
   });
   expressApp.use('/widgets', express.static(widgetsPath, noCacheStaticOptions));
   expressApp.use('/assets/vdv', express.static(path.join(assetsPath, 'vdv'), noCacheStaticOptions));
+  // Сначала пользовательские загрузки из userData, потом то, что приехало в
+  // сборке (дефолтные алерты, иконки платформ и прочая статика).
+  expressApp.use('/assets', express.static(getUserAssetsDir()));
   expressApp.use('/assets', express.static(assetsPath));
 
   expressApp.get('/', (_request, response) => {

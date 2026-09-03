@@ -43,3 +43,6 @@ Keep context small. Read this file first, then open only the files needed for th
 - Android WebView wrapper: `android/` (change URL in `res/values/strings.xml`).
 - Alert media supports MP4/WebM/GIF; `.gif` rules auto-prefer a sibling `.mp4`.
 - Keep asset writes under a path that stays writable when packaged (`asar:false` + per-user install).
+- User-picked alert/sticker media is copied into `userData/assets/{alerts,stickers}`, next to the
+  settings that reference it, so it survives updates and reinstalls. `/assets/...` serves userData
+  first, then the bundled `assets/` (defaults, icons). Never write uploads into the app folder.

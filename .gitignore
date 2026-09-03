@@ -41,3 +41,8 @@ releases/
 android/.kotlin/
 
 /house.zip
+
+# Картинки и звуки алертов, выбранные пользователем: теперь они копируются
+# в userData, а старые копии в репозитории — рантайм-мусор. defaults/ остаётся.
+assets/alerts/*
+!assets/alerts/defaults/
