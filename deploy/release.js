@@ -62,13 +62,19 @@ if (!/^[\w-]+$/.test(process.env.GH_TOKEN)) {
   process.exit(1);
 }
 
-if (!process.env.TCHAT_DEPLOY_PASS) {
-  console.error(
-    'Не задан пароль сервера. Задайте TCHAT_DEPLOY_PASS и запустите снова:\n' +
-      "  PowerShell:  $env:TCHAT_DEPLOY_PASS='<пароль>'; npm run release\n" +
-      '  cmd:         set "TCHAT_DEPLOY_PASS=<пароль>" && npm run release',
+// VPS — отдельная история: автообновление живёт на GitHub, а на сервере крутится
+// раздача OBS-виджетов и ручная ссылка на установщик. Если виджеты и
+// widgetServer.js в этом релизе не менялись, обновлять там нечего, и требовать
+// пароль ради этого незачем — публикуем на GitHub и говорим, что пропустили.
+const deployToVps = Boolean(process.env.TCHAT_DEPLOY_PASS);
+
+if (!deployToVps) {
+  console.warn(
+    'TCHAT_DEPLOY_PASS не задан — виджет-сервер на VPS обновлён не будет.\n' +
+      'Автообновления это не касается: установщик и latest.yml уезжают на GitHub.\n' +
+      'Если менялись widgets/ или src/server/widgetServer.js, потом выполните:\n' +
+      "  PowerShell:  $env:TCHAT_DEPLOY_PASS='<пароль>'; node deploy/upload-release.js",
   );
-  process.exit(1);
 }
 
 // Выполняет шаг и валит весь релиз, если шаг упал: не хочется залить половину.
@@ -93,7 +99,7 @@ const WINCODESIGN_HINT =
   '  • либо запустите терминал «от имени администратора».';
 
 // 1. ssh2 нужен upload-release.js. Ставим только если ещё нет — чтобы не ждать npm зря.
-if (!fs.existsSync(path.join(projectDir, 'node_modules', 'ssh2'))) {
+if (deployToVps && !fs.existsSync(path.join(projectDir, 'node_modules', 'ssh2'))) {
   run('установка ssh2', 'npm', ['install', '--no-save', 'ssh2']);
 }
 
@@ -101,6 +107,11 @@ if (!fs.existsSync(path.join(projectDir, 'node_modules', 'ssh2'))) {
 run(`сборка и публикация TChat ${version}`, 'npm', ['run', 'dist:publish'], WINCODESIGN_HINT);
 
 // 3. синхронизация виджет-сервера на VPS (не связано с автообновлением)
-run('обновление виджет-сервера на VPS', 'node', ['deploy/upload-release.js']);
+if (deployToVps) {
+  run('обновление виджет-сервера на VPS', 'node', ['deploy/upload-release.js']);
+}
 
-console.log(`\nГотово: TChat ${version} опубликован на GitHub и виджет-сервер обновлён.`);
+console.log(
+  `\nГотово: TChat ${version} опубликован на GitHub` +
+    (deployToVps ? ' и виджет-сервер обновлён.' : '. Виджет-сервер на VPS не трогали.'),
+);
