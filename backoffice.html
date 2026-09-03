@@ -3662,6 +3662,15 @@
         return `${assetBaseUrl}${value}`;
       }
 
+      // Донат-алерты и стикеры принимают либо картинку (png/jpg/gif-анимация —
+      // всё это браузер умеет проигрывать через <img>), либо видео (mp4/webm),
+      // которое требует отдельного <video>. Без этой развилки превью в
+      // бэкоффисе для видео просто ломалось (иконка битой картинки).
+      function isVideoAsset(url) {
+        const clean = String(url || '').split('?')[0].toLowerCase();
+        return clean.endsWith('.mp4') || clean.endsWith('.webm');
+      }
+
       const settingsKey = 'tchat.chatWindowSettings';
       const donationAlertsTokenKey = 'tchat.donationAlertsToken';
       const donationAlertsClientIdKey = 'tchat.donationAlertsClientId';
@@ -4364,7 +4373,8 @@
                 <div class="asset-actions">
                   <button class="mini-button" type="button" data-preview-image>Просмотр</button>
                 </div>
-                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(resolveAssetUrl(image))}" ${image ? '' : 'hidden'} />
+                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(resolveAssetUrl(image))}" ${image && !isVideoAsset(image) ? '' : 'hidden'} />
+                <video class="rule-preview" controls muted loop playsinline src="${escapeHtml(resolveAssetUrl(image))}" ${image && isVideoAsset(image) ? '' : 'hidden'}></video>
               </div>
               <div class="asset-field wide">
                 <label>Мелодия
@@ -4429,7 +4439,8 @@
                 <div class="asset-actions">
                   <button class="mini-button" type="button" data-preview-image>Просмотр</button>
                 </div>
-                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(resolveAssetUrl(image))}" ${image ? '' : 'hidden'} />
+                <img class="rule-preview" alt="Просмотр картинки" src="${escapeHtml(resolveAssetUrl(image))}" ${image && !isVideoAsset(image) ? '' : 'hidden'} />
+                <video class="rule-preview" controls muted loop playsinline src="${escapeHtml(resolveAssetUrl(image))}" ${image && isVideoAsset(image) ? '' : 'hidden'}></video>
               </div>
               <div class="asset-field wide">
                 <label>Мелодия
@@ -4734,9 +4745,16 @@
       function refreshRuleAssetPreview(card, kind) {
         if (kind === 'image') {
           const imageUrl = card.querySelector('[data-rule-field="image"]').value.trim();
-          const preview = card.querySelector('.rule-preview');
-          preview.src = resolveAssetUrl(imageUrl);
-          preview.hidden = !imageUrl;
+          const isVideo = imageUrl && isVideoAsset(imageUrl);
+          const [imgPreview, videoPreview] = card.querySelectorAll('img.rule-preview, video.rule-preview');
+
+          imgPreview.src = resolveAssetUrl(imageUrl);
+          imgPreview.hidden = !imageUrl || isVideo;
+
+          videoPreview.pause();
+          videoPreview.hidden = !isVideo;
+          videoPreview.src = isVideo ? resolveAssetUrl(imageUrl) : '';
+          if (isVideo) videoPreview.load();
           return;
         }
 
@@ -7466,8 +7484,7 @@
       };
 
       function isStickerVideo(url) {
-        const clean = String(url || '').split('?')[0].toLowerCase();
-        return clean.endsWith('.mp4') || clean.endsWith('.webm');
+        return isVideoAsset(url);
       }
 
       function renderStickerRule(rule) {
