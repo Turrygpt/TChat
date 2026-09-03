@@ -48,6 +48,20 @@ if (!process.env.GH_TOKEN) {
   process.exit(1);
 }
 
+// В GitHub-токене бывают только буквы, цифры, _ и -. Всё остальное — это в
+// переменную попала подстановка из инструкции (<токен>) или лишние кавычки.
+// electron-builder ловит это сам, но уже В КОНЦЕ сборки: несколько минут
+// потрачено впустую, а ошибка тонет в куче стектрейсов про publish.
+if (!/^[\w-]+$/.test(process.env.GH_TOKEN)) {
+  console.error(
+    'GH_TOKEN не похож на токен: в нём есть символы, которых в GitHub PAT не бывает —\n' +
+      'скорее всего, в переменную попала подстановка <токен> или лишние кавычки.\n' +
+      'Токен берётся на github.com: Settings → Developer settings → Personal access tokens →\n' +
+      'Tokens (classic) → Generate new token, права repo.',
+  );
+  process.exit(1);
+}
+
 if (!process.env.TCHAT_DEPLOY_PASS) {
   console.error(
     'Не задан пароль сервера. Задайте TCHAT_DEPLOY_PASS и запустите снова:\n' +
