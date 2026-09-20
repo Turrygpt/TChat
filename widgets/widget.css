@@ -158,6 +158,16 @@ body {
     0 2px 8px rgb(0 0 0 / 85%);
 }
 
+.chat-message__emote {
+  display: inline-block;
+  width: auto;
+  height: calc(1.45em * var(--chat-font-scale));
+  max-width: calc(2.6em * var(--chat-font-scale));
+  margin: -0.22em 0.08em -0.22em;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
 .widget-page--alert {
   display: grid;
   place-items: center;
@@ -1350,8 +1360,8 @@ body {
 .stream-text {
   position: absolute;
   display: block;
-  width: max-content !important;
-  max-width: none !important;
+  width: max-content;
+  max-width: none;
   min-width: 0;
   padding: 0;
   overflow: visible;
@@ -1381,8 +1391,8 @@ body.widget-page--texts {
 .stream-text__frame {
   position: relative;
   display: inline-block;
-  width: max-content !important;
-  max-width: none !important;
+  width: max-content;
+  max-width: none;
   border: 1px solid rgb(var(--cs-accent-rgb) / 32%);
   border-radius: var(--cs-radius);
   background:
@@ -1415,8 +1425,8 @@ body.widget-page--texts {
   font-weight: 800;
   line-height: 1.22;
   letter-spacing: 0.015em;
-  white-space: nowrap;
-  text-wrap: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   text-shadow:
     0 2px 0 rgb(0 0 0 / 55%),
     0 8px 24px rgb(0 0 0 / 48%);

@@ -128,7 +128,7 @@ function addMessage(message) {
       ${renderOverlayBadges(message.badges)}
       <strong>${escapeHtml(message.user)}</strong>
     </div>
-    <p>${escapeHtml(message.text)}</p>
+    <p>${renderMessageParts(message)}</p>
   `;
 
   // Новые сообщения — сверху.
@@ -147,6 +147,24 @@ function addMessage(message) {
       item.remove();
     }, CHAT_REMOVE_MS);
   }
+}
+
+// Twitch и YouTube присылают смайлики отдельными картинками в parts. Текст
+// оставляем запасным вариантом для старых сообщений и остальных площадок.
+function renderMessageParts(message = {}) {
+  if (!Array.isArray(message.parts) || !message.parts.length) {
+    return escapeHtml(message.text || '');
+  }
+
+  return message.parts
+    .map((part) => {
+      if (part?.type === 'image' && part.url) {
+        const alt = escapeHtml(part.alt || '');
+        return `<img class="chat-message__emote" src="${escapeHtml(part.url)}" alt="${alt}" title="${alt}" />`;
+      }
+      return escapeHtml(part?.text || '');
+    })
+    .join('');
 }
 
 applyChatSettings(chatSettings);

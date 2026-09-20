@@ -348,10 +348,14 @@ function resolveLatestInstaller(releasesPath) {
 }
 
 function normalizeChatMessage(payload = {}) {
+  const text = payload.text || 'Пустое сообщение';
   return {
     platform: payload.platform || 'demo',
     user: payload.user || 'Гость',
-    text: payload.text || 'Пустое сообщение',
+    text,
+    parts: Array.isArray(payload.parts) && payload.parts.length
+      ? payload.parts
+      : [{ type: 'text', text }],
     badges: Array.isArray(payload.badges) ? payload.badges : [],
     createdAt: payload.createdAt || new Date().toISOString(),
   };

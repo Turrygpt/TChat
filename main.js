@@ -924,8 +924,6 @@ function normalizeTextsWidget(widget = {}) {
     fontSize: Math.min(Math.max(Number(widget.fontSize || DEFAULT_TEXTS_FONT_SIZE), 14), 96),
   };
 
-  delete normalized.height;
-
   return normalized;
 }
 
@@ -2885,17 +2883,8 @@ function normalizeTtsText(value = '') {
     .slice(0, 700);
 }
 
-function escapeSsmlText(value = '') {
-  return normalizeTtsText(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
-
 function getEdgeTtsCachePath(text, options = {}) {
-  const cacheDir = path.join(__dirname, 'assets', 'tts');
+  const cacheDir = path.join(getUserAssetsDir(), 'tts');
   fs.mkdirSync(cacheDir, { recursive: true });
   const hash = crypto
     .createHash('sha1')
@@ -2922,13 +2911,33 @@ async function getEdgeTtsAudioPath(text, options = {}) {
   };
   const filePath = getEdgeTtsCachePath(normalizedText, ttsOptions);
 
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1024) {
     return filePath;
   }
 
-  const edgeTts = new EdgeTTS(ttsOptions);
-  await edgeTts.ttsPromise(escapeSsmlText(normalizedText), filePath);
-  return filePath;
+  // node-edge-tts сам экранирует XML. Повторное экранирование ломало фразы с
+  // &, < и >. Пишем сначала во временный файл: оборванный запрос больше не
+  // оставляет «валидный» кэш, который браузер затем не может проиграть.
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+      const edgeTts = new EdgeTTS(ttsOptions);
+      await edgeTts.ttsPromise(normalizedText, temporaryPath);
+      if (!fs.existsSync(temporaryPath) || fs.statSync(temporaryPath).size <= 1024) {
+        throw new Error('EdgeTTS вернул пустой аудиофайл');
+      }
+      fs.renameSync(temporaryPath, filePath);
+      return filePath;
+    } catch (error) {
+      lastError = error;
+      fs.rmSync(temporaryPath, { force: true });
+      fs.rmSync(filePath, { force: true });
+    }
+  }
+
+  throw lastError || new Error('EdgeTTS не создал аудиофайл');
 }
 
 function createLocalServer() {
@@ -2986,6 +2995,7 @@ function createLocalServer() {
         pitch: request.query?.pitch,
       });
 
+      response.setHeader('Cache-Control', 'no-store');
       response.type('audio/mpeg').sendFile(filePath);
     } catch (error) {
       console.error(`Edge TTS error: ${error.message}`);

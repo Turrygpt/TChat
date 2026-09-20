@@ -833,8 +833,19 @@
       }
 
       .preview-widget > .stream-text {
-        width: max-content !important;
-        max-width: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+
+      .preview-widget > .stream-text .stream-text__frame {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+      }
+
+      .preview-widget > .stream-text .stream-text__content {
+        overflow-wrap: anywhere;
+        white-space: normal;
       }
 
       .preview-widget > .stream-task-board {
@@ -962,6 +973,32 @@
         height: 6px;
         border-right: 2px solid rgb(6 18 11 / 80%);
         border-bottom: 2px solid rgb(6 18 11 / 80%);
+      }
+
+      .preview-stretch-handle {
+        position: absolute;
+        right: 20px;
+        bottom: -7px;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--bg);
+        border-radius: 4px;
+        background: linear-gradient(135deg, var(--orange, #ff9f43), #f368e0);
+        box-shadow: 0 4px 14px rgb(0 0 0 / 45%);
+        cursor: nwse-resize;
+        /* Компенсируем масштаб сцены, чтобы ручка оставалась одного размера на экране. */
+        transform: scale(calc(var(--preview-inv-scale, 1) * var(--widget-inv-scale, 1)));
+        transform-origin: center;
+      }
+
+      .preview-stretch-handle::before {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        right: 2px;
+        bottom: 2px;
+        border: 1px dashed rgb(6 18 11 / 70%);
       }
 
       .workspace-countdown-status {
@@ -2780,7 +2817,7 @@
           <article class="panel panel--wide">
             <h2>Ключи и токены (Telegram, MAX, ИИ)</h2>
             <p class="muted">
-              Используются рассылкой анонсов (вкладка «Рассылка») и отдаются внешнему боту одним конфигом.
+              Рассылка анонсов отправляется напрямую с этого ПК через указанных ботов; эти же настройки можно скачать одним конфигом.
             </p>
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
               <label class="field">
@@ -3638,7 +3675,7 @@
         <header class="preview-modal__head">
           <div>
             <strong>Превью стрима</strong>
-            <span class="muted">Перетаскивайте виджеты и тяните угловую кнопку, чтобы масштабировать их целиком в OBS</span>
+            <span class="muted">Перетаскивайте виджеты; круглая ручка масштабирует их целиком, а квадратная — растягивает ширину и высоту отдельно</span>
           </div>
           <button id="closePreviewButton" class="button button--ghost" type="button" data-preview-close>Закрыть</button>
         </header>
@@ -3694,6 +3731,7 @@
       let selectedWorkspaceWidgetId = '';
       let previewDrag = null;
       let previewResize = null;
+      let previewStretch = null;
       let previewPointerTracking = false;
       let pollOptionDraft = ['Вариант 1', 'Вариант 2'];
 
@@ -5378,31 +5416,14 @@
         const height = Number(widget.height);
         const hasHeight = Number.isFinite(height) && height > 0;
         const heightStyle = hasHeight ? `height:${height}%;overflow:hidden;box-sizing:border-box;` : '';
-
-        if (widget.type === 'countdown') {
-          return `width:max-content;max-width:${size}%;${heightStyle}`;
-        }
-
-        if (widget.type === 'texts') {
-          return `width:max-content;max-width:none;${heightStyle}`;
-        }
-
         return `width:${size}%;${heightStyle}`;
       }
 
       function applyPreviewSize(node, widget, widthPercent, heightPercent) {
         const width = Math.max(Number(widthPercent || 0), getWidgetMinWidthPercent(widget.type));
 
-        if (widget.type === 'countdown') {
-          node.style.width = 'max-content';
-          node.style.maxWidth = `${width}%`;
-        } else if (widget.type === 'texts') {
-          node.style.width = 'max-content';
-          node.style.maxWidth = 'none';
-        } else {
-          node.style.maxWidth = '';
-          node.style.width = `${width}%`;
-        }
+        node.style.maxWidth = '';
+        node.style.width = `${width}%`;
 
         const height = Number(heightPercent);
         const hasHeight = Number.isFinite(height) && height > 0;
@@ -5442,8 +5463,13 @@
           const node = previewStage?.querySelector(`[data-preview-widget="${CSS.escape(previewResize.id)}"]`);
           node?.classList.remove('is-resizing');
         }
+        if (previewStretch) {
+          const node = previewStage?.querySelector(`[data-preview-widget="${CSS.escape(previewStretch.id)}"]`);
+          node?.classList.remove('is-resizing');
+        }
         previewDrag = null;
         previewResize = null;
+        previewStretch = null;
         endPreviewPointerTracking();
       }
 
@@ -5467,7 +5493,8 @@
                 data-preview-widget="${escapeHtml(widget.id)}"
                 style="left:${x}%; top:${y}%; ${getPreviewSizeStyle(widget, width)} scale:${widgetScale}; --widget-inv-scale:${1 / widgetScale};">
                 ${renderPreviewWidgetContent(widget)}
-                <button class="preview-resize-handle" type="button" aria-label="Изменить масштаб всего виджета" title="Масштаб всего виджета" data-resize-widget="${escapeHtml(widget.id)}"></button>
+                <button class="preview-resize-handle" type="button" aria-label="Изменить масштаб всего виджета" title="Масштаб всего виджета (пропорционально)" data-resize-widget="${escapeHtml(widget.id)}"></button>
+                <button class="preview-stretch-handle" type="button" aria-label="Растянуть виджет по ширине и высоте" title="Растянуть виджет (ширина/высота отдельно)" data-stretch-widget="${escapeHtml(widget.id)}"></button>
               </div>
             `;
           })
@@ -6086,7 +6113,7 @@
       }
 
       function startPreviewDrag(event) {
-        if (event.target.closest('[data-resize-widget]')) return;
+        if (event.target.closest('[data-resize-widget], [data-stretch-widget]')) return;
         const node = event.target.closest('[data-preview-widget]');
         if (!node || !previewStage) return;
 
@@ -6111,6 +6138,11 @@
           return;
         }
 
+        if (previewStretch) {
+          movePreviewStretch(event);
+          return;
+        }
+
         if (!previewDrag || !previewStage) return;
 
         const x = ((event.clientX - previewDrag.stageRect.left - previewDrag.offsetX) / previewDrag.stageRect.width) * 100;
@@ -6125,6 +6157,11 @@
       function endPreviewDrag(event) {
         if (previewResize) {
           endPreviewResize(event);
+          return;
+        }
+
+        if (previewStretch) {
+          endPreviewStretch(event);
           return;
         }
 
@@ -6196,6 +6233,75 @@
         }
         event.target.releasePointerCapture?.(event.pointerId);
         previewResize = null;
+        endPreviewPointerTracking();
+      }
+
+      function startPreviewStretch(event) {
+        const handle = event.target.closest('[data-stretch-widget]');
+        if (!handle || !previewStage) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const node = handle.closest('[data-preview-widget]');
+        const widget = widgetsState.items.find((item) => item.id === handle.dataset.stretchWidget);
+        if (!node || !widget) return;
+
+        const stageRect = previewStage.getBoundingClientRect();
+        const nodeRect = node.getBoundingClientRect();
+        const widgetScale = Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3);
+        const startWidth = Number(widget.width ?? 30);
+        const explicitHeight = Number(widget.height);
+        const startHeight = Number.isFinite(explicitHeight) && explicitHeight > 0
+          ? explicitHeight
+          : Math.max(((nodeRect.height / widgetScale) / stageRect.height) * 100, getWidgetMinHeightPercent());
+
+        previewStretch = {
+          id: widget.id,
+          type: widget.type,
+          stageRect,
+          startX: event.clientX,
+          startY: event.clientY,
+          startWidth,
+          startHeight,
+          currentWidth: startWidth,
+          currentHeight: startHeight,
+        };
+        node.classList.add('is-resizing');
+        beginPreviewPointerTracking();
+        handle.setPointerCapture?.(event.pointerId);
+      }
+
+      function movePreviewStretch(event) {
+        if (!previewStretch || !previewStage) return;
+
+        const node = previewStage.querySelector(`[data-preview-widget="${CSS.escape(previewStretch.id)}"]`);
+        if (!node) return;
+
+        const dxPercent = ((event.clientX - previewStretch.startX) / previewStretch.stageRect.width) * 100;
+        const dyPercent = ((event.clientY - previewStretch.startY) / previewStretch.stageRect.height) * 100;
+        const width = Math.max(previewStretch.startWidth + dxPercent, getWidgetMinWidthPercent(previewStretch.type));
+        const height = Math.max(previewStretch.startHeight + dyPercent, getWidgetMinHeightPercent());
+        previewStretch.currentWidth = width;
+        previewStretch.currentHeight = height;
+        applyPreviewSize(node, { type: previewStretch.type }, width, height);
+      }
+
+      function endPreviewStretch(event) {
+        if (!previewStretch || !previewStage) return;
+
+        const node = previewStage.querySelector(`[data-preview-widget="${CSS.escape(previewStretch.id)}"]`);
+        const widget = widgetsState.items.find((item) => item.id === previewStretch.id);
+        node?.classList.remove('is-resizing');
+        if (widget) {
+          const patch = {
+            width: Math.round(previewStretch.currentWidth * 100) / 100,
+            height: Math.round(previewStretch.currentHeight * 100) / 100,
+          };
+          updateWorkspaceWidget(previewStretch.id, patch);
+        }
+        event.target.releasePointerCapture?.(event.pointerId);
+        previewStretch = null;
         endPreviewPointerTracking();
       }
 
@@ -7322,6 +7428,7 @@
         renderPollOptions();
       });
       previewStage.addEventListener('pointerdown', startPreviewResize);
+      previewStage.addEventListener('pointerdown', startPreviewStretch);
       previewStage.addEventListener('pointerdown', startPreviewDrag);
       function handleAlertAssetClick(event) {
         const card = event.target.closest('.rule-card');

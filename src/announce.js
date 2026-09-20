@@ -8,13 +8,6 @@ const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
 const MAX_API_BASE = 'https://botapi.max.ru';
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
-// Telegram шлём через наш relay-сервер, а не приложение напрямую: из России
-// api.telegram.org недоступен, поэтому TChat отдаёт готовый пост серверу, а тот
-// шлёт его в Telegram своим токеном. Значения можно переопределить через
-// переменные окружения, по умолчанию — наш VPS.
-const RELAY_URL = process.env.TCHAT_RELAY_URL || 'http://195.62.49.244:8088/api/announce';
-const RELAY_AUTH = process.env.TCHAT_RELAY_AUTH || 'admin:admin';
-
 const HTTP_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -527,50 +520,12 @@ async function buildAnnouncement(rawSettings) {
           sourceUrl: image.sourceUrl,
         }
       : null,
-    // Telegram шлёт relay-сервер своим токеном — доступен независимо от
-    // локальных настроек. MAX теперь шлём напрямую (см. sendAnnouncement),
-    // так что он доступен только если задан свой токен и chat_id.
+    // Оба мессенджера отправляются прямо с этого ПК своими ботами.
     targets: {
-      telegram: true,
+      telegram: Boolean(settings.telegram.token && settings.telegram.chatId),
       max: Boolean(settings.max.token && settings.max.chatId),
     },
   };
-}
-
-// Telegram остаётся через relay — api.telegram.org недоступен из России вне
-// зависимости от того, какой сервер релеит. MAX шлём напрямую (см. ниже):
-// botapi.max.ru не заблокирован в РФ и, по опыту, глючит именно из-под VPN.
-async function sendTelegramViaRelay({ text, image }) {
-  try {
-    const response = await fetchWithTimeout(
-      RELAY_URL,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Basic ${Buffer.from(RELAY_AUTH).toString('base64')}`,
-        },
-        body: JSON.stringify({ text, image, targets: { telegram: true, max: false } }),
-      },
-      30000,
-    );
-
-    let data = null;
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
-    }
-
-    if (!response.ok || !data) {
-      const message = (data && (data.error || data.message)) || `HTTP ${response.status}`;
-      return { ok: false, error: `сервер рассылки: ${message}` };
-    }
-
-    return data.telegram || { ok: false, error: 'сервер рассылки не вернул статус Telegram' };
-  } catch (error) {
-    return { ok: false, error: `сервер рассылки недоступен: ${error?.message || String(error)}` };
-  }
 }
 
 async function sendAnnouncement(rawSettings, prepared = {}) {
@@ -580,23 +535,24 @@ async function sendAnnouncement(rawSettings, prepared = {}) {
     return { ok: false, error: 'пустой текст поста' };
   }
 
-  const relayImage =
+  const preparedImage =
     prepared.image && prepared.image.b64
-      ? { b64: prepared.image.b64, contentType: prepared.image.contentType || 'image/jpeg' }
+      ? {
+          buffer: Buffer.from(prepared.image.b64, 'base64'),
+          contentType: prepared.image.contentType || 'image/jpeg',
+          sourceUrl: prepared.image.sourceUrl || '',
+        }
       : null;
-  const maxImage = relayImage
-    ? { buffer: Buffer.from(relayImage.b64, 'base64'), contentType: relayImage.contentType }
-    : null;
 
   const wantTelegram = prepared.targets?.telegram !== false;
   const wantMax = prepared.targets?.max !== false;
 
   const [telegramResult, maxResult] = await Promise.all([
     wantTelegram
-      ? sendTelegramViaRelay({ text, image: relayImage })
+      ? sendTelegram({ token: settings.telegram.token, chatId: settings.telegram.chatId, text, image: preparedImage })
       : Promise.resolve({ ok: false, skipped: true, error: 'Telegram отключён для этой рассылки' }),
     wantMax
-      ? sendMax({ token: settings.max.token, chatId: settings.max.chatId, text, image: maxImage })
+      ? sendMax({ token: settings.max.token, chatId: settings.max.chatId, text, image: preparedImage })
       : Promise.resolve({ ok: false, skipped: true, error: 'MAX отключён для этой рассылки' }),
   ]);
 

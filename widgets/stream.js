@@ -45,14 +45,6 @@ function widgetScaleCss(widget = {}) {
 function applyWidgetHeight(node, widget) {
   if (!node) return;
 
-  if (widget?.type === 'texts') {
-    node.classList.remove('stream-widget--sized');
-    node.style.removeProperty('height');
-    node.style.removeProperty('overflow');
-    node.style.removeProperty('box-sizing');
-    return;
-  }
-
   const height = Number(widget.height);
   const hasHeight = Number.isFinite(height) && height > 0;
   node.classList.toggle('stream-widget--sized', hasHeight);
@@ -231,6 +223,7 @@ function applyChatWidgetLayout(items) {
   streamChat.style.left = `${Number(widget.x ?? 4)}%`;
   streamChat.style.top = `${Number(widget.y ?? 48)}%`;
   streamChat.style.width = `${Number(widget.width ?? 30)}%`;
+  applyWidgetHeight(streamChat, widget);
   applyWidgetScale(streamChat, widget);
   // opacity — прозрачность в процентах: 0 — панель непрозрачна, 100 — полностью прозрачна.
   const transparency = Math.min(Math.max(Number(widget.opacity) || 0, 0), 100);
@@ -254,7 +247,7 @@ function addChatMessage(message = {}) {
       ${message.platform ? `<span class="chat-message__platform">${escapeHtml(message.platform)}</span>` : ''}
       <strong>${escapeHtml(message.user || '')}</strong>
     </div>
-    <p>${escapeHtml(message.text || '')}</p>
+    <p>${renderChatMessageParts(message)}</p>
   `;
 
   // FLIP: уже показанные строки после вставки сверху «прыгнули» бы вниз. Плавно
@@ -283,6 +276,22 @@ function addChatMessage(message = {}) {
   // прозрачности) и убираем из DOM.
   setTimeout(() => item.classList.add('chat-message--old'), chatHideMs);
   setTimeout(() => item.remove(), chatHideMs + 950); // ждём конца дым-анимации
+}
+
+function renderChatMessageParts(message = {}) {
+  if (!Array.isArray(message.parts) || !message.parts.length) {
+    return escapeHtml(message.text || '');
+  }
+
+  return message.parts
+    .map((part) => {
+      if (part?.type === 'image' && part.url) {
+        const alt = escapeHtml(part.alt || '');
+        return `<img class="chat-message__emote" src="${escapeHtml(part.url)}" alt="${alt}" title="${alt}" />`;
+      }
+      return escapeHtml(part?.text || '');
+    })
+    .join('');
 }
 
 function applyAlertWidgetLayout() {
@@ -398,8 +407,8 @@ function updateCountdownNode(node, widget) {
 
   node.style.left = `${Number(widget.x || 72)}%`;
   node.style.top = `${Number(widget.y || 4)}%`;
-  node.style.width = 'max-content';
-  node.style.maxWidth = `${Number(widget.width || 18)}%`;
+  node.style.width = `${Number(widget.width || 18)}%`;
+  node.style.maxWidth = 'none';
   applyWidgetHeight(node, widget);
   applyWidgetScale(node, widget);
 
@@ -512,21 +521,18 @@ function ensureTextNode(widget) {
   return node;
 }
 
-function applyTextNodeSizing(node) {
+function applyTextNodeSizing(node, widget) {
   if (!node) return;
 
-  node.style.setProperty('width', 'max-content', 'important');
+  node.style.setProperty('width', `${Number(widget.width || 28)}%`, 'important');
   node.style.setProperty('max-width', 'none', 'important');
-  node.style.removeProperty('height');
-  node.style.removeProperty('overflow');
-  node.style.removeProperty('box-sizing');
-  node.classList.remove('stream-widget--sized');
+  applyWidgetHeight(node, widget);
 
   const frame = node.querySelector('.stream-text__frame');
   if (frame) {
-    frame.style.setProperty('width', 'max-content', 'important');
-    frame.style.setProperty('max-width', 'none', 'important');
-    frame.style.overflow = 'visible';
+    frame.style.setProperty('width', '100%', 'important');
+    frame.style.setProperty('max-width', '100%', 'important');
+    frame.style.setProperty('overflow', 'hidden', 'important');
   }
 }
 
@@ -536,7 +542,7 @@ function updateTextNode(node, widget) {
 
   node.style.left = `${Number(widget.x || 8)}%`;
   node.style.top = `${Number(widget.y || 18)}%`;
-  applyTextNodeSizing(node);
+  applyTextNodeSizing(node, widget);
   applyWidgetScale(node, widget);
   node.hidden = !content;
 
