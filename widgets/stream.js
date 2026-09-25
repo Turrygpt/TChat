@@ -24,7 +24,6 @@ const queuedAlertIds = new Set();
 let isAlertPlaying = false;
 let displaySeconds = 8;
 let latestState = { items: [], poll: null };
-let latestVdvState = null;
 let pollTickTimer = null;
 let countdownRenderTimer = null;
 
@@ -84,13 +83,6 @@ fetch('/alerts/state')
   .catch(() => {});
 
 socket.on('widgets:state', applyWidgetsState);
-socket.on('vdv:update', applyVdvState);
-
-fetch('/vdv/state')
-  .then((response) => response.json())
-  .then(applyVdvState)
-  .catch(() => {});
-
 socket.on('chat:message', addChatMessage);
 
 window.addEventListener('message', (event) => {
@@ -184,18 +176,6 @@ function applyWidgetsState(state = {}) {
   renderEmbeddedWidgets(latestState.items);
   renderPoll(latestState.poll);
   applyChatWidgetLayout(latestState.items);
-}
-
-function applyVdvState(state = {}) {
-  latestVdvState = state;
-  const frame = streamEmbeddedWidgets?.querySelector('.stream-embedded-widget--vdv');
-  const revealing = Number(state.revealIndex) >= 0;
-  frame?.classList.toggle('is-revealing', revealing);
-  if (frame) {
-    const widget = latestState.items.find((item) => item.type === 'vdv');
-    applyWidgetScale(frame, revealing ? { scale: 1 } : widget);
-  }
-  streamEmbeddedWidgets?.classList.toggle('has-vdv-reveal', revealing && Boolean(frame));
 }
 
 // Чат в общем overlay: сам виджет (позиция, ширина, вкл/выкл) приходит в
@@ -701,12 +681,6 @@ function embeddedWidgetSrc(widget) {
   if (widget.type === 'music') {
     return '/widgets/music.html?embedded=1';
   }
-  if (widget.type === 'lastdonation') {
-    return '/widgets/lastdonation.html?embedded=1';
-  }
-  if (widget.type === 'vdv') {
-    return '/widgets/vdv.html?embedded=1';
-  }
   if (widget.type === 'video-overlay') {
     const interval = Math.min(Math.max(Number(widget.intervalMinutes || 5), 0.1), 1440);
     const duration = Math.min(Math.max(Number(widget.durationSeconds || 15), 1), 3600);
@@ -718,7 +692,7 @@ function embeddedWidgetSrc(widget) {
 function renderEmbeddedWidgets(items) {
   if (!streamEmbeddedWidgets) return;
 
-  const widgets = items.filter((item) => ['music', 'giveaway', 'lastdonation', 'vdv', 'video-overlay'].includes(item.type) && item.enabled !== false);
+  const widgets = items.filter((item) => ['music', 'giveaway', 'video-overlay'].includes(item.type) && item.enabled !== false);
   const activeIds = new Set(widgets.map((widget) => widget.id));
 
   streamEmbeddedWidgets.querySelectorAll('[data-embedded-widget-id]').forEach((node) => {
@@ -732,8 +706,7 @@ function renderEmbeddedWidgets(items) {
     const y = Number(widget.y ?? 10);
     const width = Number(widget.width ?? 28);
     const src = embeddedWidgetSrc(widget);
-    const revealingVdv = widget.type === 'vdv' && Number(latestVdvState?.revealIndex) >= 0;
-    const style = `left: ${x}%; top: ${y}%; width: ${width}%; ${widgetHeightCss(widget)} ${widgetScaleCss(revealingVdv ? { scale: 1 } : widget)}`;
+    const style = `left: ${x}%; top: ${y}%; width: ${width}%; ${widgetHeightCss(widget)} ${widgetScaleCss(widget)}`;
     let node = streamEmbeddedWidgets.querySelector(`[data-embedded-widget-id="${widget.id}"]`);
 
     if (node) {
@@ -742,7 +715,6 @@ function renderEmbeddedWidgets(items) {
       }
       node.setAttribute('title', widget.title || 'Музыка');
       node.setAttribute('style', style);
-      if (widget.type === 'vdv') node.classList.toggle('is-revealing', Number(latestVdvState?.revealIndex) >= 0);
       return;
     }
 
@@ -755,12 +727,10 @@ function renderEmbeddedWidgets(items) {
     node.allow = 'clipboard-write; autoplay; encrypted-media; fullscreen';
     node.setAttribute('allowtransparency', 'true');
     node.allowFullscreen = true;
-    if (widget.type === 'vdv') node.classList.toggle('is-revealing', Number(latestVdvState?.revealIndex) >= 0);
     node.addEventListener('load', () => syncObsPlaybackState(node));
     streamEmbeddedWidgets.appendChild(node);
   });
 
-  applyVdvState(latestVdvState || {});
 }
 
 let obsSourceVisible = true;

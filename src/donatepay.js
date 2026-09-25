@@ -41,6 +41,7 @@ let lastError = '';
 let lastEventAt = 0;
 const seen = new Set();
 const seenOrder = [];
+let primed = false;
 
 let onDonation = () => {};
 let onStatus = () => {};
@@ -112,7 +113,9 @@ function setError(message) {
 // DonatePay бьёт по рукам за частые запросы (429), поэтому все обращения идут
 // друг за другом с паузой, а на 429 ждём и повторяем. Иначе включение
 // подключения само себя роняло: проверка ключа и старт шли подряд.
-const MIN_REQUEST_GAP = 1500;
+// У DonatePay лимит на последовательные API-вызовы; короткая пауза приводила
+// к 429 сразу после проверки пользователя и мешала получить токен сокета.
+const MIN_REQUEST_GAP = 21000;
 let lastRequestAt = 0;
 let requestChain = Promise.resolve();
 
@@ -133,8 +136,8 @@ function schedule(task) {
   return run;
 }
 
-async function apiGet(method, params = {}, attempt = 0) {
-  const query = new URLSearchParams({ access_token: config.apiKey, ...params });
+async function apiGet(method, params = {}, attempt = 0, apiKey = config.apiKey) {
+  const query = new URLSearchParams({ access_token: apiKey, ...params });
   const response = await schedule(() =>
     fetch(`${API_BASE}/v1/${method}?${query}`, { signal: AbortSignal.timeout(15000) }),
   );
@@ -143,26 +146,30 @@ async function apiGet(method, params = {}, attempt = 0) {
       throw new Error('сервис просит не частить (429)');
     }
     const retryAfter = Number(response.headers.get('retry-after')) || 0;
-    await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000 || 3000 * (attempt + 1)));
-    return apiGet(method, params, attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000 || MIN_REQUEST_GAP * (attempt + 1)));
+    return apiGet(method, params, attempt + 1, apiKey);
   }
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
-  return response.json();
+  const data = await response.json();
+  if (data?.status === 'error' || data?.error) {
+    throw new Error(data.message || data.error || 'ошибка DonatePay');
+  }
+  return data;
 }
 
 // Кто мы — нужен id, из него собирается имя канала Centrifugo ($public:<id>).
 // Результат кешируется: id не меняется, а лишний запрос стоит нам 429.
-async function fetchUser() {
-  if (user?.id) {
+async function fetchUser(apiKey = config.apiKey) {
+  if (apiKey === config.apiKey && user?.id) {
     return user;
   }
-  const data = await apiGet('user');
-  const info = data?.data || data?.user || data;
+  const data = await apiGet('user', {}, 0, apiKey);
+  const info = data?.data?.user || data?.data || data?.user || data;
   const id = info?.id ?? info?.user_id;
   if (!id) {
-    throw new Error('ответ без id пользователя');
+    throw new Error('DonatePay не вернул id пользователя');
   }
   return { id: String(id), name: String(info.name || info.login || '') };
 }
@@ -171,7 +178,7 @@ async function fetchUser() {
 //   без client — токен подключения;
 //   с client и списком каналов — токен подписки на приватный $public:<id>.
 // Просить токен подписки до подключения бессмысленно: сервер отдаёт HTML.
-async function fetchSocketToken(body) {
+async function fetchSocketToken(body, attempt = 0) {
   const response = await schedule(() =>
     fetch(`${API_BASE}/v2/socket/token`, {
       method: 'POST',
@@ -180,15 +187,25 @@ async function fetchSocketToken(body) {
       signal: AbortSignal.timeout(15000),
     }),
   );
+  if (response.status === 429 && attempt < 2) {
+    const retryAfter = Number(response.headers.get('retry-after')) || 0;
+    await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000 || MIN_REQUEST_GAP * (attempt + 1)));
+    return fetchSocketToken(body, attempt + 1);
+  }
   if (!response.ok) {
     throw new Error(`токен: HTTP ${response.status}`);
   }
   const text = await response.text();
+  let data;
   try {
-    return JSON.parse(text);
+    data = JSON.parse(text);
   } catch {
     throw new Error('сервер вернул не JSON (проверьте ключ)');
   }
+  if (data?.status === 'error' || data?.error) {
+    throw new Error(data.message || data.error || 'ошибка токена');
+  }
+  return data.data || data;
 }
 
 // --- разбор события ---------------------------------------------------------
@@ -239,6 +256,14 @@ async function pollTransactions({ silent = false } = {}) {
   try {
     const data = await apiGet('transactions', { limit: 20 });
     const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    if (!primed) {
+      for (const item of list) {
+        const donation = normalizeDonation(item);
+        if (donation) remember(donation.id);
+      }
+      primed = true;
+      return;
+    }
     // Идём от старых к новым, чтобы алерты играли в правильном порядке.
     for (const item of [...list].reverse()) {
       handleDonation(item);
@@ -256,6 +281,7 @@ async function pollTransactions({ silent = false } = {}) {
 // При первом запуске просто запоминаем последние транзакции как «уже видели»,
 // иначе включение подключения выстрелит очередью старых алертов в эфир.
 async function primeSeen() {
+  if (primed) return;
   try {
     const data = await apiGet('transactions', { limit: 50 });
     const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
@@ -265,8 +291,9 @@ async function primeSeen() {
         remember(donation.id);
       }
     }
+    primed = true;
   } catch {
-    /* не смогли — значит, дедуп начнётся с первого события */
+    /* первый успешный опрос запомнит историю без показа старых алертов */
   }
 }
 
@@ -286,7 +313,10 @@ function scheduleReconnect() {
   reconnectAttempt += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    openSocket().catch((error) => setError(String(error.message || error)));
+    openSocket().catch((error) => {
+      setError(String(error.message || error));
+      scheduleReconnect();
+    });
   }, delay);
 }
 
@@ -310,13 +340,18 @@ async function openSocket() {
   if (stopped || !config.apiKey) {
     return;
   }
+  const activeKey = config.apiKey;
   closeSocket();
 
   if (!user) {
-    user = await fetchUser();
+    const fetchedUser = await fetchUser(activeKey);
+    if (stopped || config.apiKey !== activeKey) return;
+    user = fetchedUser;
   }
+  if (stopped || config.apiKey !== activeKey) return;
   const channel = `$public:${user.id}`;
   const { token: connectToken } = await fetchSocketToken({});
+  if (stopped || config.apiKey !== activeKey) return;
   if (!connectToken) {
     throw new Error('сервер не выдал токен подключения');
   }
@@ -332,6 +367,7 @@ async function openSocket() {
     pingTimer = setInterval(() => send({ id: (commandId += 1), method: CMD.ping }), 25000);
   });
 
+  let subscriptionCommandId = 0;
   ws.on('message', async (buffer) => {
     const text = buffer.toString().trim();
     if (!text) {
@@ -349,6 +385,14 @@ async function openSocket() {
       const err = frame.error || frame.result?.error;
       if (err) {
         setError(`Centrifugo: ${err.message || err.reason || err.code || 'ошибка'}`);
+        scheduleReconnect();
+        continue;
+      }
+
+      if (subscriptionCommandId && frame.id === subscriptionCommandId) {
+        connected = true;
+        reconnectAttempt = 0;
+        setError('');
         continue;
       }
 
@@ -356,21 +400,21 @@ async function openSocket() {
       // токен подписки на приватный канал.
       const client = frame.result?.client;
       if (client) {
-        connected = true;
-        reconnectAttempt = 0;
-        setError('');
         try {
           const sub = await fetchSocketToken({ client, channels: [channel] });
           const channelToken = Array.isArray(sub.channels)
             ? sub.channels.find((c) => c.channel === channel)?.token
             : sub.channels?.[channel]?.token;
+          if (!channelToken) throw new Error('DonatePay не выдал токен подписки');
+          subscriptionCommandId = ++commandId;
           send({
-            id: (commandId += 1),
+            id: subscriptionCommandId,
             method: CMD.subscribe,
-            params: { channel, ...(channelToken ? { token: channelToken } : {}) },
+            params: { channel, token: channelToken },
           });
         } catch (error) {
           setError(`подписка: ${error.message}`);
+          scheduleReconnect();
         }
         continue;
       }
@@ -410,16 +454,23 @@ async function start() {
   try {
     user = await fetchUser();
   } catch (error) {
-    // 429 — это не «ключ плохой», а «слишком часто»: сокет всё равно поднимаем,
-    // id подтянется со следующей попытки.
-    setError(String(error.message).includes('429') ? String(error.message) : `ключ не принят: ${error.message}`);
-    if (!user) {
+    const message = String(error.message || error);
+    const invalidKey = /incorrect token|invalid token|неверн.*ключ|недействител.*ключ/i.test(message);
+    setError(invalidKey ? `ключ не принят: ${message}` : `проверка DonatePay: ${message}`);
+    if (!user && invalidKey) {
+      stopped = true;
       return getState();
     }
+    if (!user) scheduleReconnect();
   }
 
-  await primeSeen();
-  await openSocket().catch((error) => setError(String(error.message || error)));
+  if (user) {
+    await primeSeen();
+    await openSocket().catch((error) => {
+      setError(String(error.message || error));
+      scheduleReconnect();
+    });
+  }
 
   clearInterval(pollTimer);
   pollTimer = setInterval(() => pollTransactions({ silent: true }), POLL_INTERVAL);
@@ -466,6 +517,9 @@ async function saveSettings(patch = {}) {
 
   if (keyChanged) {
     user = null;
+    primed = false;
+    seen.clear();
+    seenOrder.length = 0;
   }
   if (config.enabled && config.apiKey) {
     await start();
@@ -477,20 +531,13 @@ async function saveSettings(patch = {}) {
 
 // Проверка ключа из интерфейса: кто мы по этому ключу.
 async function checkKey(apiKey) {
-  const previous = config.apiKey;
-  const previousUser = user;
-  config.apiKey = String(apiKey || '').trim() || previous;
-  // Проверяем именно этот ключ, а не показываем кеш от прошлого.
-  user = null;
+  const candidate = String(apiKey || '').trim() || config.apiKey;
+  if (!candidate) return { ok: false, error: 'Введите API-ключ DonatePay' };
   try {
-    const info = await fetchUser();
-    // Ключ тот же — оставим найденное в кеше, иначе вернём как было.
-    user = config.apiKey === previous ? info : previousUser;
-    config.apiKey = previous;
+    const info = await fetchUser(candidate);
+    if (candidate === config.apiKey) user = info;
     return { ok: true, user: info };
   } catch (error) {
-    user = previousUser;
-    config.apiKey = previous;
     return { ok: false, error: String(error.message || error) };
   }
 }

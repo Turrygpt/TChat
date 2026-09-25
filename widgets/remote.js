@@ -50,10 +50,12 @@ function getDefaultHost() {
 function setConnected(isConnected, message = '') {
   connectionDot.classList.toggle('is-online', isConnected);
   connectionText.textContent = message || (isConnected ? 'Подключено' : 'Не подключено');
-  const panels = [statsPanel, goalPanel, widgetsPanel, pollPanel, donationPanel];
+  const panels = [statsPanel, goalPanel, widgetsPanel];
   panels.forEach((panel) => {
     panel.hidden = !isConnected;
   });
+  pollPanel.hidden = !isConnected || !hasRemoteApi;
+  donationPanel.hidden = !isConnected || !hasRemoteApi;
   connectButton.disabled = false;
 }
 

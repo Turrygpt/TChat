@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const readline = require('node:readline');
+const os = require('node:os');
 const express = require('express');
 const { Server } = require('socket.io');
 const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut } = require('electron');
@@ -11,12 +12,9 @@ const { LiveChat } = require('youtube-chat');
 const { EdgeTTS } = require('node-edge-tts');
 const announce = require('./src/announce');
 const restream = require('./src/restream');
-const incoming = require('./src/incoming');
 const profiles = require('./src/profiles');
 const { parseNicknameCommand } = require('./src/giveawayNicknames');
-const lastDonation = require('./src/lastDonation');
 const donatepay = require('./src/donatepay');
-const vdv = require('./src/vdv');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -53,32 +51,6 @@ try {
   }
 } catch (error) {
   console.error('[ytProxy] не удалось инициализировать:', error && error.message);
-}
-
-// Настройка обхода YouTube из бэкофиса: получить/сохранить vless-ссылку.
-let vlessConfig = null;
-try {
-  vlessConfig = require('./src/net/vlessConfig');
-} catch (error) {
-  console.error('[vless] модуль не загружен:', error && error.message);
-}
-
-if (vlessConfig) {
-  ipcMain.handle('youtube-proxy:get', () => {
-    try {
-      return { ok: true, ...vlessConfig.getState() };
-    } catch (error) {
-      return { ok: false, error: error && error.message };
-    }
-  });
-
-  ipcMain.handle('youtube-proxy:save', (_event, payload) => {
-    try {
-      return vlessConfig.saveLink(payload || {});
-    } catch (error) {
-      return { ok: false, error: (error && error.message) || 'Не удалось сохранить' };
-    }
-  });
 }
 
 function installBrokenPipeGuard() {
@@ -440,8 +412,6 @@ function setupDonationAlertsStorage() {
   loadWindowState();
   loadChatUiSettings();
   loadGoalState();
-  vdv.load(storageDir);
-  lastDonation.load(storageDir);
   loadStreamWidgets();
   loadGiveawayWinnerLog();
   scheduleAllGiveawayFinishes();
@@ -723,17 +693,6 @@ function createDefaultStreamWidgets() {
       ],
       createdAt: new Date().toISOString(),
     },
-    {
-      id: 'builtin-vdv',
-      type: 'vdv',
-      title: 'День ВДВ',
-      enabled: false,
-      x: 66,
-      y: 34,
-      width: 17.33,
-      height: 28,
-      createdAt: new Date().toISOString(),
-    },
   ];
 }
 
@@ -762,7 +721,7 @@ function mergeDefaultStreamWidgets(items = []) {
 }
 
 function saveStreamWidgets(items = streamWidgets) {
-  streamWidgets = (Array.isArray(items) ? items : []).map(normalizeStreamWidget).filter(Boolean);
+  streamWidgets = (Array.isArray(items) ? items : []).filter(Boolean).map(normalizeStreamWidget).filter(Boolean);
 
   if (!streamWidgetsFile) {
     return streamWidgets;
@@ -1022,21 +981,18 @@ function normalizeGiveawayWidget(widget = {}) {
 }
 
 function normalizeStreamWidget(widget = {}) {
-  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'lastdonation', 'vdv', 'sticker', 'video-overlay', 'custom']);
-  const persistedId = String(widget.id || '');
-  const migratedType = persistedId === 'builtin-vdv'
-    ? 'vdv'
-    : persistedId.startsWith('lastdonation-')
-      ? 'lastdonation'
-      : widget.type;
-  const type = knownTypes.has(migratedType) ? migratedType : 'goal';
+  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay', 'custom']);
+  // Старые сохранённые экземпляры удалённых виджетов не возвращаем в overlay.
+  if (
+    ['lastdonation', 'vdv'].includes(widget.type) ||
+    widget.id === 'builtin-vdv' ||
+    String(widget.id || '').startsWith('lastdonation-')
+  ) return null;
+  const type = knownTypes.has(widget.type) ? widget.type : 'goal';
   const id = String(widget.id || `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const minWidgetWidth = ['countdown', 'texts'].includes(type) ? 5 : 14;
-  const legacyFullscreenVdv = type === 'vdv' && Number(widget.width) >= 90 && Number(widget.height) >= 90;
-  const legacyCompactVdv = type === 'vdv' && Math.abs(Number(widget.width) - 26) < 0.05 && Math.abs(Number(widget.height) - 42) < 0.05;
-  const legacyVdvSize = legacyFullscreenVdv || legacyCompactVdv;
-  const height = legacyVdvSize ? 28 : normalizeWidgetHeight(widget.height);
-  const position = legacyFullscreenVdv ? defaultWidgetPosition(type) : widget;
+  const height = normalizeWidgetHeight(widget.height);
+  const position = widget;
   const base = {
     id,
     type,
@@ -1044,7 +1000,7 @@ function normalizeStreamWidget(widget = {}) {
     enabled: widget.enabled !== false,
     x: normalizeWidgetCoord(position.x, defaultWidgetPosition(type).x),
     y: normalizeWidgetCoord(position.y, defaultWidgetPosition(type).y),
-    width: Math.max(Number(legacyVdvSize ? defaultWidgetPosition(type).width : widget.width ?? defaultWidgetPosition(type).width), minWidgetWidth),
+    width: Math.max(Number(widget.width ?? defaultWidgetPosition(type).width), minWidgetWidth),
     scale: Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3),
     createdAt: widget.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1526,8 +1482,6 @@ function widgetTitleByType(type) {
     countdown: 'Обратный отсчёт',
     texts: 'Тексты',
     tasks: 'Задачи на стрим',
-    lastdonation: 'Последний донат',
-    vdv: 'День ВДВ',
     sticker: 'Стикер',
     'video-overlay': 'Видео по таймеру',
     custom: 'Кастомный виджет',
@@ -1545,8 +1499,6 @@ function defaultWidgetPosition(type) {
     countdown: { x: 72, y: 4, width: 18 },
     texts: { x: 8, y: 18, width: 44 },
     tasks: { x: 4, y: 8, width: 26 },
-    lastdonation: { x: 66, y: 34, width: 26 },
-    vdv: { x: 66, y: 34, width: 17.33 },
     sticker: { x: 46, y: 24, width: 30 },
     'video-overlay': { x: 38, y: 8, width: 24 },
     custom: { x: 12, y: 18, width: 32 },
@@ -1569,8 +1521,6 @@ function getStreamWidgetsPayload() {
       countdown: `http://localhost:${SERVER_PORT}/widgets/countdown.html`,
       texts: `http://localhost:${SERVER_PORT}/widgets/texts.html`,
       tasks: `http://localhost:${SERVER_PORT}/widgets/tasks.html`,
-      lastdonation: `http://localhost:${SERVER_PORT}/widgets/lastdonation.html`,
-      vdv: `http://localhost:${SERVER_PORT}/widgets/vdv.html`,
       videoOverlay: `http://localhost:${SERVER_PORT}/widgets/video-overlay.html`,
     },
   };
@@ -1585,6 +1535,7 @@ function broadcastStreamWidgets() {
 
 function createStreamWidget(payload = {}) {
   const widget = normalizeStreamWidget(payload);
+  if (!widget) return getStreamWidgetsPayload();
   streamWidgets.unshift(widget);
   streamWidgets = mergeDefaultStreamWidgets(streamWidgets);
   saveStreamWidgets(streamWidgets);
@@ -1606,7 +1557,7 @@ function updateStreamWidget(id, payload = {}) {
 
     return normalizeStreamWidget(merged);
   });
-  streamWidgets = mergeDefaultStreamWidgets(streamWidgets);
+  streamWidgets = mergeDefaultStreamWidgets(streamWidgets.filter(Boolean));
   saveStreamWidgets(streamWidgets);
   broadcastStreamWidgets();
   return getStreamWidgetsPayload();
@@ -2976,7 +2927,6 @@ function createLocalServer() {
     response.redirect(302, '/widgets/chat.html');
   });
   expressApp.use('/widgets', express.static(widgetsPath, noCacheStaticOptions));
-  expressApp.use('/assets/vdv', express.static(path.join(assetsPath, 'vdv'), noCacheStaticOptions));
   // Сначала пользовательские загрузки из userData, потом то, что приехало в
   // сборке (дефолтные алерты, иконки платформ и прочая статика).
   expressApp.use('/assets', express.static(getUserAssetsDir()));
@@ -3017,12 +2967,10 @@ function createLocalServer() {
         stickers: '/widgets/stickers.html',
         chat: '/widgets/chat.html',
         goal: '/widgets/goal.html',
-        lastdonation: '/widgets/lastdonation.html',
         music: '/widgets/music.html',
         countdown: '/widgets/countdown.html',
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
-        vdv: '/widgets/vdv.html',
         videoOverlay: '/widgets/video-overlay.html',
         remote: '/widgets/remote.html',
       },
@@ -3251,30 +3199,6 @@ function createLocalServer() {
     response.json(goalState);
   });
 
-  expressApp.get('/vdv/state', (_request, response) => {
-    response.json(vdv.payload());
-  });
-
-  expressApp.post('/vdv/update', (request, response) => {
-    response.json({ ok: true, state: broadcastVdvState(vdv.update(request.body || {})) });
-  });
-
-  expressApp.post('/vdv/reveal/:index', (request, response) => {
-    response.json({ ok: true, state: broadcastVdvState(vdv.reveal(Number(request.params.index))) });
-  });
-
-  expressApp.post('/vdv/close/:index', (request, response) => {
-    response.json({ ok: true, state: broadcastVdvState(vdv.close(Number(request.params.index))) });
-  });
-
-  expressApp.post('/vdv/reset', (_request, response) => {
-    response.json({ ok: true, state: broadcastVdvState(vdv.resetCards()) });
-  });
-
-  expressApp.post('/vdv/add', (request, response) => {
-    response.json({ ok: true, state: broadcastVdvState(vdv.addAmount(request.body?.amount)) });
-  });
-
   expressApp.get('/widgets/state', (_request, response) => {
     response.json(getStreamWidgetsPayload());
   });
@@ -3282,66 +3206,6 @@ function createLocalServer() {
   expressApp.post('/goal/update', (request, response) => {
     const payload = updateGoalState(request.body);
     response.json({ ok: true, goal: payload });
-  });
-
-  expressApp.get('/lastdonation/state', (_request, response) => {
-    response.json(lastDonation.payload());
-  });
-
-  // Ники для автодополнения ручного доната: берём из профилей зрителей.
-  expressApp.get('/lastdonation/nicknames', (_request, response) => {
-    response.json({ items: getKnownNicknames() });
-  });
-
-  expressApp.post('/lastdonation/update', (request, response) => {
-    lastDonation.update(request.body || {});
-    response.json({ ok: true, state: broadcastLastDonation() });
-  });
-
-  expressApp.post('/lastdonation/donation', (request, response) => {
-    const amount = Number(request.body?.amount || 0);
-    if (!(amount > 0)) {
-      response.status(400).json({ ok: false, error: 'Укажите сумму больше нуля.' });
-      return;
-    }
-
-    const result = registerLastDonation({ ...request.body, amount, manual: true });
-    response.json({
-      ok: true,
-      counted: Boolean(result.donation),
-      reachedTiers: result.reachedTiers,
-      state: result.state,
-    });
-  });
-
-  expressApp.post('/lastdonation/donation/remove', (request, response) => {
-    const result = lastDonation.removeDonation(String(request.body?.id || ''));
-    if (result.removed) broadcastLastDonation(result.state);
-    response.json({ ok: result.removed, state: result.state });
-  });
-
-  expressApp.post('/lastdonation/stream/:action', (request, response) => {
-    const { action } = request.params;
-    if (action === 'start') lastDonation.startStream(request.body?.minutes);
-    else if (action === 'extend') lastDonation.extendStream(request.body?.minutes);
-    else if (action === 'stop') lastDonation.stopStream();
-    else if (action === 'reset') lastDonation.reset();
-    else {
-      response.status(400).json({ ok: false, error: 'Неизвестное действие.' });
-      return;
-    }
-
-    response.json({ ok: true, state: broadcastLastDonation() });
-  });
-
-  // Живой MPEG-TS входящего потока по id: incoming.js держит ffmpeg на каждый
-  // источник и раздаёт его всем открытым виджетам incoming.html (браузер-источник
-  // OBS). У каждой камеры свой адрес /streams/<id>/live.ts.
-  expressApp.get('/streams/:id/live.ts', (request, response) => {
-    response.setHeader('Content-Type', 'video/mp2t');
-    response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    response.setHeader('Connection', 'close');
-    incoming.attach(request.params.id, response);
   });
 
   httpServer = http.createServer(expressApp);
@@ -3363,9 +3227,7 @@ function createLocalServer() {
     socket.emit('chat:status', getChatStatusPayload());
     socket.emit('chat:history', getRecentChatMessages(20));
     socket.emit('widgets:state', getStreamWidgetsPayload());
-    socket.emit('vdv:update', vdv.payload());
     socket.emit('stickers:settings', stickerSettings);
-    socket.emit('lastdonation:update', lastDonation.payload());
 
     socket.on('disconnect', () => {
       // Не логируем отключение: в Electron/OBS console.log может выбросить EPIPE и уронить приложение.
@@ -3546,9 +3408,8 @@ function installDownloadedUpdate({ clean = false } = {}) {
   }
 
   try {
-    // Рестрим и входящие потоки держат ffmpeg — гасим их сами, чтобы установщик не воевал за файлы.
+    // Рестрим держит ffmpeg — гасим его, чтобы установщик не воевал за файлы.
     restream.shutdown();
-    incoming.shutdown();
   } catch {
     /* не критично */
   }
@@ -3862,13 +3723,6 @@ function broadcastGoalState() {
   socketServer?.emit('goal:update', goalState);
 }
 
-function broadcastVdvState(payload = vdv.payload()) {
-  mainWindow?.webContents.send('vdv:state', payload);
-  chatWindow?.webContents.send('vdv:state', payload);
-  socketServer?.emit('vdv:update', payload);
-  return payload;
-}
-
 function updateGoalState(payload = {}) {
   goalState = saveGoalState({
     ...goalState,
@@ -3876,48 +3730,6 @@ function updateGoalState(payload = {}) {
   });
   broadcastGoalState();
   return goalState;
-}
-
-// Ники из профилей зрителей — подсказки для ручного доната. Ник профиля идёт
-// первым: его стример и держит в голове, отображаемое имя платформы — запасное.
-function getKnownNicknames() {
-  const seen = new Set();
-  const items = [];
-
-  profiles.list().forEach((profile) => {
-    [profile.nickname, profile.displayName].forEach((name) => {
-      const value = String(name || '').trim();
-      const key = value.toLowerCase();
-      if (!value || seen.has(key)) return;
-      seen.add(key);
-      items.push(value);
-    });
-  });
-
-  return items;
-}
-
-function broadcastLastDonation(payload = lastDonation.payload()) {
-  socketServer?.emit('lastdonation:update', payload);
-  mainWindow?.webContents.send('lastdonation:state', payload);
-  return payload;
-}
-
-// Пробитая ступень едет отдельным событием: виджет по нему пускает салют, а
-// обычное обновление состояния остаётся тихим.
-function registerLastDonation(donation) {
-  const result = lastDonation.addDonation(donation);
-  if (!result.donation) {
-    return result;
-  }
-
-  broadcastLastDonation(result.state);
-
-  result.reachedTiers.forEach((tier) => {
-    socketServer?.emit('lastdonation:tier', { tier, donation: result.donation });
-  });
-
-  return result;
 }
 
 // Донат идёт в счётчик только тех сборов, которые сейчас включены. Выключенный
@@ -3928,8 +3740,6 @@ function addDonationToGoal(amount) {
   if (!value) {
     return goalState;
   }
-
-  broadcastVdvState(vdv.addAmount(value));
 
   const goalWidgets = streamWidgets.filter((widget) => widget.type === 'goal');
   const activeGoalWidgets = goalWidgets.filter((widget) => widget.enabled !== false);
@@ -4205,12 +4015,6 @@ function normalizeRaid(payload = {}) {
 function enqueueDonationAlert(donation) {
   const normalizedDonation = normalizeDonation(donation);
   addDonationToGoal(normalizedDonation.amount);
-  registerLastDonation({
-    username: normalizedDonation.username,
-    amount: normalizedDonation.amount,
-    currency: normalizedDonation.currency,
-    platform: normalizedDonation.platform || 'donate',
-  });
   const musicLinks = extractMusicLinks(normalizedDonation.message || '');
 
   if (musicLinks.length) {
@@ -6273,10 +6077,6 @@ app.whenReady().then(async () => {
     storageDir: path.join(app.getPath('userData'), 'settings'),
     onStatus: (state) => mainWindow?.webContents.send('restream:status', state),
   });
-  incoming.init({
-    storageDir: path.join(app.getPath('userData'), 'settings'),
-    onStatus: (state) => mainWindow?.webContents.send('incoming:status', state),
-  });
   donatepay.init({
     storageDir: path.join(app.getPath('userData'), 'settings'),
     // Донат из любого источника идёт в общую воронку: алерты, сбор, музыка, чат.
@@ -6311,7 +6111,6 @@ app.on('before-quit', async () => {
   }
   detachYouTubeChat();
   restream.shutdown();
-  incoming.shutdown();
   await stopLocalServer();
 });
 
@@ -6425,11 +6224,6 @@ ipcMain.handle('restream:get-state', () => restream.getState());
 ipcMain.handle('restream:start', () => restream.start());
 ipcMain.handle('restream:stop', () => restream.stop());
 ipcMain.handle('restream:save-config', (_event, payload) => restream.saveConfig(payload || {}));
-
-ipcMain.handle('incoming:get-state', () => incoming.getState());
-ipcMain.handle('incoming:add', (_event, payload) => incoming.addStream(payload || {}));
-ipcMain.handle('incoming:update', (_event, payload) => incoming.updateStream(payload?.id, payload?.patch || {}));
-ipcMain.handle('incoming:remove', (_event, payload) => incoming.removeStream(payload?.id));
 
 // --- Профили зрителей ---------------------------------------------------------
 
@@ -7025,7 +6819,12 @@ ipcMain.handle('app:get-patchnotes', () => {
   };
 });
 
-ipcMain.handle('app:get-server-status', () => serverStatus);
+ipcMain.handle('app:get-server-status', () => {
+  const lanIp = Object.values(os.networkInterfaces())
+    .flat()
+    .find((address) => address?.family === 'IPv4' && !address.internal)?.address || '';
+  return { ...serverStatus, lanIp };
+});
 ipcMain.handle('app:get-info', () => ({
   version: app.getVersion(),
   updaterStatus: lastUpdaterStatus,
@@ -7159,9 +6958,9 @@ ipcMain.handle('donations:save-source', async (_event, payload) => {
   if (!source?.save) {
     return { ok: false, error: 'этот источник так не настраивается' };
   }
-  await source.save(payload.patch || {});
+  const state = await source.save(payload.patch || {});
   broadcastDonationSources();
-  return { ok: true, sources: getDonationSources() };
+  return { ok: !state.error, error: state.error || '', sources: getDonationSources() };
 });
 
 ipcMain.handle('donations:check-source', async (_event, payload) => {
@@ -7231,57 +7030,6 @@ ipcMain.handle('announce:send', async (_event, prepared) => {
 ipcMain.handle('goal:get-state', () => goalState);
 
 ipcMain.handle('goal:update', (_event, payload) => updateGoalState(payload));
-
-ipcMain.handle('vdv:get-state', () => vdv.payload());
-
-ipcMain.handle('vdv:update', (_event, payload) => broadcastVdvState(vdv.update(payload || {})));
-
-ipcMain.handle('vdv:reveal', (_event, payload) => broadcastVdvState(vdv.reveal(payload?.index)));
-
-ipcMain.handle('vdv:close', (_event, payload) => broadcastVdvState(vdv.close(payload?.index)));
-
-ipcMain.handle('vdv:reset', () => broadcastVdvState(vdv.resetCards()));
-
-ipcMain.handle('vdv:add', (_event, payload) => broadcastVdvState(vdv.addAmount(payload?.amount)));
-
-ipcMain.handle('lastdonation:get-state', () => lastDonation.payload());
-
-ipcMain.handle('lastdonation:get-nicknames', () => getKnownNicknames());
-
-ipcMain.handle('lastdonation:update', (_event, payload) => {
-  lastDonation.update(payload || {});
-  return broadcastLastDonation();
-});
-
-ipcMain.handle('lastdonation:set-tiers', (_event, payload) => {
-  lastDonation.setTiers(payload);
-  return broadcastLastDonation();
-});
-
-ipcMain.handle('lastdonation:set-top-prizes', (_event, payload) => {
-  lastDonation.setTopPrizes(payload);
-  return broadcastLastDonation();
-});
-
-ipcMain.handle('lastdonation:add-donation', (_event, payload) => {
-  const result = registerLastDonation({ ...(payload || {}), manual: true });
-  return { counted: Boolean(result.donation), reachedTiers: result.reachedTiers, state: result.state };
-});
-
-ipcMain.handle('lastdonation:remove-donation', (_event, payload) => {
-  const result = lastDonation.removeDonation(String(payload?.id || ''));
-  if (result.removed) broadcastLastDonation(result.state);
-  return result.state;
-});
-
-ipcMain.handle('lastdonation:stream', (_event, payload) => {
-  const action = payload?.action;
-  if (action === 'start') lastDonation.startStream(payload?.minutes);
-  else if (action === 'extend') lastDonation.extendStream(payload?.minutes);
-  else if (action === 'stop') lastDonation.stopStream();
-  else if (action === 'reset') lastDonation.reset();
-  return broadcastLastDonation();
-});
 
 ipcMain.handle('widgets:get-state', () => getStreamWidgetsPayload());
 
