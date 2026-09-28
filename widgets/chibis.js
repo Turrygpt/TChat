@@ -18,7 +18,7 @@
     guest.style.left = `${side === 'left' ? -avatarSize * .36
       : side === 'right' ? width - content.offsetWidth * scale + avatarSize * .36
         : margin + freeX * anchor}px`;
-    guest.style.top = `${side === 'top' ? 0
+    guest.style.top = `${side === 'top' ? -avatarSize * .3
       : side === 'bottom' ? height - avatarSize * .8
         : margin + freeY * anchor}px`;
   }
