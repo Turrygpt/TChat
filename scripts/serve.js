@@ -39,7 +39,6 @@ async function main() {
     '',
     'Оверлеи для Prizm/OBS (браузер-источник):',
     `  Стрим:      http://<host>:${PORT}/widgets/stream.html`,
-    `  Алерты:     http://<host>:${PORT}/widgets/alerts.html`,
     `  Чат:        http://<host>:${PORT}/widgets/chat.html`,
     `  Пульт:      http://<host>:${PORT}/widgets/remote.html`,
   ];

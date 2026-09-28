@@ -15,6 +15,10 @@ const restream = require('./src/restream');
 const profiles = require('./src/profiles');
 const { parseNicknameCommand } = require('./src/giveawayNicknames');
 const donatepay = require('./src/donatepay');
+const { findRewardRule } = require('./src/rewardRules');
+const { createChibis } = require('./src/chibis');
+let chibis;
+const { TwitchRewards } = require('./src/twitchRewards');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -121,6 +125,10 @@ let vkConnectionState = {
   consecutiveFailures: 0,
   lastSuccessAt: 0,
   lastViewers: 0,
+  lastLikes: null,
+  likeBounceCeiling: null,
+  likeBounceUntil: 0,
+  lastStreamId: '',
   zeroViewerSince: 0,
   lastChatAvailable: false,
   lastError: '',
@@ -396,6 +404,14 @@ function setupDonationAlertsStorage() {
   donationAlertsSettingsFile = path.join(storageDir, 'donationalerts.json');
   alertSettingsFile = path.join(storageDir, 'alert-rules.json');
   stickerSettingsFile = path.join(storageDir, 'stickers.json');
+  chibis = createChibis({
+    file: path.join(storageDir, 'chibis.json'),
+    emit: (name, value) => socketServer?.emit(name, value),
+    resolveCharacter: (event) => (event.platform
+      ? profiles.findByUser(event.platform, event.user || event.username)
+        || profiles.findByUser(event.platform, event.username)
+      : null)?.chibiId || '',
+  });
   windowStateFile = path.join(storageDir, 'window-state.json');
   chatUiSettingsFile = path.join(storageDir, 'chat-ui.json');
   goalStateFile = path.join(storageDir, 'goal-state.json');
@@ -1513,7 +1529,8 @@ function getStreamWidgetsPayload() {
     urls: {
       stream: `http://localhost:${SERVER_PORT}/widgets/stream.html`,
       alerts: `http://localhost:${SERVER_PORT}/widgets/alerts.html`,
-      stickers: `http://localhost:${SERVER_PORT}/widgets/stickers.html`,
+      stickers: `http://localhost:${SERVER_PORT}/widgets/stream.html`,
+      chibis: `http://localhost:${SERVER_PORT}/widgets/stream.html`,
       chat: `http://localhost:${SERVER_PORT}/widgets/chat.html`,
       goal: `http://localhost:${SERVER_PORT}/widgets/goal.html`,
       music: `http://localhost:${SERVER_PORT}/widgets/music.html`,
@@ -2254,6 +2271,9 @@ function saveDonationAlertsSettings() {
 function createDefaultAlertSettings() {
   return {
     displaySeconds: 8,
+    vkLikes: {
+      enabled: true,
+    },
     systemAlerts: {
       subscriber: {
         id: 'subscriber-welcome',
@@ -2381,7 +2401,7 @@ async function pickAlertAsset(kind = 'image') {
 
 // ── Стикеры ───────────────────────────────────────────────────────────────
 // Зритель активирует награду во VK Play Live -> TChat кидает стикер на
-// OBS-оверлей widgets/stickers.html на несколько секунд.
+// общий OBS-виджет widgets/stream.html на несколько секунд.
 
 const STICKER_ANIMATIONS = ['random', 'pop', 'drop', 'slide', 'spin', 'fly', 'glitch', 'zoom'];
 const STICKER_POSITIONS = [
@@ -2399,6 +2419,11 @@ const STICKER_POSITIONS = [
 
 // Последние награды из чата — чтобы в бэкоффисе было видно точные названия.
 let rewardLog = [];
+const seenRewards = new Set();
+const twitchRewards = new TwitchRewards({
+  onReward: (event) => enqueueStickerFromReward(event),
+  onStatus: (status) => mainWindow?.webContents?.send('rewards:twitch-status', status),
+});
 
 function createDefaultStickerSettings() {
   return {
@@ -2414,6 +2439,8 @@ function normalizeStickerRule(rule = {}, index = 0) {
     id: String(rule.id || `sticker-${Date.now()}-${index}`),
     enabled: rule.enabled !== false,
     reward: String(rule.reward || '').trim(),
+    platform: ['vk', 'twitch'].includes(rule.platform) ? rule.platform : 'any',
+    price: Number.isFinite(Number(rule.price)) ? Math.max(Number(rule.price), 0) : 0,
     image: String(rule.image || '').trim(),
     seconds: Math.max(Number(rule.seconds || 0), 0),
     size: Math.min(Math.max(Number(rule.size || 240), 60), 1200),
@@ -2491,16 +2518,8 @@ async function pickStickerAsset() {
 }
 
 // Пустое поле «награда» = правило ловит любую награду (запасной стикер).
-function findStickerRule(rewardName = '') {
-  const needle = String(rewardName || '').trim().toLowerCase();
-  const enabled = stickerSettings.rules.filter((rule) => rule.enabled && rule.image);
-  const exact = enabled.find((rule) => rule.reward && rule.reward.toLowerCase() === needle);
-  if (exact) {
-    return exact;
-  }
-
-  const partial = needle ? enabled.find((rule) => rule.reward && needle.includes(rule.reward.toLowerCase())) : null;
-  return partial || enabled.find((rule) => !rule.reward) || null;
+function findStickerRule(event = {}) {
+  return findRewardRule(stickerSettings.rules, event);
 }
 
 function showSticker(payload = {}) {
@@ -2528,6 +2547,8 @@ function rememberReward(event = {}) {
   rewardLog.unshift({
     username: String(event.username || 'Зритель'),
     reward: String(event.reward || ''),
+    platform: String(event.platform || 'vk'),
+    price: Number(event.price) || 0,
     matched: Boolean(event.matched),
     createdAt: event.createdAt || new Date().toISOString(),
   });
@@ -2547,7 +2568,13 @@ function getStickerStatePayload() {
 }
 
 function enqueueStickerFromReward(event = {}) {
-  const rule = findStickerRule(event.reward);
+  chibis?.reward(event);
+  if (event.id && seenRewards.has(event.id)) return null;
+  if (event.id) {
+    seenRewards.add(event.id);
+    if (seenRewards.size > 2000) seenRewards.delete(seenRewards.values().next().value);
+  }
+  const rule = findStickerRule(event);
 
   rememberReward({ ...event, matched: Boolean(rule) });
 
@@ -2576,6 +2603,9 @@ function normalizeAlertSettings(settings = {}) {
 
   return {
     displaySeconds: Math.max(Number(settings.displaySeconds || defaults.displaySeconds), 3),
+    vkLikes: {
+      enabled: settings.vkLikes?.enabled !== false,
+    },
     systemAlerts: {
       subscriber: normalizeSystemAlertRule(systemAlerts.subscriber, defaults.systemAlerts.subscriber),
       subscriptionRenewal: normalizeSystemAlertRule(systemAlerts.subscriptionRenewal, defaults.systemAlerts.subscriptionRenewal),
@@ -2647,6 +2677,9 @@ function migrateAlertSettings(settings = {}) {
 
   return {
     displaySeconds: Math.max(Number(settings.displaySeconds || 8), 3),
+    vkLikes: {
+      enabled: settings.vkLikes?.enabled !== false,
+    },
     systemAlerts: {
       ...systemAlerts,
       firstMessage: {
@@ -2964,7 +2997,7 @@ function createLocalServer() {
       widgets: {
         stream: '/widgets/stream.html',
         alerts: '/widgets/alerts.html',
-        stickers: '/widgets/stickers.html',
+        stickers: '/widgets/stream.html',
         chat: '/widgets/chat.html',
         goal: '/widgets/goal.html',
         music: '/widgets/music.html',
@@ -3189,6 +3222,19 @@ function createLocalServer() {
   expressApp.post('/demo/sticker', (request, response) => {
     const item = showSticker(request.body || {});
     response.json({ ok: Boolean(item), item });
+  });
+
+  expressApp.get('/chibis/state', (_request, response) => response.json(chibis.state()));
+  expressApp.post('/demo/chibi', (request, response) => response.json({ ok: true, item: chibis.show(request.body) }));
+
+  expressApp.post('/demo/vk-likes', (request, response) => {
+    if (!isInternalDemoRequest(request)) {
+      response.status(403).json({ ok: false, error: 'Demo endpoint доступен только из TChat.' });
+      return;
+    }
+
+    const payload = broadcastVkLikeEffect(request.body?.count || 8, request.body?.total || 0, 'demo');
+    response.json({ ok: true, payload });
   });
 
   expressApp.get('/music/state', (_request, response) => {
@@ -4442,6 +4488,8 @@ const VK_API_BASE = 'https://api.live.vkvideo.ru/v1';
 // Общее окно сглаживания одиночных нулей от API площадок (VK, Twitch): реальные
 // зрители не пропадают за один опрос, а вот сам API иногда отдаёт 0 на секунду.
 const ZERO_VIEWER_GRACE_MS = 30000;
+const VK_LIKE_BOUNCE_LIMIT = 2;
+const VK_LIKE_BOUNCE_WINDOW_MS = 60000;
 const VK_FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   Accept: 'application/json',
@@ -4580,6 +4628,86 @@ function extractVkViewerCount(stream = {}) {
   }
 
   return Number.isFinite(topLevel) ? Math.max(topLevel, 0) : 0;
+}
+
+function extractVkLikeCount(stream = {}) {
+  const likes = Number(stream?.count?.likes);
+  return Number.isFinite(likes) ? Math.max(Math.round(likes), 0) : null;
+}
+
+function broadcastVkLikeEffect(count = 1, total = 0, streamId = 'demo') {
+  const payload = {
+    count: Math.min(Math.max(Math.round(Number(count) || 1), 1), 50),
+    total: Math.max(Math.round(Number(total) || 0), 0),
+    streamId: String(streamId || 'demo'),
+    createdAt: new Date().toISOString(),
+  };
+  socketServer?.emit('vk:likes', payload);
+  return payload;
+}
+
+function syncVkLikes(likes, streamId = '') {
+  if (!Number.isFinite(likes)) {
+    return;
+  }
+
+  const normalizedLikes = Math.max(Math.round(likes), 0);
+  const normalizedStreamId = String(streamId || '').trim();
+  const streamChanged = Boolean(
+    normalizedStreamId && vkConnectionState.lastStreamId && normalizedStreamId !== vkConnectionState.lastStreamId,
+  );
+
+  if (streamChanged || vkConnectionState.lastLikes === null) {
+    vkConnectionState.lastLikes = normalizedLikes;
+    vkConnectionState.likeBounceCeiling = null;
+    vkConnectionState.likeBounceUntil = 0;
+    vkConnectionState.lastStreamId = normalizedStreamId;
+    return;
+  }
+
+  const previousLikes = vkConnectionState.lastLikes;
+  const now = Date.now();
+  if (vkConnectionState.likeBounceUntil <= now) {
+    vkConnectionState.likeBounceCeiling = null;
+    vkConnectionState.likeBounceUntil = 0;
+  }
+
+  if (normalizedLikes < previousLikes) {
+    const ceiling = Math.max(vkConnectionState.likeBounceCeiling ?? previousLikes, previousLikes);
+    const totalDrop = ceiling - normalizedLikes;
+    if (totalDrop <= VK_LIKE_BOUNCE_LIMIT) {
+      vkConnectionState.likeBounceCeiling = ceiling;
+      vkConnectionState.likeBounceUntil = now + VK_LIKE_BOUNCE_WINDOW_MS;
+    } else {
+      vkConnectionState.likeBounceCeiling = null;
+      vkConnectionState.likeBounceUntil = 0;
+    }
+    vkConnectionState.lastLikes = normalizedLikes;
+    vkConnectionState.lastStreamId = normalizedStreamId || vkConnectionState.lastStreamId;
+    return;
+  }
+
+  let increase = normalizedLikes - previousLikes;
+  if (increase > 0 && vkConnectionState.likeBounceCeiling !== null) {
+    // Возврат одного-двух только что снятых лайков погашает «долг» и не даёт
+    // эффект. Всё, что поднялось выше прежнего значения, считается новым.
+    const restoredLikes = Math.max(
+      Math.min(normalizedLikes, vkConnectionState.likeBounceCeiling) - previousLikes,
+      0,
+    );
+    increase = Math.max(increase - restoredLikes, 0);
+    if (normalizedLikes >= vkConnectionState.likeBounceCeiling) {
+      vkConnectionState.likeBounceCeiling = null;
+      vkConnectionState.likeBounceUntil = 0;
+    }
+  }
+
+  vkConnectionState.lastLikes = normalizedLikes;
+  vkConnectionState.lastStreamId = normalizedStreamId || vkConnectionState.lastStreamId;
+
+  if (increase > 0 && alertSettings.vkLikes?.enabled !== false) {
+    broadcastVkLikeEffect(increase, normalizedLikes, vkConnectionState.lastStreamId);
+  }
 }
 
 function parseVkChannelSlug(channelUrl = '') {
@@ -5036,6 +5164,10 @@ async function connectChatSources(channels = currentChannels) {
       consecutiveFailures: 0,
       lastSuccessAt: 0,
       lastViewers: 0,
+      lastLikes: null,
+      likeBounceCeiling: null,
+      likeBounceUntil: 0,
+      lastStreamId: '',
       zeroViewerSince: 0,
       lastChatAvailable: false,
       lastError: '',
@@ -5095,6 +5227,11 @@ async function connectTwitchChat(channel) {
   twitchClient.on('message', (_channel, tags, message, self) => {
     if (self) {
       return;
+    }
+
+    if (tags['msg-id'] === 'highlighted-message') {
+      chibis?.reward({ id: `twitch:highlight:${tags.id}`, platform: 'twitch', highlighted: true,
+        username: tags['display-name'] || tags.username, message });
     }
 
     createTwitchMessage(tags, message)
@@ -5634,7 +5771,8 @@ async function pollVkChat() {
     return;
   }
 
-  const { messages, viewers, chatAvailable } = vkState;
+  const { messages, viewers, likes, streamId, chatAvailable } = vkState;
+  syncVkLikes(likes, streamId);
   // VK's public_video_stream иногда отдаёт count.viewers=0 или вовсе без него
   // на несколько опросов подряд, хотя эфир идёт — это дрёбезг API, а не
   // реальный уход зрителей. Раньше 0 принимался после двух опросов подряд
@@ -5767,6 +5905,8 @@ async function fetchVkState(channelUrl) {
 
   const stream = unwrapVkStreamPayload(streamResult.value);
   const viewers = extractVkViewerCount(stream);
+  const likes = extractVkLikeCount(stream);
+  const streamId = String(stream?.id || stream?.vid || stream?.data?.id || '').trim();
   const chatAvailable = stream?.hasChat !== false;
 
   let chatData = [];
@@ -5778,6 +5918,8 @@ async function fetchVkState(channelUrl) {
 
   return {
     viewers,
+    likes,
+    streamId,
     messages,
     chatAvailable,
   };
@@ -6102,6 +6244,7 @@ app.on('will-quit', () => {
 });
 
 app.on('before-quit', async () => {
+  twitchRewards.stop();
   clearInterval(vkPollTimer);
   clearInterval(viewerPollTimer);
   clearInterval(donationAlertsTimer);
@@ -6381,6 +6524,7 @@ async function getProfilePayload(id) {
   await ensureProfileMessages(profile);
   return {
     ...profile,
+    chibiCatalog: chibis.state().catalog,
     stats: { ...profiles.messageStats(id), ...computeDonationStats(profile) },
   };
 }
@@ -6989,7 +7133,25 @@ ipcMain.handle('alerts:get-queue', () => getAlertQueuePayload());
 
 ipcMain.handle('alerts:pick-asset', (_event, payload) => pickAlertAsset(payload?.kind || 'image'));
 
+ipcMain.handle('alerts:test-vk-likes', (_event, payload) => {
+  return broadcastVkLikeEffect(payload?.count || 8, payload?.total || 0, 'demo');
+});
+
 ipcMain.handle('stickers:get-state', () => getStickerStatePayload());
+ipcMain.handle('chibis:get-state', () => chibis.state());
+ipcMain.handle('chibis:save', (_event, payload) => chibis.save(payload));
+ipcMain.handle('chibis:test', (_event, payload) => chibis.show(payload));
+ipcMain.handle('chibis:clear', () => chibis.clear());
+ipcMain.handle('rewards:twitch-status', () => twitchRewards.status);
+ipcMain.handle('rewards:twitch-connect', async (_event, token) => {
+  await twitchRewards.start(token);
+  return twitchRewards.status;
+});
+ipcMain.handle('rewards:twitch-disconnect', () => {
+  twitchRewards.stop();
+  twitchRewards.report('Не подключено');
+  return twitchRewards.status;
+});
 
 ipcMain.handle('stickers:save-settings', (_event, payload) => saveStickerSettings(payload));
 

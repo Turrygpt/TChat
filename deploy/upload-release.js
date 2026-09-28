@@ -47,17 +47,23 @@ const widgetUploads = fs.existsSync(widgetsDir)
       .filter((name) => fs.statSync(path.join(widgetsDir, name)).isFile())
       .map((name) => [path.join(widgetsDir, name), `${REMOTE_DIR}/widgets/${name}`])
   : [];
+const chibiUploads = fs.readdirSync(path.join(projectDir, 'assets', 'chibis'))
+  .filter((name) => name.endsWith('.png'))
+  .map((name) => [path.join(projectDir, 'assets', 'chibis', name), `${REMOTE_DIR}/assets/chibis/${name}`]);
 
 const uploads = [
   [path.join(dist, `TChat-Setup-${version}.exe`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe`],
   [path.join(dist, `TChat-Setup-${version}.exe.blockmap`), `${REMOTE_DIR}/releases/TChat-Setup-${version}.exe.blockmap`],
   [path.join(projectDir, 'src', 'server', 'widgetServer.js'), `${REMOTE_DIR}/src/server/widgetServer.js`],
+  [path.join(projectDir, 'src', 'chibis.js'), `${REMOTE_DIR}/src/chibis.js`],
+  [path.join(projectDir, 'assets', 'reactions', 'like.svg'), `${REMOTE_DIR}/assets/reactions/like.svg`],
   [path.join(projectDir, 'package.json'), `${REMOTE_DIR}/package.json`],
   [path.join(projectDir, 'patchnotes.json'), `${REMOTE_DIR}/patchnotes.json`],
   // Рядом с latest.yml: установленное приложение читает заметки о версии,
   // которой у него ещё нет, с той же раздачи, откуда качает обновление.
   [path.join(projectDir, 'patchnotes.json'), `${REMOTE_DIR}/releases/patchnotes.json`],
   ...widgetUploads,
+  ...chibiUploads,
   // Publish latest.yml last. Clients must not discover a release before its
   // critical/regular policy, installer, blockmap and patch notes are present.
   [path.join(dist, 'latest.yml'), `${REMOTE_DIR}/releases/latest.yml`],
@@ -91,7 +97,7 @@ function exec(command) {
 conn
   .on('ready', async () => {
     try {
-      await exec(`mkdir -p ${REMOTE_DIR}/releases ${REMOTE_DIR}/widgets`);
+      await exec(`mkdir -p ${REMOTE_DIR}/releases ${REMOTE_DIR}/widgets ${REMOTE_DIR}/assets/chibis ${REMOTE_DIR}/assets/reactions`);
       const sftp = await new Promise((resolve, reject) => conn.sftp((e, s) => (e ? reject(e) : resolve(s))));
       for (const [local, remote] of uploads) {
         await new Promise((resolve, reject) =>

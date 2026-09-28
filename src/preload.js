@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('tchat', {
+  getChibiState: () => ipcRenderer.invoke('chibis:get-state'),
+  saveChibiSettings: (payload) => ipcRenderer.invoke('chibis:save', payload),
+  testChibi: (payload) => ipcRenderer.invoke('chibis:test', payload),
+  clearChibis: () => ipcRenderer.invoke('chibis:clear'),
   getServerStatus: () => ipcRenderer.invoke('app:get-server-status'),
   getAppInfo: () => ipcRenderer.invoke('app:get-info'),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
@@ -76,7 +80,16 @@ contextBridge.exposeInMainWorld('tchat', {
   saveAlertSettings: (payload) => ipcRenderer.invoke('alerts:save-settings', payload),
   getAlertQueue: () => ipcRenderer.invoke('alerts:get-queue'),
   pickAlertAsset: (payload) => ipcRenderer.invoke('alerts:pick-asset', payload),
+  testVkLikes: (payload) => ipcRenderer.invoke('alerts:test-vk-likes', payload),
   getStickerState: () => ipcRenderer.invoke('stickers:get-state'),
+  getTwitchRewardsStatus: () => ipcRenderer.invoke('rewards:twitch-status'),
+  connectTwitchRewards: (token) => ipcRenderer.invoke('rewards:twitch-connect', token),
+  disconnectTwitchRewards: () => ipcRenderer.invoke('rewards:twitch-disconnect'),
+  onTwitchRewardsStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('rewards:twitch-status', listener);
+    return () => ipcRenderer.removeListener('rewards:twitch-status', listener);
+  },
   saveStickerSettings: (payload) => ipcRenderer.invoke('stickers:save-settings', payload),
   pickStickerAsset: () => ipcRenderer.invoke('stickers:pick-asset'),
   testSticker: (payload) => ipcRenderer.invoke('stickers:test', payload),

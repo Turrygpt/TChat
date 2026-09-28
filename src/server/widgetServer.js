@@ -3,6 +3,7 @@ const http = require('node:http');
 const path = require('node:path');
 const express = require('express');
 const { Server } = require('socket.io');
+const { createChibis } = require('../chibis');
 
 const APP_VERSION = require('../../package.json').version;
 
@@ -32,6 +33,9 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   };
 
   app.use(express.json());
+  const chibis = createChibis({ emit: (name, item) => io.emit(name, item) });
+  app.get('/chibis/state', (_request, response) => response.json(chibis.state()));
+  app.post('/demo/chibi', (request, response) => response.json({ ok: true, item: chibis.show(request.body) }));
   app.get([
     '/widget/chat',
     '/widget/chat/',
@@ -81,7 +85,8 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         countdown: '/widgets/countdown.html',
         texts: '/widgets/texts.html',
         tasks: '/widgets/tasks.html',
-        stickers: '/widgets/stickers.html',
+        stickers: '/widgets/stream.html',
+        chibis: '/widgets/stream.html',
         videoOverlay: '/widgets/video-overlay.html',
       },
     });
@@ -119,7 +124,8 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         countdown: `http://localhost:${port}/widgets/countdown.html`,
         texts: `http://localhost:${port}/widgets/texts.html`,
         tasks: `http://localhost:${port}/widgets/tasks.html`,
-        stickers: `http://localhost:${port}/widgets/stickers.html`,
+        stickers: `http://localhost:${port}/widgets/stream.html`,
+        chibis: `http://localhost:${port}/widgets/stream.html`,
         videoOverlay: `http://localhost:${port}/widgets/video-overlay.html`,
       },
     });
@@ -135,7 +141,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
 
   app.get('/alerts/state', (_request, response) => {
     response.json({
-      settings: { displaySeconds: 8 },
+      settings: { displaySeconds: 8, vkLikes: { enabled: true } },
       queue: [],
     });
   });
@@ -175,6 +181,17 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
     };
     io.emit('sticker:show', item);
     response.json({ ok: Boolean(item.url), item });
+  });
+
+  app.post('/demo/vk-likes', (request, response) => {
+    const payload = {
+      count: Math.min(Math.max(Math.round(Number(request.body?.count || 8)), 1), 50),
+      total: Math.max(Math.round(Number(request.body?.total || 0)), 0),
+      streamId: 'demo',
+      createdAt: new Date().toISOString(),
+    };
+    io.emit('vk:likes', payload);
+    response.json({ ok: true, payload });
   });
 
   app.post('/demo/chat', (request, response) => {
@@ -336,7 +353,6 @@ function renderLandingPage() {
   const widgets = [
     ['remote', 'Пульт (мобильный)', 'Управление со смартфона'],
     ['stream', 'Оверлей стрима', 'Полный оверлей для Prizm/OBS'],
-    ['alerts', 'Алерты', 'Донаты, подписки, рейды'],
     ['chat', 'Чат', 'Агрегированный чат'],
     ['goal', 'Цель сбора', 'Прогресс-бар цели'],
     ['music', 'Музыка', 'Текущий трек / заявки'],

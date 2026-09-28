@@ -20,6 +20,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { catalog: chibiCatalog } = require('./chibis');
 
 let file = '';
 let messagesDir = '';
@@ -86,6 +87,7 @@ function normalizeProfile(profile = {}) {
     // Игровой ник может отличаться от имени пользователя в чате. Его задаёт
     // стример вручную или сам зритель командой «Ник: ...» после розыгрыша.
     nickname: String(profile.nickname || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    chibiId: chibiCatalog.some(item => item.id === profile.chibiId) ? profile.chibiId : '',
     // Один игровой ник объединяет несколько аккаунтов чата в общий профиль.
     accounts,
     bio: String(profile.bio || ''),
@@ -499,6 +501,7 @@ function mergeProfiles(target, source) {
     aiStatus: portrait.aiStatus,
     aiError: portrait.aiError,
     nickname: target.nickname || source.nickname,
+    chibiId: target.chibiId || source.chibiId,
     displayName: target.displayName,
     accounts,
     aliases: uniqueStrings([...target.aliases, ...source.aliases]),

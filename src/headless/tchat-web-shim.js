@@ -61,6 +61,10 @@
   }
 
   window.tchat = {
+    getChibiState: function () { return invoke('chibis:get-state'); },
+    saveChibiSettings: function (p) { return invoke('chibis:save', p); },
+    testChibi: function (p) { return invoke('chibis:test', p); },
+    clearChibis: function () { return invoke('chibis:clear'); },
     // app / windows — handled client-side (a server has no desktop windows)
     getServerStatus: function () {
       return invoke('app:get-server-status');
@@ -132,6 +136,9 @@
     },
     pickAlertAsset: function (p) {
       return invoke('alerts:pick-asset', p);
+    },
+    testVkLikes: function (p) {
+      return invoke('alerts:test-vk-likes', p);
     },
 
     // announce

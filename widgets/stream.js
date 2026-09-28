@@ -18,6 +18,7 @@ const alertSound = document.querySelector('#streamAlertSound');
 // Стикеры живут в этом же оверлее: переиспользуем общий сокет и модуль
 // stickers.js, чтобы не держать в OBS отдельный источник.
 window.TChatStickers?.mount({ socket, layer: document.querySelector('#stickerLayer') });
+window.TChatVkLikes?.mount({ socket, layer: document.querySelector('#vkLikeLayer') });
 
 const alertQueue = [];
 const queuedAlertIds = new Set();

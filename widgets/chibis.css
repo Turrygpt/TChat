@@ -1,0 +1,27 @@
+.chibi-stage{position:fixed;inset:0;pointer-events:none;z-index:900;overflow:hidden;font-family:Arial,sans-serif}
+.chibi-guest{position:absolute;width:max-content;--avatar-size:clamp(130px,20vw,260px);--tilt:0deg;--from-x:0;--from-y:0;transform:scale(var(--fit,1));transform-origin:top left}
+.chibi-content{display:flex;align-items:center;gap:0;width:max-content;max-width:min(560px,94vw);animation:chibi-arrive .8s cubic-bezier(.16,1,.3,1) both}
+.chibi-guest[data-side=left]{--from-x:-130%;--tilt:58deg}
+.chibi-guest[data-side=right]{--from-x:130%;--tilt:-58deg}
+.chibi-guest[data-side=right] .chibi-content{flex-direction:row-reverse}
+.chibi-guest[data-side=bottom]{--from-y:130%}
+.chibi-guest[data-side=top]{--from-y:-130%;--tilt:180deg}
+.chibi-avatar{position:relative;width:var(--avatar-size);aspect-ratio:1;flex-shrink:0;filter:drop-shadow(0 6px 8px #0004);animation:chibi-bob 3s ease-in-out .8s infinite}
+.chibi-avatar img{position:absolute;inset:3%;width:94%;height:94%;object-fit:contain;transform:rotate(var(--tilt))}
+.chibi-guest[data-side=top] .chibi-bubble{align-self:flex-end}
+.chibi-guest[data-side=bottom] .chibi-bubble{align-self:flex-start}
+.chibi-bubble{position:relative;flex:0 1 auto;box-sizing:border-box;min-width:0;max-width:320px;padding:12px 16px 18px;border-radius:24px 22px 25px 16px;background:#fffdf5;border:2.5px solid #292335;box-shadow:4px 5px 0 #292335,0 8px 18px #0002;color:#292335;animation:chibi-pop .4s ease-out .25s both}
+.chibi-bubble:before{content:'';position:absolute;left:-10px;top:42%;width:15px;height:15px;background:#fffdf5;transform:rotate(45deg) skew(-10deg,-10deg);border-left:2.5px solid #292335;border-bottom:2.5px solid #292335}
+[data-side=right] .chibi-bubble:before{left:auto;right:-10px;transform:rotate(225deg) skew(-10deg,-10deg)}
+.chibi-name{display:inline-block;max-width:100%;box-sizing:border-box;padding:2px 7px;border-radius:7px;font-size:12px;font-weight:800;line-height:1.3;color:#292335;background:var(--chibi-accent,#aabfff);overflow-wrap:anywhere}
+.chibi-text{font-size:clamp(14px,1.2vw,19px);font-weight:600;line-height:1.35;margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.chibi-timer{position:absolute;bottom:7px;left:18px;right:18px;height:2px;background:var(--chibi-accent,#aabfff);border-radius:3px;transform-origin:left;animation:chibi-count var(--chibi-duration,8s) linear forwards}
+.chibi-guest.is-leaving .chibi-bubble{animation:chibi-melt .45s ease-out both}
+.chibi-guest.is-retreating .chibi-avatar{animation:chibi-depart .45s ease-in both}
+@keyframes chibi-melt{from{opacity:1;filter:blur(0)}to{opacity:0;filter:blur(3px)}}
+@keyframes chibi-arrive{from{transform:translate(var(--from-x),var(--from-y))}to{transform:translate(0,0)}}
+@keyframes chibi-depart{to{transform:translate(var(--from-x),var(--from-y))}}
+@keyframes chibi-pop{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
+@keyframes chibi-bob{50%{transform:translateY(-3px)}}
+@keyframes chibi-count{to{transform:scaleX(0)}}
+@media(prefers-reduced-motion:reduce){.chibi-avatar,.chibi-bubble{animation:none}.chibi-content,.chibi-guest.is-retreating .chibi-avatar,.chibi-guest.is-leaving .chibi-bubble{animation-duration:.05s}}

@@ -64,6 +64,7 @@
       }
 
       const id = String(payload.id || `sticker-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      if (active.has(id)) return;
       const size = clamp(Number(payload.size || 240), 60, 1200);
       const seconds = Math.max(Number(payload.seconds || settings.displaySeconds), 1);
       const animation = resolveAnimation(payload.animation);

@@ -7,6 +7,7 @@ Keep context small. Read this file first, then open only the files needed for th
 - Use `npm.cmd`, not `npm`, in PowerShell.
 - `npm.cmd run server:check` verifies the lightweight widget server and `/health`.
 - `npm.cmd run smoke:test` checks the running app at `http://localhost:3000`.
+- Smoke checks against the running app must be read-only. Never send demo chat, music, alerts, or poll mutations to the user's live app; use an isolated test server for those checks.
 - Main local URL: `http://localhost:3000`.
 
 ## Files To Open By Task

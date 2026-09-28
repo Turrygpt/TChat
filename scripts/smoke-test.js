@@ -12,6 +12,11 @@ function check(name, fn) {
 }
 
 async function request(path, options = {}) {
+  // Smoke checks run against the user's live app: never change its state.
+  const method = String(options.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD'].includes(method)) {
+    throw new Error(`Smoke checks must be read-only: ${method} ${path}`);
+  }
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
@@ -111,6 +116,49 @@ check('widget pages are served', async () => {
     if (!response.ok || typeof body !== 'string' || !body.includes('<html')) {
       throw new Error(`page failed: ${page}`);
     }
+  }
+});
+
+check('VK likes alert has socket event and flight effect', async () => {
+  const main = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+  const backoffice = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  const preload = fs.readFileSync(path.join(projectRoot, 'src', 'preload.js'), 'utf8');
+  const webShim = fs.readFileSync(path.join(projectRoot, 'src', 'headless', 'tchat-web-shim.js'), 'utf8');
+  const [scriptResponse, styleResponse, streamResponse] = await Promise.all([
+    request('/widgets/vk-likes.js', { method: 'GET', headers: {} }),
+    request('/widgets/vk-likes.css', { method: 'GET', headers: {} }),
+    request('/widgets/stream.html', { method: 'GET', headers: {} }),
+  ]);
+  if (!scriptResponse.response.ok || !scriptResponse.body.includes("socket.on('vk:likes'") || !scriptResponse.body.includes('createLike')) {
+    throw new Error('VK likes socket handler missing');
+  }
+  if (!styleResponse.response.ok || !styleResponse.body.includes('@keyframes vk-like-flight')) {
+    throw new Error('VK likes flight animation missing');
+  }
+  if (
+    !streamResponse.response.ok ||
+    !streamResponse.body.includes('id="vkLikeLayer"')
+  ) {
+    throw new Error('VK likes layer missing from unified stream overlay');
+  }
+  if (
+    !main.includes('stream?.count?.likes') ||
+    !main.includes('VK_LIKE_BOUNCE_LIMIT = 2') ||
+    !main.includes('normalizedLikes, vkConnectionState.likeBounceCeiling') ||
+    !main.includes("socketServer?.emit('vk:likes'")
+  ) {
+    throw new Error('VK likes polling bridge missing');
+  }
+  if (
+    !backoffice.includes('id="alertsSection"') ||
+    !backoffice.includes('id="vkLikesEnabledInput"') ||
+    !backoffice.includes('id="testVkLikesButton"') ||
+    !backoffice.includes("'/demo/vk-likes'") ||
+    backoffice.includes('stream.html?demo=12') ||
+    !preload.includes('alerts:test-vk-likes') ||
+    !webShim.includes('alerts:test-vk-likes')
+  ) {
+    throw new Error('VK likes controls missing from alerts section');
   }
 });
 
@@ -380,113 +428,10 @@ check('legacy donation widget queues tts alerts', async () => {
   }
 });
 
-check('demo subscriber alert', async () => {
-  const { response, body } = await request('/demo/subscriber', {
-    method: 'POST',
-    headers: { 'X-TChat-Internal': '1' },
-    body: JSON.stringify({ username: 'SmokeSub' }),
-  });
-  if (!response.ok || !body?.ok || body.item?.kind !== 'subscriber') {
-    throw new Error('demo subscriber failed');
-  }
-});
-
-check('first chat message does not trigger greeting alert', async () => {
-  const username = `FirstSmoke${Date.now()}`;
-  await request('/demo/chat', {
-    method: 'POST',
-    body: JSON.stringify({ platform: 'demo', user: username, text: 'hello' }),
-  });
-  await request('/demo/chat', {
-    method: 'POST',
-    body: JSON.stringify({ platform: 'demo', user: username, text: 'second hello' }),
-  });
-
-  const { response, body } = await request('/alerts/state', { method: 'GET', headers: {} });
-  const greetings = (body.queue || []).filter((item) => item.kind === 'firstMessage' && item.firstMessage?.username === username);
-  if (!response.ok || greetings.length !== 0) {
-    throw new Error(`unexpected first message greetings: ${greetings.length}`);
-  }
-});
-
 check('first message greeting alert stays disabled', async () => {
   const { response, body } = await request('/alerts/state', { method: 'GET', headers: {} });
   if (!response.ok || body.settings?.systemAlerts?.firstMessage?.enabled !== false) {
     throw new Error('first message alert should stay disabled');
-  }
-});
-
-check('poll widget accepts one immutable vote per user', async () => {
-  const started = await request('/remote/poll/start', {
-    method: 'POST',
-    body: JSON.stringify({
-      title: 'Smoke poll',
-      durationSeconds: 60,
-      options: ['One', 'Two', 'Three'],
-    }),
-  });
-  if (!started.response.ok || !started.body?.poll || started.body.poll.visible !== true) {
-    throw new Error('poll did not start visible');
-  }
-
-  await request('/demo/chat', {
-    method: 'POST',
-    body: JSON.stringify({ platform: 'demo', user: 'PollUserA', text: '1' }),
-  });
-  await request('/demo/chat', {
-    method: 'POST',
-    body: JSON.stringify({ platform: 'demo', user: 'PollUserA', text: '2' }),
-  });
-  await request('/demo/chat', {
-    method: 'POST',
-    body: JSON.stringify({ platform: 'demo', user: 'PollUserB', text: '2' }),
-  });
-
-  const state = await request('/widgets/state', { method: 'GET', headers: {} });
-  const poll = state.body?.poll;
-  if (!state.response.ok || !poll) {
-    throw new Error('poll missing from widgets state');
-  }
-
-  const votes = poll.options.map((option) => Number(option.votes || 0));
-  if (votes[0] !== 1 || votes[1] !== 1 || votes[2] !== 0) {
-    throw new Error(`poll votes are not immutable per user: ${votes.join(',')}`);
-  }
-
-  const hidden = await request('/remote/poll/hide', { method: 'POST' });
-  if (hidden.body?.poll?.visible !== false) {
-    throw new Error('poll hide did not preserve hidden poll state');
-  }
-
-  const shown = await request('/remote/poll/show', { method: 'POST' });
-  if (shown.body?.poll?.visible !== true) {
-    throw new Error('poll show did not restore visible poll state');
-  }
-
-  const finished = await request('/remote/poll/finish', { method: 'POST' });
-  if (finished.body?.poll?.status !== 'finished') {
-    throw new Error('poll did not finish early');
-  }
-
-  await request('/remote/poll/clear', { method: 'POST' });
-});
-
-check('demo music enqueue', async () => {
-  const { response, body } = await request('/demo/music', {
-    method: 'POST',
-    body: JSON.stringify({
-      url: 'https://www.youtube.com/watch?v=rXA-9mWGCXk',
-      username: 'Smoke test',
-    }),
-  });
-
-  if (!response.ok || !body?.ok) {
-    throw new Error(`demo music failed: ${body?.error || response.status}`);
-  }
-
-  const readyItems = (body.queue?.queue || []).filter((item) => ['ready', 'playing'].includes(item.status) && item.embedUrl);
-  if (!readyItems.length) {
-    throw new Error('demo music did not produce ready item');
   }
 });
 
@@ -797,15 +742,14 @@ check('music uses the title reported by the OBS player', () => {
   }
 });
 
-check('music state after enqueue', async () => {
+check('music state endpoint', async () => {
   const { response, body } = await request('/music/state', { method: 'GET', headers: {} });
   if (!response.ok) {
     throw new Error('music state unavailable');
   }
 
-  const readyItems = (body.queue || []).filter((item) => ['ready', 'playing'].includes(item.status) && item.embedUrl);
-  if (!readyItems.length) {
-    throw new Error('music queue has no playable items');
+  if (!Array.isArray(body.queue)) {
+    throw new Error('music queue is not an array');
   }
 });
 
@@ -850,16 +794,6 @@ check('VK polling reads the newest chat page', () => {
   }
   if (body.includes('`?limit=30&from_id=${vkConnectionState.lastChatMessageId}`')) {
     throw new Error('VK chat polling still paginates backwards with from_id');
-  }
-});
-
-check('demo music cleanup', async () => {
-  const { response, body } = await request('/demo/music/reset', {
-    method: 'POST',
-  });
-
-  if (!response.ok || !body?.ok) {
-    throw new Error('demo music reset failed');
   }
 });
 

@@ -2637,6 +2637,14 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
             <span>Алерты</span>
           </button>
+          <button class="tab" type="button" data-tab="stickers" aria-label="Стикеры" title="Стикеры">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 14V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9Z"/><path d="M14 21v-5a2 2 0 0 1 2-2h5"/><path d="M8 8h.01M14 8h.01M8 12c1.5 2 4.5 2 6 0"/></svg>
+            <span>Стикеры</span>
+          </button>
+          <button class="tab" type="button" data-tab="chibis" aria-label="Чибики" title="Чибики">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="9" r="7"/><path d="M9 8h.01M15 8h.01M9 12q3 3 6 0M8 16l-2 5h12l-2-5"/></svg>
+            <span>Чибики</span>
+          </button>
           <button class="tab" type="button" data-tab="music" aria-label="Музыка">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
             <span>Музыка</span>
@@ -3019,11 +3027,6 @@
           <article class="panel">
             <h2>Ссылки для OBS</h2>
             <div class="widget-link">
-              <strong>Окно алертов</strong>
-              <code>http://localhost:3000/widgets/alerts.html</code>
-              <button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/alerts.html">Открыть</button>
-            </div>
-            <div class="widget-link">
               <strong>Чат для OBS</strong>
               <code>http://localhost:3000/widgets/chat.html</code>
               <button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/chat.html">Открыть</button>
@@ -3093,9 +3096,20 @@
 
       <section id="alertsSection" class="section">
         <section class="grid">
+          <article class="panel panel--wide">
+            <h2>Лайки VK Видео Live</h2>
+            <label class="rule-toggle" style="margin-bottom: 12px;">
+              <input id="vkLikesEnabledInput" type="checkbox" checked />
+              включить лайки
+            </label>
+            <div class="button-row">
+              <button id="testVkLikesButton" class="button button--ghost" type="button">Проверить эффект</button>
+            </div>
+          </article>
+
           <article class="panel">
             <h2>Тестовый донат</h2>
-            <p class="muted">Появится в чате с меткой «ТЕСТ», в списке донатов и в OBS-виджете алертов.</p>
+            <p class="muted">Появится в чате с меткой «ТЕСТ», в списке донатов и в едином overlay стрима.</p>
             <label class="field">
               <span>Ник донатера</span>
               <input id="testDonationUserInput" type="text" value="Тестовый зритель" />
@@ -3159,20 +3173,38 @@
         </section>
       </section>
 
+      <section id="chibisSection" class="section">
+        <article class="panel" id="chibiPanel" style="margin-bottom:20px;background:linear-gradient(130deg,#232b43,#181c2c);border:1px solid #ffffff20">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:20px"><h2>Чибики за баллы</h2><span style="font-size:30px" aria-hidden="true">✦</span></div>
+          <p class="muted">Маленький гость выходит с края экрана, показывает сообщение и уходит. Уже входит в общий виджет стрима.</p>
+          <div id="chibiCharacters" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0"></div>
+          <p class="muted">Отметьте несколько образов для случайного выбора или один — для постоянного. Пока это готовые костюмы; сменный гардероб появится позже.</p>
+          <div class="form-grid">
+            <label class="field"><span>Название награды — точное совпадение</span><input id="chibiReward" value="Выделить сообщение" maxlength="150"></label>
+            <label class="field"><span>Площадка</span><select id="chibiPlatform"><option value="any">Twitch и VK</option><option value="twitch">Twitch</option><option value="vk">VK</option></select></label>
+            <label class="field"><span>Откуда появляется</span><select id="chibiPosition"><option value="random">Случайная сторона</option><option value="left">Слева</option><option value="right">Справа</option><option value="top">Сверху</option><option value="bottom">Снизу</option></select></label>
+            <label class="field"><span>Время показа, секунд</span><input id="chibiSeconds" type="number" min="3" max="30" value="8"></label>
+          </div>
+          <label class="checkbox"><input id="chibiEnabled" type="checkbox"> Включить появление за баллы</label>
+          <label class="checkbox"><input id="chibiHighlighted" type="checkbox" checked> Реагировать на стандартное «Выделить сообщение» Twitch</label>
+          <p class="muted">У своей награды включите ввод сообщения. Для Twitch подключите награды в разделе «Стикеры» → «Баллы Twitch». Если площадка не передала текст, чибик скажет «Спасибо за стрим!».</p>
+          <label class="field"><span>Сообщение для проверки</span><input id="chibiTestMessage" maxlength="400" value="Чат, вы невероятные! Спасибо за уютный стрим ✨"></label>
+          <div class="actions"><button id="chibiSave" class="button" type="button">Сохранить чибиков</button><button id="chibiTest" class="button button--ghost" type="button">Показать в OBS</button><button id="chibiClear" class="button button--ghost" type="button">Очистить очередь</button></div>
+          <p id="chibiStatus" class="muted" role="status">Загрузка…</p>
+          <div class="widget-link"><strong>Общий виджет стрима для OBS</strong><code>http://localhost:3000/widgets/stream.html</code><button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/stream.html">Открыть общий виджет</button></div>
+          <p class="muted">Чибики появляются поверх общего виджета. Дополнительный источник в OBS не нужен. Для проверки нажмите «Показать в OBS».</p>
+        </article>
+      </section>
+
       <section id="stickersSection" class="section">
         <section class="grid">
           <article class="panel">
-            <h2>Виджет для OBS</h2>
-            <div class="widget-link">
-              <strong>Слой стикеров</strong>
-              <code id="stickersWidgetUrl">http://localhost:3000/widgets/stickers.html</code>
-              <button class="button button--ghost" type="button" data-open-url="http://localhost:3000/widgets/stickers.html">Открыть</button>
-            </div>
+            <h2>Стикеры в общем виджете</h2>
             <p class="muted">
-              Стикеры уже входят в общий оверлей <code>stream.html</code> — если он добавлен в OBS,
-              отдельный источник не нужен. Ссылка ниже пригодится, только если хочется держать стикеры
-              отдельным слоем. Зритель активирует награду во VK Play Live — стикер прилетает на оверлей
-              и через пару секунд улетает.
+              Стикеры и реакции за баллы показываются в едином виджете стрима вместе с чатом,
+              алертами и остальными элементами. Ссылка для OBS находится в разделе «Виджеты».
+              Зритель активирует награду во VK Видео Live или Twitch — реакция появляется
+              на экране и исчезает через заданное время. Кнопка «Тест» запускает её в этом же виджете.
             </p>
             <label class="field">
               <span>Длительность показа по умолчанию, секунд</span>
@@ -3195,19 +3227,39 @@
 
           <article class="panel">
             <h2>Последние награды</h2>
-            <p class="muted">Что прилетело из чата VK Play Live. Скопируйте название в правило, чтобы привязать стикер.</p>
+            <p class="muted">Покупки наград за баллы VK и Twitch. Скопируйте точное название в правило, чтобы привязать эффект.</p>
             <ul id="stickerRewardsList" class="list queue-list"></ul>
           </article>
 
           <article class="panel panel--wide">
-            <h2>Правила стикеров</h2>
+            <h2>Баллы Twitch</h2>
+            <p class="muted">Для всех покупок, включая награды без сообщения в чат, подключите токен владельца канала
+              с правом <code>channel:read:redemptions</code>. Награды приходят с канала владельца токена.
+              Токен действует до закрытия TChat; после перезапуска подключите снова.</p>
+            <label class="field"><span>OAuth access token Twitch</span>
+              <input id="twitchRewardsToken" type="password" autocomplete="off" placeholder="Токен владельца канала" />
+            </label>
+            <div class="button-row">
+              <button id="connectTwitchRewardsButton" class="button" type="button">Подключить награды</button>
+              <button id="disconnectTwitchRewardsButton" class="button button--ghost" type="button">Отключить</button>
+              <button class="button button--ghost" type="button" data-open-url="https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/">Как получить токен</button>
+            </div>
+            <p id="twitchRewardsStatus" class="muted">Не подключено</p>
+          </article>
+
+          <article class="panel panel--wide">
+            <h2>Реакции за баллы</h2>
             <div class="button-row">
               <button id="addStickerRuleButton" class="button button--ghost" type="button">Добавить стикер</button>
+              <button id="addLikeRewardButton" class="button" type="button">👍 Классный стрим</button>
             </div>
             <div id="stickerRulesList" class="rule-list"></div>
             <p class="muted">
-              Награда сопоставляется по названию без учёта регистра. Пустое поле «Награда» — запасное правило:
+              Создайте на площадке награду «Классный стрим» за 900 баллов, добавьте готовый лайк и сохраните правила.
+              Можно выбрать свою картинку, GIF или видео и анимацию появления.
+              Награда сопоставляется по точному названию без учёта регистра. Пустое поле «Награда» — запасное правило:
               срабатывает на любую награду, для которой нет своего стикера.
+              Цена 0 — любая; VK иногда не передаёт цену, тогда оставьте 0 и используйте название.
             </p>
           </article>
         </section>
@@ -3579,7 +3631,7 @@
         youtube: '',
         rutube: '',
       };
-      let alertSettings = { displaySeconds: 8, systemAlerts: {}, rules: [] };
+      let alertSettings = { displaySeconds: 8, vkLikes: { enabled: true }, systemAlerts: {}, rules: [] };
       let widgetsState = { items: [], poll: null, urls: {} };
       let workspaceCountdownTimer = null;
       let selectedWidgetType = 'goal';
@@ -3710,6 +3762,8 @@
         connections: ['Подключения', 'Каналы чата, DonationAlerts и обход YouTube.'],
         widgets: ['Виджеты', 'Общий overlay для OBS: алерты, чат, музыка, таймеры.'],
         alerts: ['Алерты', 'Оповещения о донатах, подписках и событиях.'],
+        stickers: ['Стикеры', 'Реакции на награды за баллы VK и Twitch: картинки, GIF и видео.'],
+        chibis: ['Чибики', 'Персонажи, сообщения за баллы и появление из-за края экрана.'],
         music: ['Музыка', 'Очередь треков и виджет «сейчас играет».'],
         announce: ['Рассылка', 'Анонсы стрима в Telegram и MAX.'],
         restream: ['Рестрим', 'Раздача одного потока OBS на все площадки.'],
@@ -3953,10 +4007,12 @@
       function renderAlertSettings(settings) {
         alertSettings = {
           displaySeconds: Number(settings?.displaySeconds || 8),
+          vkLikes: { enabled: settings?.vkLikes?.enabled !== false },
           systemAlerts: settings?.systemAlerts || {},
           rules: Array.isArray(settings?.rules) ? settings.rules : [],
         };
         alertDisplaySecondsInput.value = alertSettings.displaySeconds;
+        document.querySelector('#vkLikesEnabledInput').checked = alertSettings.vkLikes.enabled;
         systemAlertList.innerHTML = ['subscriber', 'subscriptionRenewal', 'raid', 'portal'].map((type) => renderSystemAlert(type, alertSettings.systemAlerts[type])).join('');
         alertRulesList.innerHTML = alertSettings.rules.map(renderRule).join('');
       }
@@ -4136,6 +4192,9 @@
 
         return {
           displaySeconds: Number(alertDisplaySecondsInput.value || 8),
+          vkLikes: {
+            enabled: document.querySelector('#vkLikesEnabledInput').checked,
+          },
           systemAlerts,
           rules,
         };
@@ -4144,6 +4203,28 @@
       async function saveAlertRules() {
         const saved = await window.tchat.saveAlertSettings(collectAlertSettings());
         renderAlertSettings(saved);
+      }
+
+      async function testVkLikes() {
+        if (typeof window.tchat?.testVkLikes === 'function') {
+          await window.tchat.testVkLikes({ count: 8 });
+          return;
+        }
+
+        const endpoint = /^https?:$/.test(window.location.protocol)
+          ? '/demo/vk-likes'
+          : 'http://localhost:3000/demo/vk-likes';
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-TChat-Internal': '1'
+          },
+          body: JSON.stringify({ count: 8 })
+        });
+        if (!response.ok) {
+          throw new Error(`VK likes test failed: ${response.status}`);
+        }
       }
 
       function addRule(type) {
@@ -5837,7 +5918,7 @@
               countdown: `${widgetsState.urls.countdown || 'http://localhost:3000/widgets/countdown.html'}?id=${encodeURIComponent(widget.id)}`,
               texts: `${widgetsState.urls.texts || 'http://localhost:3000/widgets/texts.html'}?id=${encodeURIComponent(widget.id)}`,
               tasks: `${widgetsState.urls.tasks || 'http://localhost:3000/widgets/tasks.html'}?id=${encodeURIComponent(widget.id)}`,
-              alerts: widgetsState.urls.alerts || 'http://localhost:3000/widgets/alerts.html',
+              alerts: widgetsState.urls.stream || 'http://localhost:3000/widgets/stream.html',
               chat: widgetsState.urls.chat || 'http://localhost:3000/widgets/chat.html',
             };
             const url = widgetUrlByType[widget.type] || (widgetsState.urls.stream || 'http://localhost:3000/widgets/stream.html');
@@ -6487,6 +6568,8 @@
       document.querySelector('#connectDonationAlertsButton').addEventListener('click', connectDonationAlerts);
       document.querySelector('#clearDonationAlertsButton').addEventListener('click', clearDonationAlerts);
       document.querySelector('#saveAlertRulesButton').addEventListener('click', saveAlertRules);
+      document.querySelector('#vkLikesEnabledInput').addEventListener('change', saveAlertRules);
+      document.querySelector('#testVkLikesButton').addEventListener('click', testVkLikes);
       document.querySelector('#addAmountRuleButton').addEventListener('click', () => addRule('amount'));
       document.querySelector('#addNicknameRuleButton').addEventListener('click', () => addRule('nickname'));
       document.querySelector('#addIntervalRuleButton').addEventListener('click', () => addRule('interval'));
@@ -6993,8 +7076,16 @@
         return `
           <article class="rule-card" data-sticker-id="${escapeHtml(rule.id)}">
             <div class="rule-grid">
-              <label class="wide">Награда во VK Play Live
+              <label class="wide">Название награды VK / Twitch
                 <input data-sticker-field="reward" type="text" placeholder="пусто = любая награда" value="${escapeHtml(rule.reward || '')}" />
+              </label>
+              <label>Площадка
+                <select data-sticker-field="platform">
+                  ${Object.entries({ any: 'VK и Twitch', vk: 'VK Видео Live', twitch: 'Twitch' }).map(([value, label]) => `<option value="${value}" ${(rule.platform || 'any') === value ? 'selected' : ''}>${label}</option>`).join('')}
+                </select>
+              </label>
+              <label>Цена в баллах (0 — любая)
+                <input data-sticker-field="price" type="number" min="0" step="1" value="${escapeHtml(rule.price || 0)}" />
               </label>
               <div class="asset-field wide">
                 <label>Картинка / анимация
@@ -7066,7 +7157,7 @@
             return `
               <li>
                 <strong>${escapeHtml(item.reward || 'без названия')}</strong>
-                <span class="muted">${escapeHtml(item.username)} · ${escapeHtml(time)} · ${badge}</span>
+                <span class="muted">${escapeHtml(item.platform === 'twitch' ? 'Twitch' : 'VK')} · ${escapeHtml(item.username)} · ${item.price > 0 ? `${escapeHtml(item.price)} баллов · ` : ''}${escapeHtml(time)} · ${badge}</span>
               </li>
             `;
           })
@@ -7079,6 +7170,8 @@
           id: card.dataset.stickerId,
           enabled: value('enabled').checked,
           reward: value('reward').value.trim(),
+          platform: value('platform').value,
+          price: Number(value('price').value || 0),
           image: value('image').value.trim(),
           seconds: Number(value('seconds').value || 0),
           size: Number(value('size').value || 240),
@@ -7158,13 +7251,39 @@
       });
 
       document.querySelector('#addStickerRuleButton').addEventListener('click', addStickerRule);
+      document.querySelector('#addLikeRewardButton').addEventListener('click', () => {
+        stickerRulesList.insertAdjacentHTML('beforeend', renderStickerRule({
+          id: `sticker-like-${Date.now()}`, enabled: true, reward: 'Классный стрим',
+          platform: 'any', price: 0, image: '/assets/reactions/like.svg',
+          seconds: 6, size: 280, position: 'center', animation: 'pop', loop: true,
+        }));
+        stickersState.textContent = 'Лайк добавлен. Нажмите «Тест», затем «Сохранить стикеры».';
+      });
+      const twitchRewardsStatus = document.querySelector('#twitchRewardsStatus');
+      if (window.tchat.getTwitchRewardsStatus) {
+        window.tchat.getTwitchRewardsStatus().then((status) => { twitchRewardsStatus.textContent = status; });
+        window.tchat.onTwitchRewardsStatus((status) => { twitchRewardsStatus.textContent = status; });
+      }
+      document.querySelector('#connectTwitchRewardsButton').addEventListener('click', async () => {
+        const input = document.querySelector('#twitchRewardsToken');
+        const token = input.value.trim();
+        if (!token) { twitchRewardsStatus.textContent = 'Введите токен владельца канала Twitch.'; return; }
+        if (!window.tchat.connectTwitchRewards) { twitchRewardsStatus.textContent = 'Подключение доступно в приложении TChat.'; return; }
+        input.value = '';
+        try { twitchRewardsStatus.textContent = await window.tchat.connectTwitchRewards(token); }
+        catch { twitchRewardsStatus.textContent = 'Не удалось подключиться. Повторите попытку.'; }
+      });
+      document.querySelector('#disconnectTwitchRewardsButton').addEventListener('click', async () => {
+        if (window.tchat.disconnectTwitchRewards) twitchRewardsStatus.textContent = await window.tchat.disconnectTwitchRewards();
+      });
       document.querySelector('#saveStickersButton').addEventListener('click', saveStickerSettings);
       document.querySelector('#clearStickersButton').addEventListener('click', async () => {
         await window.tchat.clearStickers();
         stickersState.textContent = 'Экран очищен.';
       });
 
-      window.tchat.onStickerState(renderStickerState);
+      // Incoming purchases must not overwrite unsaved rule edits.
+      window.tchat.onStickerState((state) => renderStickerRewards(state?.rewards || []));
       window.tchat.getStickerState().then(renderStickerState);
 
       // === Оповещение о стриме (Telegram + MAX) ===
@@ -8376,7 +8495,9 @@
 
         // Карточка только показывает то, что написал ИИ: править портрет руками нельзя,
         // можно закрепить профиль, добавить свою заметку в таймлайн и пересобрать портрет.
+        let profileChibiCatalog = [];
         function renderCard(p) {
+          if (p.chibiCatalog) profileChibiCatalog = p.chibiCatalog;
           const s = p.stats || {};
           const cell = (label, value) => `<div class="stat-tile"><div class="stat-tile__label">${label}</div><div class="stat-tile__value">${value}</div></div>`;
           // Крестик «неверно» у каждого утверждения ИИ: пометка убирает его из
@@ -8445,6 +8566,16 @@
               </label>
               <button id="pe-nickname-save" class="button button--ghost" type="button">Сохранить ник</button>
             </div>
+            <div class="timeline__add">
+              <label class="field" style="flex:1;">Чибик зрителя
+                <select id="pe-chibi">
+                  <option value="">Случайный</option>
+                  ${profileChibiCatalog.map(item => `<option value="${esc(item.id)}" ${p.chibiId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}
+                </select>
+              </label>
+              <button id="pe-chibi-save" class="button button--ghost" type="button">Сохранить чибика</button>
+            </div>
+            <p id="pe-chibi-status" class="muted" role="status">Выбранный чибик используется для всех аккаунтов этого профиля. «Случайный» — выбор из образов, включённых в разделе «Чибики».</p>
             <div class="tile-grid profile-card__stats">
               ${cell('Сообщений', s.messageCount || 0)}
               ${cell('Первое', fmtDate(s.firstSeen))}
@@ -8489,6 +8620,17 @@
             </div>`;
 
           cardEl.querySelector('#pe-pin').addEventListener('change', (event) => togglePin(p.id, event.target.checked));
+          cardEl.querySelector('#pe-chibi-save').addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            const status = cardEl.querySelector('#pe-chibi-status');
+            button.disabled = true;
+            try {
+              await api.upsertProfile({ id: p.id, chibiId: cardEl.querySelector('#pe-chibi').value });
+              status.textContent = 'Чибик сохранён. Назначение вступит в силу при следующем появлении.';
+            } catch (error) {
+              status.textContent = `Не удалось сохранить: ${error.message}`;
+            } finally { button.disabled = false; }
+          });
           cardEl.querySelector('#pe-nickname-save').addEventListener('click', () => saveNickname(p.id));
           cardEl.querySelector('#pe-nickname').addEventListener('keydown', (event) => {
             if (event.key === 'Enter') saveNickname(p.id);
@@ -8629,5 +8771,6 @@
         });
       })();
     </script>
+    <script src="./widgets/chibi-panel.js"></script>
   </body>
 </html>
