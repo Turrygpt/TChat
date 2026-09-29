@@ -87,7 +87,14 @@ socket.on('widgets:state', applyWidgetsState);
 socket.on('chat:message', addChatMessage);
 
 window.addEventListener('message', (event) => {
-  if (event.origin !== window.location.origin || event.data?.type !== 'tchat:giveaway-size') return;
+  if (event.origin !== window.location.origin) return;
+  if (event.data?.type === 'tchat:music-visibility') {
+    const frame = [...(streamEmbeddedWidgets?.querySelectorAll('.stream-embedded-widget--music') || [])]
+      .find((node) => node.contentWindow === event.source);
+    frame?.classList.toggle('is-empty', event.data.visible !== true);
+    return;
+  }
+  if (event.data?.type !== 'tchat:giveaway-size') return;
   const id = String(event.data.id || '');
   const frame = streamEmbeddedWidgets?.querySelector(
     `.stream-embedded-widget--giveaway[data-embedded-widget-id="${CSS.escape(id)}"]`,
@@ -721,6 +728,7 @@ function renderEmbeddedWidgets(items) {
 
     node = document.createElement('iframe');
     node.className = `stream-embedded-widget stream-embedded-widget--${widget.type}`;
+    if (widget.type === 'music') node.classList.add('is-empty');
     node.dataset.embeddedWidgetId = widget.id;
     node.title = widget.title || 'Музыка';
     node.src = src;

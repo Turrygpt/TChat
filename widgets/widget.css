@@ -421,6 +421,11 @@ body {
 
 .stream-embedded-widget--music {
   min-height: 260px;
+  background: transparent !important;
+}
+
+.stream-embedded-widget--music.is-empty {
+  opacity: 0;
 }
 
 .stream-embedded-widget--giveaway {

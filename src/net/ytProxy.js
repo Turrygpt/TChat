@@ -78,7 +78,7 @@ function proxyHostPort(proxyUrl) {
   }
 }
 
-function writePacFile(proxyUrl) {
+function writePacFile(proxyUrl, userDataPath) {
   const hp = proxyHostPort(proxyUrl);
   const lines = YT_SUFFIXES.map((s) => `    is(${JSON.stringify(s)})`).join(' ||\n');
   const pac = `// TChat — сгенерировано автоматически. Только YouTube -> прокси, остальное DIRECT.
@@ -96,7 +96,8 @@ ${lines}
   return "DIRECT";
 }
 `;
-  const outPath = path.join(PROJECT_ROOT, 'scripts', 'yt.generated.pac');
+  const outPath = path.join(userDataPath, 'proxy', 'yt.generated.pac');
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, pac, 'utf8');
   return outPath;
 }
@@ -110,7 +111,7 @@ function toFileUrl(p) {
 function installChromiumProxy(app, proxyUrl) {
   if (!app || !app.commandLine) return;
   try {
-    const pacPath = writePacFile(proxyUrl);
+    const pacPath = writePacFile(proxyUrl, app.getPath('userData'));
     app.commandLine.appendSwitch('proxy-pac-url', toFileUrl(pacPath));
     // Прокси форсирует TCP; на всякий случай гасим QUIC/UDP, который умеет обходить прокси.
     app.commandLine.appendSwitch('disable-quic');

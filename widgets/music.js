@@ -908,6 +908,9 @@ function syncWidgetVisibility() {
   const waitingItems = queue.filter((item) => item.id !== currentId && item.status !== 'played' && !item.played);
   const hasContent = Boolean(currentId) || waitingItems.length > 0 || !musicNowTitle.hidden || !musicPlayer.hidden;
   musicWidget.hidden = !hasContent;
+  if (isEmbeddedPlayer && window.parent !== window) {
+    window.parent.postMessage({ type: 'tchat:music-visibility', visible: hasContent }, window.location.origin);
+  }
 }
 
 function decodeHtml(value = '') {

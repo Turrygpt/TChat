@@ -5178,9 +5178,17 @@ async function connectChatSources(channels = currentChannels) {
 
   await connectTwitchChat(parseTwitchChannel(currentChannels.twitch));
   await connectYouTubeChat(currentChannels.youtube);
-  await connectRutubeChat(currentChannels.rutube);
-  await refreshViewerCounts();
+  // Rutube's page fetch must not hold VK chat startup hostage. Its viewer
+  // request is bounded below, and the Rutube status updates independently.
+  connectRutubeChat(currentChannels.rutube).catch((error) => {
+    console.error(`Не удалось подключить Rutube: ${error.message}`);
+  });
   await pollVkChat();
+  // Viewer APIs can stall independently of VK. Start periodic chat polling as
+  // soon as the first VK request finishes instead of waiting for those APIs.
+  refreshViewerCounts().catch((error) => {
+    console.error(`Не удалось обновить счётчики зрителей: ${error.message}`);
+  });
   broadcastChatStatus();
 }
 
@@ -5592,8 +5600,7 @@ async function connectRutubeChat(channelUrl) {
 }
 
 async function fetchRutubeViewerCount(channelUrl) {
-  const response = await fetch(channelUrl);
-  const html = await response.text();
+  const html = await fetchTextWithTimeout(channelUrl, 8000);
   const match = html.match(/"viewers_count"\s*:\s*(\d+)/) || html.match(/"viewersCount"\s*:\s*(\d+)/);
   return match ? Number(match[1]) : 0;
 }
@@ -6044,8 +6051,13 @@ function parseVkRewardEvent(item = {}) {
     return null;
   }
 
-  const quoted = base.textParts.match(/[«"'"]([^»"'"]+)[»"'"]/);
-  const rewardName = String(quoted?.[1] || '').trim();
+  // VK puts the reward announcement and the viewer's message in separate
+  // text parts, divided by a newline. Match only the announcement so the
+  // viewer's message cannot prevent the reward name from being recognized.
+  const [announcement, ...messageParts] = base.textParts.split(/\r?\n/);
+  const quoted = announcement.match(/[«"'"]([^»"'"]+)[»"'"]/);
+  const unquoted = announcement.trim().match(/наград[ауы]?\s*[:—-]\s*(.+?)(?:\s+за\s+(\d+(?:[.,]\d+)?))?$/i);
+  const rewardName = String(quoted?.[1] || unquoted?.[1] || '').trim();
   if (!rewardName) {
     return null;
   }
@@ -6054,8 +6066,8 @@ function parseVkRewardEvent(item = {}) {
     platform: 'vk',
     username: base.username,
     reward: rewardName,
-    price: 0,
-    message: base.textParts,
+    price: Number(String(unquoted?.[2] || '').replace(',', '.')) || 0,
+    message: messageParts.join('\n').trim() || base.textParts,
     id: `vk:reward:${base.id}`,
     createdAt: base.createdAt,
   };
