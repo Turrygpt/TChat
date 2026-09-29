@@ -5131,6 +5131,7 @@ function normalizeChatMessage(payload = {}) {
     text,
     parts: normalizeMessageParts(text, payload.parts),
     badges: Array.isArray(payload.badges) ? payload.badges : [],
+    highlighted: payload.highlighted === true,
     createdAt: payload.createdAt || new Date().toISOString(),
   };
 }
@@ -5611,6 +5612,7 @@ async function createTwitchMessage(tags, message) {
     platformIcon: getPlatformIconUrl('twitch'),
     user: tags['display-name'] || tags.username || 'Зритель',
     text: message,
+    highlighted: tags['msg-id'] === 'highlighted-message',
     parts: await buildTwitchMessageParts(message, tags.emotes || {}),
     badges: Object.keys(tags.badges || {}),
     color: tags.color || '',
@@ -5852,6 +5854,7 @@ async function pollVkChat() {
       text: message.text,
       parts: message.parts,
       badges: message.badges,
+      highlighted: message.highlighted,
       createdAt: message.createdAt,
     });
   }
@@ -5875,6 +5878,7 @@ async function mapVkChatItems(chatData = []) {
             user: item.author?.displayName || item.author?.nick || item.author?.name || 'Зритель',
             text: extractVkMessageText(item.data),
             parts: extractVkMessageParts(item.data),
+            highlighted: Boolean(rewardEvent && /^выделить сообщение$/i.test(String(rewardEvent.reward || '').trim())),
             badges: await buildVkBadges(item.author?.badges || [], item.author || {}),
             createdAt: new Date(Number(item.createdAt || Date.now() / 1000) * 1000).toISOString(),
             subscriberEvent,

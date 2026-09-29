@@ -116,6 +116,7 @@ function applyChatSettings(settings = {}) {
 }
 
 function addMessage(message) {
+  if (message.highlighted === true) return; // текст выделения показывает чибик
   if (isChatMessageHidden(message)) return; // скрыто в окне чата
 
   const item = document.createElement('article');

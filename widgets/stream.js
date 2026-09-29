@@ -222,6 +222,7 @@ const CHAT_MAX_MESSAGES = 8;
 
 function addChatMessage(message = {}) {
   if (!streamChat || !chatWidgetEnabled) return;
+  if (message.highlighted === true) return; // текст выделения показывает чибик
   if (isChatMessageHidden(message)) return; // скрыто в окне чата — в overlay не показываем
 
   // В общем overlay показываем только источник (площадку), ник и текст. Ролевые
