@@ -47,3 +47,6 @@ android/.kotlin/
 # в userData, а старые копии в репозитории — рантайм-мусор. defaults/ остаётся.
 assets/alerts/*
 !assets/alerts/defaults/
+
+# Локальный адрес прокси может содержать логин и пароль
+/youtube-proxy.json

@@ -16,19 +16,26 @@
 Проксируемые домены: `youtube.com`, `youtu.be`, `youtube-nocookie.com`, `googlevideo.com`,
 `ytimg.com`, `ggpht.com`, `youtubei.googleapis.com`.
 
-## Backend по умолчанию — свой VPS, без VPN и без сторонних прокси
+## Настройка прокси
 
-`youtube-proxy.json` по умолчанию указывает на **свой сервер**
-(`195.62.49.244:18899`, tinyproxy) — доступ по логину/паролю, на сервере разрешены
-только youtube-домены (`/etc/tinyproxy/filter`, `FilterDefaultDeny Yes`), CONNECT
-ограничен портом 443. Никакого VPN-клиента или платной VLESS-подписки на своей
-машине запускать не нужно — просто запусти `start.bat` (без `start-with-youtube.bat`
-и без `youtube-bypass\run-xray.bat`).
+Адрес и учётные данные задаются переменной окружения `TCHAT_YT_PROXY`.
+Она имеет приоритет над локальным `youtube-proxy.json`. Например, для локального
+прокси в PowerShell:
 
-Реквизиты и настройка tinyproxy на сервере — [[vps-restream-server]] в памяти
-проекта / история чата с настройкой. Если понадобится сменить пароль или порт —
-правь `/etc/tinyproxy/tinyproxy.conf` на сервере и `proxy` в `youtube-proxy.json`
-на клиенте.
+```powershell
+$env:TCHAT_YT_PROXY = 'http://127.0.0.1:10810'
+npm.cmd start
+```
+
+Для сервера с авторизацией URL имеет вид `http://HOST:PORT`.
+Подставьте свои данные локально; специальные символы логина и пароля нужно
+URL-кодировать. Не коммитьте адрес с учётными данными.
+
+Вместо переменной можно скопировать `youtube-proxy.example.json` в
+`youtube-proxy.json`, включить `enabled` и указать `proxy`.
+Этот локальный файл исключён из Git. Без настроек приложение подключается напрямую.
+После обновления сборки настройте `TCHAT_YT_PROXY` на компьютере или сервере,
+где запускается TChat. Уже существующий локальный конфиг продолжит работать.
 
 ## Альтернативный backend — свой VLESS через Xray (локально)
 
@@ -65,8 +72,8 @@ start.bat                     :: затем TChat
 
 1. Если backend локальный (Xray/ByeDPI) — его окно без ошибок, слушает `127.0.0.1:10810`.
 2. В логе TChat при старте видно, например:
-   `[ytProxy] Chromium: YouTube -> http://tchat:***@195.62.49.244:18899 (PAC), остальное DIRECT`
-   (адрес — тот, что в `youtube-proxy.json`).
+   `[ytProxy] Chromium: YouTube -> http://HOST:PORT (PAC), остальное DIRECT`
+   (учётные данные в логах скрыты).
 3. Плеер/музыка с YouTube проигрываются без вечного буфера; live-чат подключается.
 4. VK/Twitch/Rutube/DonationAlerts работают как раньше (они не проксируются).
 
