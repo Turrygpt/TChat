@@ -1,6 +1,6 @@
 {
   "name": "tchat",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
   "main": "main.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "dist": "electron-builder --win",
     "dist:publish": "electron-builder --win --publish always",
     "pack": "electron-builder --dir",
-    "release": "node deploy/release.js"
+    "release": "node deploy/release.js",
+    "test:twitch": "node scripts/test-twitch-subscriptions.js"
   },
   "keywords": [],
   "author": "TChat",
@@ -66,7 +67,9 @@
       "!node_modules/**/*.d.ts",
       "!node_modules/**/*.md",
       "!node_modules/**/{test,tests,__tests__,example,examples,docs}/**",
-      "!youtube-bypass/geoip.dat"
+      "!youtube-bypass/geoip.dat",
+      "!youtube-bypass/xray-config.json",
+      "!youtube-proxy.json"
     ],
     "win": {
       "target": [

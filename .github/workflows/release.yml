@@ -1,0 +1,55 @@
+name: Windows release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify subscriptions and server
+        run: |
+          npm run test:twitch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:TCHAT_PORT = '3198'
+          npm run server:check
+      - name: Build Windows installer
+        run: npm run dist -- --publish never
+      - name: Verify package and prepare release notes
+        run: |
+          if (Test-Path dist/win-unpacked/resources/app/youtube-proxy.json) { throw 'Private proxy config in package' }
+          if (Test-Path dist/win-unpacked/resources/app/youtube-bypass/xray-config.json) { throw 'Private Xray config in package' }
+          node -e "const fs=require('fs');const v=require('./package.json').version;const n=require('./patchnotes.json').notes.find(n=>n.version===v);if(!n||typeof n.critical!=='boolean')throw Error('Missing release notes');fs.writeFileSync('dist/release-notes.md',n.title+'\n\n'+n.changes.map(c=>'- '+c).join('\n')+'\n');"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path dist/latest.yml)) { throw 'Missing update manifest' }
+      - name: Publish installer and update manifest
+        run: |
+          $version = node -p "require('./package.json').version"
+          $installer = "dist/TChat-Setup-$version.exe"
+          if (!(Test-Path $installer)) { throw 'Missing installer' }
+          $assets = @($installer, "${installer}.blockmap", 'dist/latest.yml')
+          gh release create "v$version" @assets --target $env:GITHUB_SHA --title "TChat $version" --notes-file dist/release-notes.md --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -38,7 +38,7 @@ assert.match(messages[5].text, /количество: 3/);
 for (const message of messages) {
   assert.equal(message.platform, 'twitch');
   assert.equal(message.systemEvent, 'twitch-subscription');
-  assert.equal(message.highlighted, true);
+  assert.equal(message.highlighted, false, 'subscription notices must remain visible in OBS chat');
   assert.deepEqual(message.parts, [{ type: 'text', text: message.text }]);
 }
 console.log('PASS Twitch subscriptions: real USERNOTICE parsing, renewals, gifts, anonymous and bulk gifts, disabled alerts');

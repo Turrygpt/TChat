@@ -18,7 +18,7 @@ function registerTwitchSubscriptions(client, { publish, subscriberAlert, renewal
       parts: [{ type: 'text', text }],
       badges: [],
       color: '',
-      highlighted: true,
+      highlighted: false,
       systemEvent: 'twitch-subscription',
       subscriptionType: kind,
       createdAt: new Date().toISOString(),
