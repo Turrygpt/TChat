@@ -19,6 +19,7 @@ const { findRewardRule } = require('./src/rewardRules');
 const { createChibis } = require('./src/chibis');
 let chibis;
 const { TwitchRewards } = require('./src/twitchRewards');
+const { registerTwitchSubscriptions } = require('./src/twitchSubscriptions');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
 let autoUpdater = null;
@@ -3670,11 +3671,13 @@ function broadcastChatMessage(message) {
   saveChatMessage(message);
   chatStats.messages += 1;
   chatStats.users.add(`${message.platform}:${message.user}`.toLowerCase());
-  registerPollVote(message);
-  registerGiveawayParticipant(message);
-  registerGiveawayWinnerNickname(message);
-  maybeEnqueueFirstMessageAlert(message);
-  maybeEnqueuePortalAlert(message);
+  if (!message.systemEvent) {
+    registerPollVote(message);
+    registerGiveawayParticipant(message);
+    registerGiveawayWinnerNickname(message);
+    maybeEnqueueFirstMessageAlert(message);
+    maybeEnqueuePortalAlert(message);
+  }
   socketServer?.emit('chat:message', message);
   mainWindow?.webContents.send('chat:message', message);
   chatWindow?.webContents.send('chat:message', message);
@@ -5248,32 +5251,10 @@ async function connectTwitchChat(channel) {
       .catch((error) => console.error(`Не удалось обработать Twitch-сообщение: ${error.message}`));
   });
 
-  twitchClient.on('subscription', (_channel, username, _methods, message) => {
-    enqueueSubscriberAlert({
-      id: `twitch:sub:${username}:${Date.now()}`,
-      platform: 'twitch',
-      username,
-      message: message || 'оформил подписку',
-    });
-  });
-
-  twitchClient.on('resub', (_channel, username, months, message) => {
-    enqueueSubscriptionRenewalAlert({
-      id: `twitch:renewal:${username}:${Date.now()}`,
-      platform: 'twitch',
-      username,
-      months: Number(months || 0),
-      message: message || 'продлил подписку',
-    });
-  });
-
-  twitchClient.on('subgift', (_channel, username, _streakMonths, recipient) => {
-    enqueueSubscriberAlert({
-      id: `twitch:gift:${recipient}:${Date.now()}`,
-      platform: 'twitch',
-      username: recipient,
-      message: `получил подарочную подписку от ${username}`,
-    });
+  registerTwitchSubscriptions(twitchClient, {
+    publish: (message) => broadcastChatMessage({ ...message, platformIcon: getPlatformIconUrl('twitch') }),
+    subscriberAlert: enqueueSubscriberAlert,
+    renewalAlert: enqueueSubscriptionRenewalAlert,
   });
 
   twitchClient.on('raided', (_channel, username, viewers) => {

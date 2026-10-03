@@ -108,6 +108,17 @@ function toFileUrl(p) {
   return 'file://' + encodeURI(s);
 }
 
+function describeProxy(proxyUrl) {
+  try {
+    const url = new URL(proxyUrl);
+    url.username = '';
+    url.password = '';
+    return url.origin;
+  } catch {
+    return '[invalid proxy URL]';
+  }
+}
+
 function installChromiumProxy(app, proxyUrl) {
   if (!app || !app.commandLine) return;
   try {
@@ -115,7 +126,7 @@ function installChromiumProxy(app, proxyUrl) {
     app.commandLine.appendSwitch('proxy-pac-url', toFileUrl(pacPath));
     // Прокси форсирует TCP; на всякий случай гасим QUIC/UDP, который умеет обходить прокси.
     app.commandLine.appendSwitch('disable-quic');
-    console.log('[ytProxy] Chromium: YouTube -> ' + proxyUrl + ' (PAC), остальное DIRECT');
+    console.log('[ytProxy] Chromium: YouTube -> ' + describeProxy(proxyUrl) + ' (PAC), остальное DIRECT');
   } catch (error) {
     console.error('[ytProxy] Chromium proxy не выставлен:', error.message);
   }
@@ -129,7 +140,7 @@ function installAxiosProxy(proxyUrl) {
     axios.defaults.httpAgent = agent;
     axios.defaults.httpsAgent = agent;
     axios.defaults.proxy = false; // отключаем встроенную логику proxy, работаем через agent
-    console.log('[ytProxy] axios (youtube-chat) -> ' + proxyUrl);
+    console.log('[ytProxy] axios (youtube-chat) -> ' + describeProxy(proxyUrl));
 
     // https-proxy-agent открывает CONNECT-туннель отдельным сокетом ДО того,
     // как http-модуль назначит его запросу — таймаут axios (config.timeout)
@@ -218,7 +229,7 @@ function installFetchProxy(proxyUrl) {
       }
       return origFetch(input, init);
     };
-    console.log('[ytProxy] fetch (метаданные YouTube) -> ' + proxyUrl + ' (остальные хосты как есть)');
+    console.log('[ytProxy] fetch (метаданные YouTube) -> ' + describeProxy(proxyUrl) + ' (остальные хосты как есть)');
   } catch (error) {
     console.error('[ytProxy] fetch proxy не выставлен:', error.message);
   }
