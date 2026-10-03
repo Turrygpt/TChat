@@ -5,7 +5,30 @@ window.TChatSubscriberGoals = {
     const nodes = new Map();
     const timers = new Set();
     let audio;
-    function later(fn, ms) { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); }
+    function cancel(timer) { if (timer != null) { clearTimeout(timer); timers.delete(timer); } }
+    function scheduleMotivation(entry) {
+      const widget = entry.widget;
+      const interval = Math.max(15, Math.min(3600, Number(widget.motivationIntervalSeconds) || 300));
+      const key = `${widget.motivationEnabled !== false}:${interval}:${widget.current >= widget.target}`;
+      if (entry.motivationKey === key) return;
+      entry.motivationKey = key;
+      cancel(entry.motivationTimer);
+      entry.node.classList.remove('is-motivating');
+      if (widget.motivationEnabled === false || widget.current >= widget.target) return;
+      const tick = () => {
+        if (nodes.get(widget.id) !== entry) return;
+        if (Date.now() >= (entry.busyUntil || 0)) {
+          const messages = ['Подпишись! Приблизим цель вместе 👍', 'Твоя подписка — ещё один шаг к цели ✨', 'Поддержи стрим подпиской! 💜'];
+          entry.node.querySelector('.subscriber-goal__motivation').textContent = messages[(entry.motivationIndex || 0) % messages.length];
+          entry.motivationIndex = (entry.motivationIndex || 0) + 1;
+          entry.node.classList.add('is-motivating');
+          later(() => entry.node.classList.remove('is-motivating'), 6000);
+        }
+        entry.motivationTimer = later(tick, interval * 1000);
+      };
+      entry.motivationTimer = later(tick, interval * 1000);
+    }
+    function later(fn, ms) { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t; }
     function melody() {
       try {
         audio ||= new (window.AudioContext || window.webkitAudioContext)();
@@ -23,28 +46,42 @@ window.TChatSubscriberGoals = {
     function render(state = {}) {
       const items = (state.items || []).filter(w => w.type === 'subscriber-goal' && w.enabled !== false && (!filterId || w.id === filterId));
       const keep = new Set(items.map(w => w.id));
-      for (const [id, entry] of nodes) if (!keep.has(id)) { entry.node.remove(); nodes.delete(id); }
+      for (const [id, entry] of nodes) if (!keep.has(id)) { cancel(entry.motivationTimer); entry.node.remove(); nodes.delete(id); }
       for (const widget of items) {
         let entry = nodes.get(widget.id);
         if (!entry) {
           const node = document.createElement('article'); node.className = 'subscriber-goal';
-          node.innerHTML = '<div class="subscriber-goal__head"><span class="subscriber-goal__icon">★</span><strong class="subscriber-goal__title"></strong><span class="subscriber-goal__count"></span></div><div class="subscriber-goal__track"><div class="subscriber-goal__fill"></div></div><div class="subscriber-goal__bottom"><strong class="subscriber-goal__remaining"></strong><span class="subscriber-goal__reward"></span></div><div class="subscriber-goal__new" aria-live="polite"></div><div class="subscriber-goal__effects"></div>';
+          node.innerHTML = '<div class="subscriber-goal__head"><span class="subscriber-goal__icon">★</span><strong class="subscriber-goal__title"></strong><span class="subscriber-goal__count"></span></div><div class="subscriber-goal__track"><div class="subscriber-goal__fill"></div></div><div class="subscriber-goal__bottom"><span class="subscriber-goal__reward"></span></div><div class="subscriber-goal__footer"><strong class="subscriber-goal__remaining"></strong><span class="subscriber-goal__status"></span></div><div class="subscriber-goal__motivation" aria-live="polite"></div><div class="subscriber-goal__reaction" aria-hidden="true"></div><div class="subscriber-goal__new" aria-live="polite"></div><div class="subscriber-goal__effects"></div>';
           layer.append(node); entry = { node }; nodes.set(widget.id, entry);
         }
         const node = entry.node; entry.widget = widget;
         node.style.cssText = standalone ? 'position:relative;width:100%;box-sizing:border-box;' : `left:${Number(widget.x)}%;top:${Number(widget.y)}%;width:${Number(widget.width)}%;scale:${Number(widget.scale) || 1};transform-origin:top left;`;
         node.querySelector('.subscriber-goal__title').textContent = widget.title;
         node.querySelector('.subscriber-goal__count').textContent = `${widget.current} / ${widget.target}`;
-        node.querySelector('.subscriber-goal__remaining').textContent = widget.current >= widget.target ? 'Цель достигнута! 🎉' : `Осталось ${Math.max(0, widget.target - widget.current)}`;
+        node.querySelector('.subscriber-goal__remaining').textContent = `Осталось подписок: ${Math.max(0, widget.target - widget.current)}`;
         node.querySelector('.subscriber-goal__reward').textContent = widget.reward;
+        node.querySelector('.subscriber-goal__status').textContent = widget.current >= widget.target ? 'Цель достигнута! 🎉' : '';
         node.querySelector('.subscriber-goal__fill').style.width = `${Math.min(100, widget.current / widget.target * 100)}%`;
         node.classList.toggle('is-complete', widget.current >= widget.target);
+        scheduleMotivation(entry);
       }
     }
     function increment(changes = []) {
       for (const change of changes) {
         const entry = nodes.get(change.id); if (!entry) continue;
         const node = entry.node;
+        entry.busyUntil = Date.now() + 6500;
+        node.classList.remove('is-motivating');
+        const reaction = node.querySelector('.subscriber-goal__reaction');
+        reaction.replaceChildren();
+        const like = document.createElement('span'); like.className = 'subscriber-goal__like'; like.textContent = '👍';
+        reaction.append(like);
+        for (let i = 0; i < 7; i++) {
+          const heart = document.createElement('span'); heart.className = 'subscriber-goal__heart'; heart.textContent = i % 2 ? '✨' : '💜';
+          heart.style.cssText = `--dx:${(i - 3) * 32}px;--delay:${i * 0.06}s;`;
+          reaction.append(heart);
+        }
+        later(() => { if (reaction.children[0] === like) reaction.replaceChildren(); }, 2500);
         node.classList.remove('is-bumping'); void node.offsetWidth; node.classList.add('is-bumping');
         const notice = node.querySelector('.subscriber-goal__new');
         notice.textContent = `+1 · ${change.username || 'Зритель'} · Спасибо за подписку!`;

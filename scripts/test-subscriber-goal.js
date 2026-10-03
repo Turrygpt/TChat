@@ -36,4 +36,8 @@ assert.equal(normalizeSubscriberGoal({ target: NaN, current: Infinity }).target,
 assert.equal(normalizeSubscriberGoal({ target: -10, current: -5 }).current, 0);
 assert.equal(normalizeSubscriberGoal({ sound: 'false' }).sound, false);
 assert.equal(advanceSubscriberGoals(restored, { id: 'future', platform: 'youtube' }).length, 2);
+assert.equal(normalizeSubscriberGoal({}).motivationIntervalSeconds, 300);
+assert.equal(normalizeSubscriberGoal({ motivationIntervalSeconds: 1 }).motivationIntervalSeconds, 15);
+assert.equal(normalizeSubscriberGoal({ motivationIntervalSeconds: 9000 }).motivationIntervalSeconds, 3600);
+assert.equal(normalizeSubscriberGoal({ motivationEnabled: 'false' }).motivationEnabled, false);
 console.log('Subscriber goal: counting, platform filters, gifts, duplicates, persistence, hidden widgets, alert independence and one-time completion passed.');

@@ -5185,7 +5185,7 @@
 
       function renderPreviewWidgetContent(widget) {
         if (widget.type === 'subscriber-goal') {
-          return `<article class="stream-goal"><strong>${escapeHtml(widget.title)}</strong><p>${widget.current} / ${widget.target} · Осталось ${Math.max(0, widget.target - widget.current)}</p><p>${escapeHtml(widget.reward)}</p></article>`;
+          return `<article class="stream-goal"><strong>${escapeHtml(widget.title)}</strong><p>${widget.current} / ${widget.target}</p><p>${escapeHtml(widget.reward)}</p><p>Осталось подписок: ${Math.max(0, widget.target - widget.current)}</p></article>`;
         }
         if (widget.type === 'goal') {
           const target = Math.max(Number(widget.target || 1), 1);
@@ -5406,6 +5406,9 @@
             <label class="field">Что будет при достижении?<input data-config-field="reward" maxlength="300" value="${escapeHtml(widget.reward)}" /></label>
             <label class="field">Платформа<select data-config-field="platform">${['all','twitch','vk'].map(v => `<option value="${v}" ${widget.platform === v ? 'selected' : ''}>${v === 'all' ? 'Все платформы' : v}</option>`).join('')}</select></label>
             <label class="field">Восьмибитная мелодия<select data-config-field="sound"><option value="true" ${widget.sound ? 'selected' : ''}>Включена</option><option value="false" ${!widget.sound ? 'selected' : ''}>Выключена</option></select></label>
+            <label class="field">Призыв «Подпишись!»<select data-config-field="motivationEnabled"><option value="true" ${widget.motivationEnabled !== false ? 'selected' : ''}>Включён</option><option value="false" ${widget.motivationEnabled === false ? 'selected' : ''}>Выключен</option></select></label>
+            <label class="field">Интервал призыва, секунд<input data-config-field="motivationIntervalSeconds" type="number" min="15" max="3600" step="1" value="${widget.motivationIntervalSeconds || 300}" /></label>
+            <p class="muted">Призыв появляется на 6 секунд и чередует сообщения. После достижения цели он прекращается. Новая подписка запускает анимированный лайк.</p>
             <p class="muted">Скрытие не останавливает счётчик. Продления и тестовые оповещения не учитываются.</p>
             <div class="button-row"><button class="button" data-save-config>Сохранить</button><button class="button button--ghost" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button><button class="button button--danger" data-delete-selected>Удалить</button></div>`;
           return;
@@ -5708,8 +5711,8 @@
             return;
           }
 
-          if (key === 'sound') { patch[key] = input.value === 'true'; return; }
-          patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds', 'scale', 'intervalMinutes', 'durationSeconds'].includes(key) ? Number(input.value || 0) : input.value.trim();
+          if (['sound', 'motivationEnabled'].includes(key)) { patch[key] = input.value === 'true'; return; }
+          patch[key] = ['motivationIntervalSeconds', 'target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds', 'scale', 'intervalMinutes', 'durationSeconds'].includes(key) ? Number(input.value || 0) : input.value.trim();
         });
         return patch;
       }

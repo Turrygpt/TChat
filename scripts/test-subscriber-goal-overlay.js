@@ -14,8 +14,9 @@ class Node {
 }
 const socket = new EventEmitter(), layer = new Node(), scheduled = [];
 const window = {};
+let clock = 0;
 const context = vm.createContext({ window, document: { createElement: () => new Node() }, location: { search: '' }, URLSearchParams,
-  fetch: () => new Promise(() => {}), setTimeout: fn => { scheduled.push(fn); return scheduled.length; }, clearTimeout() {}, Math, Map, Set });
+  fetch: () => new Promise(() => {}), setTimeout: (fn, ms) => { scheduled.push({ fn, ms, active: true }); return scheduled.length; }, clearTimeout: id => { if (scheduled[id - 1]) scheduled[id - 1].active = false; }, Date: { now: () => clock }, Math, Map, Set });
 vm.runInContext(fs.readFileSync(require.resolve('../widgets/subscriber-goal.js'), 'utf8'), context);
 const widget = { id: 'test', type: 'subscriber-goal', title: '<script>bad</script>', reward: 'Разыграю коврик!', current: 0, target: 2, enabled: true, sound: false, x: 10, y: 10, width: 40 };
 const mounted = window.TChatSubscriberGoals.mount({ socket, layer });
@@ -23,27 +24,44 @@ socket.emit('widgets:state', { items: [widget] });
 assert.equal(layer.children.length, 1);
 const node = layer.children[0];
 assert.equal(node.querySelector('.subscriber-goal__title').textContent, widget.title);
-assert.equal(node.querySelector('.subscriber-goal__remaining').textContent, 'Осталось 2');
+assert.equal(node.querySelector('.subscriber-goal__remaining').textContent, 'Осталось подписок: 2');
+const inviteTimer = scheduled.find(timer => timer.ms === 300000 && timer.active);
+assert.ok(inviteTimer, 'default invitation repeats every five minutes');
+clock = 300000; inviteTimer.active = false; inviteTimer.fn();
+assert.equal(node.classes.has('is-motivating'), true);
+assert.match(node.querySelector('.subscriber-goal__motivation').textContent, /Подпишись/);
 socket.emit('widgets:state', { items: [{ ...widget, current: 1 }] });
 assert.equal(layer.children[0], node); // state updates keep the animated DOM alive
 socket.emit('subscriber-goal:increment', [{ id: 'test', username: 'Alice', reached: false }]);
 assert.match(node.querySelector('.subscriber-goal__new').textContent, /Alice/);
+assert.equal(node.classes.has('is-motivating'), false, 'subscription takes priority over the prompt');
+assert.equal(node.querySelector('.subscriber-goal__reaction').children.length, 8);
+assert.equal(node.querySelector('.subscriber-goal__reaction').children[0].textContent, '👍');
 socket.emit('widgets:state', { items: [{ ...widget, current: 2 }] });
 socket.emit('subscriber-goal:increment', [{ id: 'test', username: 'Bob', reached: true }]);
 assert.equal(node.querySelector('.subscriber-goal__fill').style.width, '100%');
 assert.equal(node.querySelector('.subscriber-goal__effects').children.length, 80);
 assert.equal(node.classes.has('is-complete'), true);
+assert.equal(node.querySelector('.subscriber-goal__remaining').textContent, 'Осталось подписок: 0');
+assert.equal(scheduled.some(timer => timer.ms === 300000 && timer.active), false, 'completed goals stop invitations');
 socket.emit('subscriber-goal:increment', [{ id: 'test', username: 'Third', reached: false }]);
 assert.equal(node.querySelector('.subscriber-goal__effects').children.length, 80);
-scheduled.forEach(fn => fn());
+scheduled.forEach(timer => { if (timer.active) { timer.active = false; timer.fn(); } });
 assert.equal(node.querySelector('.subscriber-goal__effects').children.length, 0);
 assert.equal(node.querySelector('.subscriber-goal__new').textContent, '');
+assert.equal(node.querySelector('.subscriber-goal__reaction').children.length, 0);
 socket.emit('widgets:state', { items: [{ ...widget, enabled: false }] });
 assert.equal(layer.children.length, 0);
 socket.emit('subscriber-goal:increment', [{ id: 'test', reached: true }]);
 assert.equal(layer.children.length, 0);
 socket.emit('widgets:state', { items: [{ ...widget, current: 3 }] });
 assert.equal(layer.children[0].querySelector('.subscriber-goal__effects').children.length, 0); // reload never celebrates again
+socket.emit('widgets:state', { items: [{ ...widget, motivationEnabled: false }] });
+assert.equal(scheduled.some(timer => timer.ms === 300000 && timer.active), false, 'disabled motivator has no timer');
+socket.emit('widgets:state', { items: [{ ...widget, motivationIntervalSeconds: 15 }] });
+assert.ok(scheduled.some(timer => timer.ms === 15000 && timer.active));
+socket.emit('widgets:state', { items: [{ ...widget, enabled: false }] });
+assert.equal(scheduled.some(timer => timer.ms === 15000 && timer.active), false, 'hidden widget stops invitations');
 mounted.destroy();
 assert.equal(socket.listenerCount('widgets:state'), 0);
 assert.equal(socket.listenerCount('connect'), 0);

@@ -3,6 +3,8 @@ function normalizeSubscriberGoal(widget) {
   return { current: integer(widget.current), target: Math.max(1, integer(widget.target, 50)),
     reward: String(widget.reward || 'Разыграю коврик!').slice(0, 300),
     platform: ['twitch', 'vk', 'all'].includes(widget.platform) ? widget.platform : 'all',
+    motivationEnabled: widget.motivationEnabled !== false && widget.motivationEnabled !== 'false',
+    motivationIntervalSeconds: Math.min(3600, Math.max(15, integer(widget.motivationIntervalSeconds, 300))),
     sound: widget.sound !== false && widget.sound !== 'false',
     recentSubscriberIds: Array.isArray(widget.recentSubscriberIds) ? widget.recentSubscriberIds.filter(x => typeof x === 'string').slice(-500) : [] };
 }
