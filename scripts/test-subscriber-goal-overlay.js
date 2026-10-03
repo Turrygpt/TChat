@@ -49,3 +49,24 @@ assert.equal(socket.listenerCount('widgets:state'), 0);
 assert.equal(socket.listenerCount('connect'), 0);
 assert.equal(layer.children.length, 0);
 console.log('Overlay PASS: text safety, remaining count, persistent nodes, +1 animation, 80 fireworks, completion, hide/show and cleanup.');
+
+// Exercise the active toolbar's creation handler, including selection of the new widget.
+(async () => {
+  const html = fs.readFileSync(require.resolve('../backoffice.html'), 'utf8');
+  const toolbar = html.slice(html.indexOf('<section class="workspace-zone workspace-zone--widgets">'), html.indexOf('<aside class="workspace-zone workspace-zone--config">'));
+  assert.match(toolbar, /id="quickCreateSubscriberGoalButton"[^>]*>\+ Подписчики/);
+  assert.match(html, /querySelector\('#quickCreateSubscriberGoalButton'\)\.addEventListener\('click', \(\) => createSubscriberGoalWidget\(\)\)/);
+  const start = html.indexOf('      async function createSubscriberGoalWidget(');
+  const end = html.indexOf("      document.querySelector('#createSubscriberGoalButton')", start);
+  let createdOptions, rendered;
+  const ui = vm.createContext({ Set, widgetsState: { items: [{ id: 'old', type: 'goal' }] }, selectedWorkspaceWidgetId: 'old', widgetsStudioState: {},
+    window: { tchat: { createWidget: async options => { createdOptions = options; return { items: [{ ...options, id: 'new' }, { id: 'old', type: 'goal' }] }; } } },
+    renderWidgetsState: state => rendered = state });
+  vm.runInContext(html.slice(start, end), ui);
+  await ui.createSubscriberGoalWidget();
+  assert.equal(createdOptions.type, 'subscriber-goal');
+  assert.equal(createdOptions.platform, 'all');
+  assert.equal(ui.selectedWorkspaceWidgetId, 'new');
+  assert.equal(rendered.items[0].id, 'new');
+  console.log('Toolbar PASS: visible + Подписчики button creates and selects a subscriber goal for the right-hand settings.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

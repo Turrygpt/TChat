@@ -2852,6 +2852,7 @@
             <div class="zone-title">
               <span>Виджеты</span>
               <div class="button-row">
+                <button id="quickCreateSubscriberGoalButton" class="mini-button" type="button">+ Подписчики</button>
                 <button id="quickCreateGoalButton" class="mini-button" type="button">+ Полоска</button>
                 <button id="quickCreatePollButton" class="mini-button" type="button">+ Голосование</button>
                 <button id="quickCreateGiveawayButton" class="mini-button" type="button">+ Розыгрыш</button>
@@ -6086,11 +6087,21 @@
         }
       }
 
-      document.querySelector('#createSubscriberGoalButton').addEventListener('click', async () => {
-        const value = id => document.getElementById(id).value;
-        const payload = await window.tchat.createWidget({ type: 'subscriber-goal', title: value('subscriberGoalTitle'), target: Number(value('subscriberGoalTarget')), current: Number(value('subscriberGoalCurrent')), reward: value('subscriberGoalReward'), platform: value('subscriberGoalPlatform') });
+      async function createSubscriberGoalWidget(options = {}) {
+        const previousIds = new Set(widgetsState.items.map(widget => widget.id));
+        const payload = await window.tchat.createWidget({
+          type: 'subscriber-goal', title: 'Цель подписчиков', target: 50,
+          current: 0, reward: 'Разыграю коврик!', platform: 'all', ...options,
+        });
+        const created = payload.items.find(widget => widget.type === 'subscriber-goal' && !previousIds.has(widget.id));
+        if (created) selectedWorkspaceWidgetId = created.id;
         renderWidgetsState(payload);
-        widgetsStudioState.textContent = 'Цель подписчиков добавлена в общий overlay.';
+        widgetsStudioState.textContent = 'Цель подписчиков добавлена. Задайте количество и приз в настройках справа.';
+      }
+
+      document.querySelector('#createSubscriberGoalButton').addEventListener('click', () => {
+        const value = id => document.getElementById(id).value;
+        return createSubscriberGoalWidget({ title: value('subscriberGoalTitle'), target: Number(value('subscriberGoalTarget')), current: Number(value('subscriberGoalCurrent')), reward: value('subscriberGoalReward'), platform: value('subscriberGoalPlatform') });
       });
 
       async function createGoalWidget() {
@@ -6612,6 +6623,7 @@
       document.querySelector('#addNicknameRuleButton').addEventListener('click', () => addRule('nickname'));
       document.querySelector('#addIntervalRuleButton').addEventListener('click', () => addRule('interval'));
       document.querySelector('#createGoalWidgetButton').addEventListener('click', createGoalWidget);
+      document.querySelector('#quickCreateSubscriberGoalButton').addEventListener('click', () => createSubscriberGoalWidget());
       document.querySelector('#quickCreateGoalButton').addEventListener('click', createGoalWidget);
       document.querySelector('#quickCreatePollButton').addEventListener('click', createPollWidget);
       document.querySelector('#quickCreateGiveawayButton').addEventListener('click', createGiveawayWidget);
