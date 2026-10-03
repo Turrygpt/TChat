@@ -1,4 +1,5 @@
 const socket = io();
+window.TChatSubscriberGoals?.mount({ socket, layer: document.querySelector('#subscriberGoals') });
 
 const streamGoals = document.querySelector('#streamGoals');
 const streamCountdowns = document.querySelector('#streamCountdowns');

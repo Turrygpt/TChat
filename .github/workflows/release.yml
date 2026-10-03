@@ -32,6 +32,8 @@ jobs:
         run: npm ci
       - name: Verify subscriptions and server
         run: |
+          npm run test:subscriber-goal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:twitch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:TCHAT_PORT = '3198'

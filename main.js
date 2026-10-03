@@ -1,3 +1,4 @@
+const { normalizeSubscriberGoal, advanceSubscriberGoals } = require('./src/subscriberGoal');
 const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -998,7 +999,7 @@ function normalizeGiveawayWidget(widget = {}) {
 }
 
 function normalizeStreamWidget(widget = {}) {
-  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay', 'custom']);
+  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'subscriber-goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay', 'custom']);
   // Старые сохранённые экземпляры удалённых виджетов не возвращаем в overlay.
   if (
     ['lastdonation', 'vdv'].includes(widget.type) ||
@@ -1033,6 +1034,8 @@ function normalizeStreamWidget(widget = {}) {
   } else {
     delete widgetSource.height;
   }
+
+  if (type === 'subscriber-goal') return { ...base, ...normalizeSubscriberGoal(widget) };
 
   if (type === 'goal') {
     return {
@@ -1493,6 +1496,7 @@ function widgetTitleByType(type) {
     alerts: 'Оповещения',
     chat: 'Чат на экране',
     music: 'Музыка',
+    'subscriber-goal': 'Цель подписчиков',
     goal: 'Сбор',
     poll: 'Голосование',
     giveaway: 'Розыгрыш',
@@ -1510,6 +1514,7 @@ function defaultWidgetPosition(type) {
     alerts: { x: 34, y: 34, width: 42 },
     chat: { x: 4, y: 48, width: 30 },
     music: { x: 68, y: 10, width: 28 },
+    'subscriber-goal': { x: 18, y: 6, width: 40 },
     goal: { x: 18, y: 6, width: 64 },
     poll: { x: 60, y: 56, width: 34 },
     giveaway: { x: 28, y: 20, width: 44 },
@@ -1569,6 +1574,7 @@ function updateStreamWidget(id, payload = {}) {
     }
 
     const merged = { ...widget, ...payload, id: widget.id, createdAt: widget.createdAt };
+    if (widget.type === 'subscriber-goal') merged.recentSubscriberIds = widget.recentSubscriberIds;
     if ('height' in payload && normalizeWidgetHeight(payload.height) == null) {
       delete merged.height;
     }
@@ -3939,6 +3945,12 @@ function maybeEnqueuePortalAlert(message = {}) {
 
 function enqueueSubscriberAlert(subscriber = {}) {
   const normalized = normalizeSubscriber(subscriber);
+  const changes = advanceSubscriberGoals(streamWidgets, normalized);
+  if (changes.length) {
+    saveStreamWidgets(streamWidgets);
+    broadcastStreamWidgets();
+    socketServer?.emit('subscriber-goal:increment', changes);
+  }
   const rule = getSystemAlertRule('subscriber');
   if (!rule.enabled) {
     return null;

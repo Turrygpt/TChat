@@ -2897,6 +2897,7 @@
                     <strong>Полоска сбора</strong>
                     <span>Отдельная ссылка и показ в общем overlay.</span>
                   </button>
+                  <button class="widget-type-card" type="button" data-widget-type="subscriber-goal"><strong>Цель подписчиков</strong><span>Новые подписки, приз и фейерверк.</span></button>
                   <button class="widget-type-card" type="button" data-widget-type="poll">
                     <strong>Голосование</strong>
                     <span>Вопрос, варианты и управление на стриме.</span>
@@ -2948,6 +2949,15 @@
                     <input id="newWidgetCurrencyInput" type="text" value="RUB" />
                   </label>
                   <button id="createGoalWidgetButton" class="button" type="button">Добавить полоску</button>
+                </div>
+                <div id="subscriberGoalWidgetForm" hidden>
+                  <label class="field">Название<input id="subscriberGoalTitle" value="Цель подписчиков" /></label>
+                  <label class="field">Цель, подписок<input id="subscriberGoalTarget" type="number" min="1" step="1" value="50" /></label>
+                  <label class="field">Начальное количество<input id="subscriberGoalCurrent" type="number" min="0" step="1" value="0" /></label>
+                  <label class="field">Что будет при достижении?<input id="subscriberGoalReward" value="Разыграю коврик!" maxlength="300" /></label>
+                  <label class="field">Платформа<select id="subscriberGoalPlatform"><option value="all">Все платформы</option><option value="twitch">Twitch</option><option value="vk">VK</option></select></label>
+                  <p class="muted">Считает новые подписки и подарки с момента добавления. Продления не учитываются. Начальное количество задаётся вручную. Скрытый виджет продолжает считать.</p>
+                  <button id="createSubscriberGoalButton" class="button" type="button">Добавить цель подписчиков</button>
                 </div>
                 <div id="pollWidgetHint" hidden>
                   <p class="muted">Голосование появится в общем overlay. Зрители голосуют цифрами в чате.</p>
@@ -3181,7 +3191,7 @@
           <p class="muted">Отметьте несколько образов для случайного выбора или один — для постоянного. Пока это готовые костюмы; сменный гардероб появится позже.</p>
           <div class="form-grid">
             <label class="field"><span>Название награды — точное совпадение</span><input id="chibiReward" value="Выделить сообщение" maxlength="150"></label>
-            <label class="field"><span>Площадка</span><select id="chibiPlatform"><option value="any">Twitch и VK</option><option value="twitch">Twitch</option><option value="vk">VK</option></select></label>
+            <label class="field"><span>Площадка</span><select id="chibiPlatform"><option value="any">Все платформы</option><option value="twitch">Twitch</option><option value="vk">VK</option></select></label>
             <label class="field"><span>Откуда появляется</span><select id="chibiPosition"><option value="random">Случайная сторона</option><option value="left">Слева</option><option value="right">Справа</option><option value="top">Сверху</option><option value="bottom">Снизу</option></select></label>
             <label class="field"><span>Время показа, секунд</span><input id="chibiSeconds" type="number" min="3" max="30" value="8"></label>
           </div>
@@ -4523,6 +4533,7 @@
           alerts: 'Оповещения',
           chat: 'Чат на экране',
           music: 'Музыка',
+          'subscriber-goal': 'Цель подписчиков',
           goal: 'Полоска сбора',
           poll: 'Голосование',
           giveaway: 'Розыгрыш',
@@ -4959,6 +4970,7 @@
       }
 
       function widgetStatusText(widget = {}) {
+        if (widget.type === 'subscriber-goal') return `${widget.current} / ${widget.target} · Осталось ${Math.max(0, widget.target - widget.current)} · ${widget.platform === 'all' ? 'Все платформы' : widget.platform}`;
         if (widget.type === 'goal') {
           const percent = widget.target > 0 ? Math.min((Number(widget.current || 0) / Number(widget.target || 1)) * 100, 100) : 0;
           return `${formatMoney(widget.current || 0)} / ${formatMoney(widget.target || 1)} ${widget.currency || 'RUB'} · ${percent.toFixed(0)}%`;
@@ -5171,6 +5183,9 @@
       });
 
       function renderPreviewWidgetContent(widget) {
+        if (widget.type === 'subscriber-goal') {
+          return `<article class="stream-goal"><strong>${escapeHtml(widget.title)}</strong><p>${widget.current} / ${widget.target} · Осталось ${Math.max(0, widget.target - widget.current)}</p><p>${escapeHtml(widget.reward)}</p></article>`;
+        }
         if (widget.type === 'goal') {
           const target = Math.max(Number(widget.target || 1), 1);
           const current = Math.max(Number(widget.current || 0), 0);
@@ -5379,6 +5394,19 @@
               <button class="button button--danger" type="button" data-delete-selected>Удалить</button>
             </div>
           `;
+          return;
+        }
+
+        if (widget.type === 'subscriber-goal') {
+          workspaceConfigurator.innerHTML = `
+            <label class="field">Название<input data-config-field="title" value="${escapeHtml(widget.title)}" /></label>
+            <label class="field">Цель, подписок<input data-config-field="target" type="number" min="1" step="1" value="${widget.target}" /></label>
+            <label class="field">Текущее количество<input data-config-field="current" type="number" min="0" step="1" value="${widget.current}" /></label>
+            <label class="field">Что будет при достижении?<input data-config-field="reward" maxlength="300" value="${escapeHtml(widget.reward)}" /></label>
+            <label class="field">Платформа<select data-config-field="platform">${['all','twitch','vk'].map(v => `<option value="${v}" ${widget.platform === v ? 'selected' : ''}>${v === 'all' ? 'Все платформы' : v}</option>`).join('')}</select></label>
+            <label class="field">Восьмибитная мелодия<select data-config-field="sound"><option value="true" ${widget.sound ? 'selected' : ''}>Включена</option><option value="false" ${!widget.sound ? 'selected' : ''}>Выключена</option></select></label>
+            <p class="muted">Скрытие не останавливает счётчик. Продления и тестовые оповещения не учитываются.</p>
+            <div class="button-row"><button class="button" data-save-config>Сохранить</button><button class="button button--ghost" data-toggle-selected>${widget.enabled === false ? 'Показать' : 'Скрыть'}</button><button class="button button--danger" data-delete-selected>Удалить</button></div>`;
           return;
         }
 
@@ -5679,6 +5707,7 @@
             return;
           }
 
+          if (key === 'sound') { patch[key] = input.value === 'true'; return; }
           patch[key] = ['target', 'current', 'x', 'y', 'width', 'fontSize', 'opacity', 'hideSeconds', 'scale', 'intervalMinutes', 'durationSeconds'].includes(key) ? Number(input.value || 0) : input.value.trim();
         });
         return patch;
@@ -5687,7 +5716,7 @@
       async function updateWorkspaceWidget(id, patch) {
         const widget = widgetsState.items.find((item) => item.id === id);
         if (!widget) return;
-        const payload = await window.tchat.updateWidget({ ...widget, ...patch, id });
+        const payload = await window.tchat.updateWidget(widget.type === 'subscriber-goal' ? { ...patch, id } : { ...widget, ...patch, id });
         renderWidgetsState(payload);
       }
 
@@ -5912,6 +5941,7 @@
         streamWidgetsList.innerHTML = widgetsState.items
           .map((widget) => {
             const widgetUrlByType = {
+              'subscriber-goal': `http://localhost:3000/widgets/subscriber-goal.html?id=${encodeURIComponent(widget.id)}`,
               goal: `${widgetsState.urls.goal || 'http://localhost:3000/widgets/goal.html'}?id=${encodeURIComponent(widget.id)}`,
               music: widgetsState.urls.music || 'http://localhost:3000/widgets/music.html',
               giveaway: `${widgetsState.urls.giveaway || 'http://localhost:3000/widgets/giveaway.html'}?id=${encodeURIComponent(widget.id)}`,
@@ -6055,6 +6085,13 @@
           widgetsStudioState.textContent = text;
         }
       }
+
+      document.querySelector('#createSubscriberGoalButton').addEventListener('click', async () => {
+        const value = id => document.getElementById(id).value;
+        const payload = await window.tchat.createWidget({ type: 'subscriber-goal', title: value('subscriberGoalTitle'), target: Number(value('subscriberGoalTarget')), current: Number(value('subscriberGoalCurrent')), reward: value('subscriberGoalReward'), platform: value('subscriberGoalPlatform') });
+        renderWidgetsState(payload);
+        widgetsStudioState.textContent = 'Цель подписчиков добавлена в общий overlay.';
+      });
 
       async function createGoalWidget() {
         const payload = await window.tchat.createWidget({
@@ -6441,10 +6478,11 @@
       }
 
       function selectWidgetType(type) {
-        selectedWidgetType = ['poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay'].includes(type) ? type : 'goal';
+        selectedWidgetType = ['subscriber-goal', 'poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay'].includes(type) ? type : 'goal';
         document.querySelectorAll('[data-widget-type]').forEach((button) => {
           button.classList.toggle('is-active', button.dataset.widgetType === selectedWidgetType);
         });
+        document.querySelector('#subscriberGoalWidgetForm').hidden = selectedWidgetType !== 'subscriber-goal';
         goalWidgetForm.hidden = selectedWidgetType !== 'goal';
         pollWidgetHint.hidden = selectedWidgetType !== 'poll';
         document.querySelector('#giveawayWidgetHint').hidden = selectedWidgetType !== 'giveaway';

@@ -1,6 +1,6 @@
 {
   "name": "tchat",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
   "main": "main.js",
   "scripts": {
@@ -12,7 +12,8 @@
     "dist:publish": "electron-builder --win --publish always",
     "pack": "electron-builder --dir",
     "release": "node deploy/release.js",
-    "test:twitch": "node scripts/test-twitch-subscriptions.js"
+    "test:twitch": "node scripts/test-twitch-subscriptions.js",
+    "test:subscriber-goal": "node scripts/test-subscriber-goal.js && node scripts/test-subscriber-goal-overlay.js"
   },
   "keywords": [],
   "author": "TChat",
