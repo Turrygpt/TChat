@@ -8,8 +8,8 @@ const os = require('node:os');
 const express = require('express');
 const { Server } = require('socket.io');
 const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut } = require('electron');
-const tmi = require('tmi.js');
 const { LiveChat } = require('youtube-chat');
+const { tmi, singleFlight, watchTwitchConnection, retireTwitchClient } = require('./src/net/chatKeepAlive');
 const { EdgeTTS } = require('node-edge-tts');
 const announce = require('./src/announce');
 const restream = require('./src/restream');
@@ -115,11 +115,16 @@ let chatWindow = null;
 let httpServer = null;
 let socketServer = null;
 let twitchClient = null;
+let stopTwitchKeepAlive = null;
 let youtubeClient = null;
 // Эфир, к чьему чату мы сейчас подключены: по нему сверяем, не сменилась ли
 // трансляция на канале (новая трансляция = новый videoId = новый чат).
 let youtubeLiveId = '';
 let youtubeAttaching = false;
+let youtubeRetryLiveId = '';
+let youtubeMessageIds = new Set();
+const pollVkChat = singleFlight(pollVkChatOnce);
+const refreshViewerCounts = singleFlight(refreshViewerCountsOnce);
 let vkPollTimer = null;
 let viewerPollTimer = null;
 let vkChatBootstrapped = false;
@@ -2837,12 +2842,12 @@ async function cacheRemoteAsset(url, group = 'emotes') {
     const extension = path.extname(parsedUrl.pathname).split('?')[0] || '.png';
     const safeName = Buffer.from(parsedUrl.href).toString('base64url').slice(0, 80);
     const relativePath = path.join('chat', group, `${safeName}${extension}`);
-    const filePath = path.join(__dirname, 'assets', relativePath);
+    const filePath = path.join(getUserAssetsDir(), relativePath);
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
     if (!fs.existsSync(filePath)) {
-      const response = await fetch(parsedUrl.href);
+      const response = await fetch(parsedUrl.href, { signal: AbortSignal.timeout(5000) });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -4558,6 +4563,7 @@ function isVkTransientError(error) {
     message.includes('econnreset') ||
     message.includes('enetunreach') ||
     message.includes('socket hang up') ||
+    /^http (408|429|5\d\d)$/.test(message) ||
     ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)
   );
 }
@@ -4571,7 +4577,7 @@ function formatVkFetchError(error) {
   return String(error?.message || error || 'неизвестная ошибка');
 }
 
-async function fetchJsonWithRetry(url, timeoutMs = 20000, options = {}, attempts = 3) {
+async function fetchJsonWithRetry(url, timeoutMs = 8000, options = {}, attempts = 3) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -5192,6 +5198,7 @@ async function connectChatSources(channels = currentChannels) {
     chatStats.vkMessageIds = new Set();
   }
 
+  startChatPolling();
   await connectTwitchChat(parseTwitchChannel(currentChannels.twitch));
   await connectYouTubeChat(currentChannels.youtube);
   // Rutube's page fetch must not hold VK chat startup hostage. Its viewer
@@ -5199,22 +5206,21 @@ async function connectChatSources(channels = currentChannels) {
   connectRutubeChat(currentChannels.rutube).catch((error) => {
     console.error(`Не удалось подключить Rutube: ${error.message}`);
   });
-  await pollVkChat();
-  // Viewer APIs can stall independently of VK. Start periodic chat polling as
-  // soon as the first VK request finishes instead of waiting for those APIs.
+  // Discover YouTube immediately; a failing VK request must not hold it up.
   refreshViewerCounts().catch((error) => {
     console.error(`Не удалось обновить счётчики зрителей: ${error.message}`);
   });
+  await pollVkChat();
   broadcastChatStatus();
 }
 
 async function connectTwitchChat(channel) {
   if (twitchClient) {
-    try {
-      await twitchClient.disconnect();
-    } catch (error) {
-      console.error(`Не удалось отключить старый Twitch-чат: ${error.message}`);
-    }
+    const previous = twitchClient;
+    twitchClient = null;
+    stopTwitchKeepAlive?.();
+    stopTwitchKeepAlive = null;
+    retireTwitchClient(previous);
   }
 
   twitchViewerState = { lastViewers: 0, zeroViewerSince: 0 };
@@ -5228,28 +5234,42 @@ async function connectTwitchChat(channel) {
   chatStats.platformStatus.twitch = 'подключаем';
   broadcastChatStatus();
 
-  twitchClient = new tmi.Client({
+  const client = new tmi.Client({
     connection: {
       reconnect: true,
       secure: true,
+      timeout: 10000,
+      reconnectInterval: 1000,
+      maxReconnectInterval: 10000,
     },
     channels: [channel],
   });
+  twitchClient = client;
+  stopTwitchKeepAlive = watchTwitchConnection(client, {
+    onTimeout: (reason) => logInfo(`Twitch keep-alive: ${reason}, переподключаемся`),
+  });
 
-  twitchClient.on('connected', () => {
+  client.on('connected', () => {
+    if (twitchClient !== client) return;
     chatStats.platformStatus.twitch = 'подключён';
     console.log(`Twitch-чат подключён: ${channel}`);
     broadcastChatStatus();
   });
 
-  twitchClient.on('disconnected', (reason) => {
-    chatStats.platformStatus.twitch = `отключён: ${reason || 'причина неизвестна'}`;
+  client.on('disconnected', (reason) => {
+    if (twitchClient !== client) return;
+    chatStats.platformStatus.twitch = `переподключение: ${reason || 'связь потеряна'}`;
     console.log(`Twitch-чат отключён: ${reason || 'причина неизвестна'}`);
     broadcastChatStatus();
   });
+  client.on('reconnect', () => {
+    if (twitchClient !== client) return;
+    chatStats.platformStatus.twitch = 'переподключение…';
+    broadcastChatStatus();
+  });
 
-  twitchClient.on('message', (_channel, tags, message, self) => {
-    if (self) {
+  client.on('message', (_channel, tags, message, self) => {
+    if (self || twitchClient !== client) {
       return;
     }
 
@@ -5259,17 +5279,18 @@ async function connectTwitchChat(channel) {
     }
 
     createTwitchMessage(tags, message)
-      .then((chatMessage) => broadcastChatMessage(chatMessage))
+      .then((chatMessage) => { if (twitchClient === client) broadcastChatMessage(chatMessage); })
       .catch((error) => console.error(`Не удалось обработать Twitch-сообщение: ${error.message}`));
   });
 
-  registerTwitchSubscriptions(twitchClient, {
+  registerTwitchSubscriptions(client, {
     publish: (message) => broadcastChatMessage({ ...message, platformIcon: getPlatformIconUrl('twitch') }),
     subscriberAlert: enqueueSubscriberAlert,
     renewalAlert: enqueueSubscriptionRenewalAlert,
   });
 
-  twitchClient.on('raided', (_channel, username, viewers) => {
+  client.on('raided', (_channel, username, viewers) => {
+    if (twitchClient !== client) return;
     enqueueRaidAlert({
       id: `twitch:raid:${username}:${Date.now()}`,
       platform: 'twitch',
@@ -5279,13 +5300,13 @@ async function connectTwitchChat(channel) {
     });
   });
 
-  try {
-    await twitchClient.connect();
-  } catch (error) {
-    chatStats.platformStatus.twitch = `ошибка: ${error.message}`;
-    console.error(`Twitch-чат не подключён: ${error.message}`);
+  // Network startup must not block the other chat sources or their timers.
+  client.connect().catch((error) => {
+    if (twitchClient !== client) return;
+    chatStats.platformStatus.twitch = 'переподключение…';
+    console.error(`Twitch-чат не подключён: ${error?.message || error}`);
     broadcastChatStatus();
-  }
+  });
 }
 
 // Отцепляем чат от эфира. Сначала забываем клиента, потом останавливаем: его
@@ -5309,11 +5330,14 @@ function detachYouTubeChat() {
 
 async function attachYouTubeChat(liveId) {
   detachYouTubeChat();
+  if (youtubeRetryLiveId !== liveId) youtubeMessageIds = new Set();
+  youtubeRetryLiveId = liveId;
 
   chatStats.platformStatus.youtube = 'подключаем чат эфира';
   broadcastChatStatus();
 
   const client = new LiveChat({ liveId });
+  const pendingMessageIds = new Set();
 
   client.on('start', () => {
     if (youtubeClient !== client) return;
@@ -5324,36 +5348,50 @@ async function attachYouTubeChat(liveId) {
 
   client.on('end', (reason) => {
     if (youtubeClient !== client) return;
-    youtubeClient = null;
-    youtubeLiveId = '';
+    detachYouTubeChat();
     chatStats.platformStatus.youtube = `отключён: ${reason || 'эфир завершён'}`;
     broadcastChatStatus();
-    // Заново искать эфир не нужно: следующий опрос канала (раз в 10 с) сам
-    // увидит новую трансляцию и подцепит её чат.
+    // Следующий опрос восстановит чат или подцепит новую трансляцию.
   });
 
   client.on('error', (error) => {
     if (youtubeClient !== client) return;
-    chatStats.platformStatus.youtube = `ошибка: ${error.message || error}`;
+    // Recreate the continuation after a timeout/reset, including when the
+    // channel page is also unreachable. Keeping this client would prevent retry.
+    detachYouTubeChat();
+    chatStats.platformStatus.youtube = `переподключение: ${error.message || error}`;
     broadcastChatStatus();
   });
 
   client.on('chat', async (chatItem) => {
     if (youtubeClient !== client) return;
+    if (chatItem.id && (youtubeMessageIds.has(chatItem.id) || pendingMessageIds.has(chatItem.id))) return;
+    if (chatItem.id) pendingMessageIds.add(chatItem.id);
 
-    const parts = await buildYouTubeMessageParts(chatItem.message || []);
-    const text = parts.map((part) => part.text || part.alt || '').join('');
-    const badges = await buildYouTubeBadges(chatItem);
+    try {
+      const parts = await buildYouTubeMessageParts(chatItem.message || []);
+      const text = parts.map((part) => part.text || part.alt || '').join('');
+      const badges = await buildYouTubeBadges(chatItem);
+      if (youtubeClient !== client) return;
+      if (chatItem.id) {
+        youtubeMessageIds.add(chatItem.id);
+        if (youtubeMessageIds.size > 5000) youtubeMessageIds = new Set([...youtubeMessageIds].slice(-3000));
+      }
 
-    broadcastChatMessage({
-      platform: 'youtube',
-      platformIcon: getPlatformIconUrl('youtube'),
-      user: chatItem.author?.name || 'Зритель',
-      text,
-      parts,
-      badges,
-      createdAt: (chatItem.timestamp || new Date()).toISOString(),
-    });
+      broadcastChatMessage({
+        platform: 'youtube',
+        platformIcon: getPlatformIconUrl('youtube'),
+        user: chatItem.author?.name || 'Зритель',
+        text,
+        parts,
+        badges,
+        createdAt: (chatItem.timestamp || new Date()).toISOString(),
+      });
+    } catch (error) {
+      console.error(`Не удалось обработать YouTube-сообщение: ${error.message}`);
+    } finally {
+      if (chatItem.id) pendingMessageIds.delete(chatItem.id);
+    }
   });
 
   // Запоминаем клиента до start(): событие «подключились» прилетает уже внутри.
@@ -5361,11 +5399,12 @@ async function attachYouTubeChat(liveId) {
   youtubeLiveId = liveId;
 
   const ok = await client.start();
+  if (youtubeClient !== client) {
+    client.stop();
+    return;
+  }
   if (!ok) {
-    if (youtubeClient === client) {
-      youtubeClient = null;
-      youtubeLiveId = '';
-    }
+    detachYouTubeChat();
     chatStats.platformStatus.youtube = 'не удалось подключить чат эфира';
     broadcastChatStatus();
   }
@@ -5383,6 +5422,7 @@ async function syncYouTubeChat(liveId) {
   }
 
   if (!liveId) {
+    youtubeRetryLiveId = '';
     // Эфира на канале нет. Если чат к чему-то подключён — эта трансляция
     // закончилась, отцепляемся и ждём следующую.
     if (youtubeClient) {
@@ -5408,6 +5448,7 @@ async function syncYouTubeChat(liveId) {
   try {
     await attachYouTubeChat(liveId);
   } catch (error) {
+    detachYouTubeChat();
     chatStats.platformStatus.youtube = `ошибка: ${error.message}`;
     broadcastChatStatus();
   } finally {
@@ -5420,6 +5461,8 @@ async function syncYouTubeChat(liveId) {
 // connectChatSources и дальше сам следит за сменой эфиров.
 async function connectYouTubeChat(channelUrl) {
   detachYouTubeChat();
+  youtubeRetryLiveId = '';
+  youtubeMessageIds = new Set();
   chatStats.platformStatus.youtube = channelUrl ? 'ищем эфир' : 'канал не задан';
   broadcastChatStatus();
 }
@@ -5556,8 +5599,7 @@ async function fetchYouTubeLiveState(channelUrl) {
     ? target
     : `${target.replace(/\/$/, '')}/live`;
 
-  const response = await fetch(pageUrl);
-  const html = await response.text();
+  const html = await fetchTextWithTimeout(pageUrl, 15000);
 
   return { liveId: parseYouTubeLiveId(html), viewers: parseYouTubeViewers(html) };
 }
@@ -5671,11 +5713,10 @@ function startChatPolling() {
       console.error(`Не удалось обновить счётчики зрителей: ${error.message}`);
     });
   }, 10000);
-
-  refreshViewerCounts().catch(() => {});
 }
 
-async function refreshViewerCounts() {
+async function refreshViewerCountsOnce() {
+  const channels = { ...currentChannels };
   const [twitchViewers, youtubeState, rutubeViewers] = await Promise.all([
     fetchTwitchViewerCount(parseTwitchChannel(currentChannels.twitch)).catch(() => chatStats.viewers.twitch || 0),
     // null = до YouTube не достучались. Это не то же самое, что «эфира нет»:
@@ -5684,6 +5725,7 @@ async function refreshViewerCounts() {
     fetchYouTubeLiveState(currentChannels.youtube).catch(() => null),
     fetchRutubeViewerCount(currentChannels.rutube).catch(() => 0),
   ]);
+  if (Object.keys(channels).some((key) => channels[key] !== currentChannels[key])) return;
 
   // Twitch's GQL иногда на один опрос отдаёт stream:null, хотя эфир идёт —
   // тот же дребезг, что и у VK. Держим последнее известное значение, пока
@@ -5708,12 +5750,12 @@ async function refreshViewerCounts() {
   // несинхронизированный опрос того же эндпойнта раз в 10с мог перезаписать
   // счётчик своим собственным глюком в обход этого сглаживания.
   chatStats.viewers.vk = vkConnectionState.lastViewers;
-  chatStats.viewers.youtube = youtubeState ? youtubeState.viewers : 0;
+  chatStats.viewers.youtube = youtubeState ? youtubeState.viewers : chatStats.viewers.youtube;
   chatStats.viewers.rutube = rutubeViewers;
   broadcastChatStatus();
 
-  if (youtubeState) {
-    await syncYouTubeChat(youtubeState.liveId).catch((error) => {
+  if (youtubeState || youtubeRetryLiveId) {
+    await syncYouTubeChat(youtubeState ? youtubeState.liveId : youtubeRetryLiveId).catch((error) => {
       console.error(`Не удалось подцепить чат YouTube: ${error.message}`);
     });
   }
@@ -5726,7 +5768,7 @@ async function fetchTwitchViewerCount(channel) {
 
   const query =
     'query ChannelShell($login: String!) { user(login: $login) { stream { viewersCount type } } }';
-  const response = await fetch('https://gql.twitch.tv/gql', {
+  const payload = await fetchJsonWithTimeout('https://gql.twitch.tv/gql', 8000, {
     method: 'POST',
     headers: {
       'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
@@ -5738,12 +5780,11 @@ async function fetchTwitchViewerCount(channel) {
       query,
     }),
   });
-  const payload = await response.json();
 
   return Number(payload?.data?.user?.stream?.viewersCount || 0);
 }
 
-async function pollVkChat() {
+async function pollVkChatOnce() {
   if (!currentChannels.vk) {
     chatStats.viewers.vk = 0;
     chatStats.platformStatus.vk = 'канал не задан';
@@ -5752,8 +5793,10 @@ async function pollVkChat() {
   }
 
   let vkState;
+  const channel = currentChannels.vk;
   try {
-    vkState = await fetchVkState(currentChannels.vk);
+    vkState = await fetchVkState(channel);
+    if (channel !== currentChannels.vk) return;
     if (vkConnectionState.consecutiveFailures > 0) {
       logInfo('VK Live снова подключён');
     }
@@ -5761,6 +5804,7 @@ async function pollVkChat() {
     vkConnectionState.lastError = '';
     vkConnectionState.lastSuccessAt = Date.now();
   } catch (error) {
+    if (channel !== currentChannels.vk) return;
     vkConnectionState.consecutiveFailures += 1;
     vkConnectionState.lastError = formatVkFetchError(error);
     chatStats.viewers.vk = vkConnectionState.lastViewers || 0;
@@ -5906,12 +5950,15 @@ async function fetchVkState(channelUrl) {
   if (streamResult.status === 'rejected') {
     throw streamResult.reason;
   }
+  if (chatResult.status === 'rejected' && isVkTransientError(chatResult.reason)) {
+    throw chatResult.reason;
+  }
 
   const stream = unwrapVkStreamPayload(streamResult.value);
   const viewers = extractVkViewerCount(stream);
   const likes = extractVkLikeCount(stream);
   const streamId = String(stream?.id || stream?.vid || stream?.data?.id || '').trim();
-  const chatAvailable = stream?.hasChat !== false;
+  const chatAvailable = stream?.hasChat !== false && chatResult.status === 'fulfilled';
 
   let chatData = [];
   if (chatResult.status === 'fulfilled') {
@@ -6221,7 +6268,6 @@ app.whenReady().then(async () => {
     startDonationAlertsSync(donationAlertsToken);
   }
   await connectChatSources(currentChannels);
-  startChatPolling();
   ensureCountdownTicking();
   setupAutoUpdater();
   restream.init({
@@ -6258,9 +6304,10 @@ app.on('before-quit', async () => {
   clearInterval(viewerPollTimer);
   clearInterval(donationAlertsTimer);
   clearInterval(countdownTickTimer);
-  if (twitchClient) {
-    await twitchClient.disconnect().catch(() => {});
-  }
+  stopTwitchKeepAlive?.();
+  retireTwitchClient(twitchClient);
+  twitchClient = null;
+  youtubeRetryLiveId = '';
   detachYouTubeChat();
   restream.shutdown();
   await stopLocalServer();

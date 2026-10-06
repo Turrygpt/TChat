@@ -481,7 +481,7 @@ check('youtube chat follows the channel live broadcast', () => {
   const body = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
   // Чат обязан переспрашивать канал сам: эфир, начатый в Студии уже после
   // запуска TChat, должен подцепиться без «сохранить» и без перезапуска.
-  if (!body.includes('function syncYouTubeChat') || !body.includes('await syncYouTubeChat(youtubeState.liveId)')) {
+  if (!body.includes('function syncYouTubeChat') || !/await syncYouTubeChat\(youtubeState(?:\.liveId| \? youtubeState\.liveId : youtubeRetryLiveId)\)/.test(body)) {
     throw new Error('youtube chat is not reconciled against the channel poll');
   }
   // Онлайн и чат должны читать одну и ту же страницу, иначе счётчик снова

@@ -136,7 +136,7 @@ function installAxiosProxy(proxyUrl) {
   try {
     const axios = require('axios'); // тот же singleton, что и в youtube-chat
     const { HttpsProxyAgent } = require('https-proxy-agent');
-    const agent = new HttpsProxyAgent(proxyUrl);
+    const agent = new HttpsProxyAgent(proxyUrl, { keepAlive: true });
     axios.defaults.httpAgent = agent;
     axios.defaults.httpsAgent = agent;
     axios.defaults.proxy = false; // отключаем встроенную логику proxy, работаем через agent
@@ -147,13 +147,6 @@ function installAxiosProxy(proxyUrl) {
     // на этот этап не действует, поэтому мёртвый/недоступный прокси (сервер
     // лёг, порт зарубило на фаерволе) вешает чат навсегда, а не роняет
     // ошибкой. AbortSignal.timeout работает на уровне запроса и это чинит.
-    axios.interceptors.request.use((requestConfig) => {
-      if (!requestConfig.signal) {
-        requestConfig.signal = AbortSignal.timeout(15000);
-      }
-      return requestConfig;
-    });
-
     // Тот же откат, что и у fetch. Без него выключенный локальный прокси
     // (Xray не поднялся, порт закрыт) молча убивал ИМЕННО чат: метаданные
     // уходили напрямую и онлайн был виден, а чат ютуба не подключался вовсе.
@@ -164,14 +157,14 @@ function installAxiosProxy(proxyUrl) {
 
     const http = require('node:http');
     const https = require('node:https');
-    const directHttp = new http.Agent();
-    const directHttps = new https.Agent();
+    const directHttp = new http.Agent({ keepAlive: true });
+    const directHttps = new https.Agent({ keepAlive: true });
     let warnedAboutFallback = false;
 
     axios.interceptors.response.use(undefined, (error) => {
       const config = error && error.config;
       // Ответ есть — прокси жив, а ругается сам YouTube: это не наш случай.
-      if (!config || config.__tchatDirectRetry || (error && error.response)) {
+      if (!config || config.__tchatDirectRetry || config.__tchatCallerSignal?.aborted || (error && error.response)) {
         return Promise.reject(error);
       }
 
@@ -256,15 +249,37 @@ function proxyAuthInfo(proxyUrl) {
 let installed = false;
 let currentProxyAuth = null;
 
+function installAxiosKeepAlive(axios = require('axios'), timeoutMs = 15000) {
+  const http = require('node:http');
+  const https = require('node:https');
+  const httpAgent = new http.Agent({ keepAlive: true });
+  const httpsAgent = new https.Agent({ keepAlive: true });
+  return axios.interceptors.request.use((config) => {
+    if (!isYouTubeHost(hostFromUrl(config.url))) return config;
+    config.httpAgent ||= httpAgent;
+    config.httpsAgent ||= httpsAgent;
+    config.timeout = Math.min(config.timeout || timeoutMs, timeoutMs);
+    // The deadline includes DNS, TLS and proxy CONNECT, even without a proxy.
+    // A direct fallback gets a fresh deadline while keeping caller cancellation.
+    if (!config.__tchatDeadline) config.__tchatCallerSignal = config.signal;
+    config.__tchatDeadline = true;
+    const deadline = AbortSignal.timeout(timeoutMs);
+    config.signal = config.__tchatCallerSignal
+      ? AbortSignal.any([config.__tchatCallerSignal, deadline]) : deadline;
+    return config;
+  });
+}
+
 function install(opts) {
   opts = opts || {};
   if (installed) return;
+  installed = true;
+  installAxiosKeepAlive();
   const cfg = readConfig();
   if (!cfg.enabled) {
     console.log('[ytProxy] выключен (нет youtube-proxy.json / TCHAT_YT_PROXY). Всё идёт напрямую.');
     return;
   }
-  installed = true;
   currentProxyAuth = proxyAuthInfo(cfg.proxy);
   installChromiumProxy(opts.app, cfg.proxy);
   installAxiosProxy(cfg.proxy);
@@ -277,4 +292,4 @@ function getProxyAuth() {
   return currentProxyAuth;
 }
 
-module.exports = { install, isYouTubeHost, YT_SUFFIXES, getProxyAuth };
+module.exports = { install, installAxiosKeepAlive, isYouTubeHost, YT_SUFFIXES, getProxyAuth };
