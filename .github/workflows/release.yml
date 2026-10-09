@@ -36,6 +36,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:twitch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:widget-types
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:TCHAT_PORT = '3198'
           npm run server:check
       - name: Build Windows installer

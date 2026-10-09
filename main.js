@@ -1,4 +1,5 @@
 const { normalizeSubscriberGoal, advanceSubscriberGoals } = require('./src/subscriberGoal');
+const { resolveWidgetType } = require('./src/widgetTypes');
 const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -728,6 +729,9 @@ function loadStreamWidgets() {
 
   try {
     const saved = JSON.parse(fs.readFileSync(streamWidgetsFile, 'utf8'));
+    if (Array.isArray(saved?.items) && saved.items.some((widget) => resolveWidgetType(widget) !== widget.type)) {
+      fs.copyFileSync(streamWidgetsFile, `${streamWidgetsFile}.before-type-repair-${Date.now()}.bak`);
+    }
     streamWidgets = mergeDefaultStreamWidgets(Array.isArray(saved?.items) ? saved.items.map(normalizeStreamWidget).filter(Boolean) : []);
     saveStreamWidgets(streamWidgets);
   } catch (error) {
@@ -1004,14 +1008,13 @@ function normalizeGiveawayWidget(widget = {}) {
 }
 
 function normalizeStreamWidget(widget = {}) {
-  const knownTypes = new Set(['alerts', 'chat', 'music', 'goal', 'subscriber-goal', 'poll', 'giveaway', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay', 'custom']);
   // Старые сохранённые экземпляры удалённых виджетов не возвращаем в overlay.
   if (
     ['lastdonation', 'vdv'].includes(widget.type) ||
     widget.id === 'builtin-vdv' ||
     String(widget.id || '').startsWith('lastdonation-')
   ) return null;
-  const type = knownTypes.has(widget.type) ? widget.type : 'goal';
+  const type = resolveWidgetType(widget);
   const id = String(widget.id || `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const minWidgetWidth = ['countdown', 'texts'].includes(type) ? 5 : 14;
   const height = normalizeWidgetHeight(widget.height);
@@ -1578,7 +1581,7 @@ function updateStreamWidget(id, payload = {}) {
       return widget;
     }
 
-    const merged = { ...widget, ...payload, id: widget.id, createdAt: widget.createdAt };
+    const merged = { ...widget, ...payload, id: widget.id, type: resolveWidgetType(widget), createdAt: widget.createdAt };
     if (widget.type === 'subscriber-goal') merged.recentSubscriberIds = widget.recentSubscriberIds;
     if ('height' in payload && normalizeWidgetHeight(payload.height) == null) {
       delete merged.height;

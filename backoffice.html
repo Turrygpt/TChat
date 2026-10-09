@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=Montserrat+Alternates:wght@700;800;900&family=Rubik+Mono+One&family=Russo+One&family=Unbounded:wght@700;800;900&family=Yanone+Kaffeesatz:wght@600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./widgets/widget.css" />
+    <link rel="stylesheet" href="./widgets/subscriber-goal.css" />
     <style>
       :root {
         color-scheme: dark;
@@ -772,6 +773,7 @@
       }
 
       .preview-widget > .stream-goal,
+      .preview-widget > .subscriber-goal,
       .preview-widget > .stream-countdown,
       .preview-widget > .stream-text,
       .preview-widget > .stream-task-board,
@@ -839,6 +841,7 @@
       }
 
       .preview-widget > .stream-goal,
+      .preview-widget > .subscriber-goal,
       .preview-widget > .stream-poll,
       .preview-widget > .music-widget,
       .preview-widget > .stream-alert,
@@ -891,6 +894,7 @@
       }
 
       .preview-widget.has-explicit-height > .stream-goal,
+      .preview-widget.has-explicit-height > .subscriber-goal,
       .preview-widget.has-explicit-height > .stream-countdown,
       .preview-widget.has-explicit-height > .stream-text,
       .preview-widget.has-explicit-height > .stream-task-board,
@@ -5185,7 +5189,24 @@
 
       function renderPreviewWidgetContent(widget) {
         if (widget.type === 'subscriber-goal') {
-          return `<article class="stream-goal"><strong>${escapeHtml(widget.title)}</strong><p>${widget.current} / ${widget.target}</p><p>${escapeHtml(widget.reward)}</p><p>Осталось подписок: ${Math.max(0, widget.target - widget.current)}</p></article>`;
+          const current = Math.max(Number(widget.current) || 0, 0);
+          const target = Math.max(Number(widget.target) || 1, 1);
+          const percent = Math.min(100, current / target * 100);
+          return `
+            <article class="subscriber-goal${current >= target ? ' is-complete' : ''}">
+              <div class="subscriber-goal__head">
+                <span class="subscriber-goal__icon" aria-hidden="true">★</span>
+                <strong class="subscriber-goal__title">${escapeHtml(widget.title || 'Цель подписчиков')}</strong>
+                <span class="subscriber-goal__count">${current} / ${target}</span>
+              </div>
+              <div class="subscriber-goal__track"><div class="subscriber-goal__fill" style="width:${percent}%"></div></div>
+              <div class="subscriber-goal__bottom"><span class="subscriber-goal__reward">${escapeHtml(widget.reward || '')}</span></div>
+              <div class="subscriber-goal__footer">
+                <strong class="subscriber-goal__remaining">Осталось подписок: ${Math.max(0, target - current)}</strong>
+                <span class="subscriber-goal__status">${current >= target ? 'Цель достигнута! 🎉' : ''}</span>
+              </div>
+            </article>
+          `;
         }
         if (widget.type === 'goal') {
           const target = Math.max(Number(widget.target || 1), 1);
