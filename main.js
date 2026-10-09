@@ -21,6 +21,7 @@ const { findRewardRule } = require('./src/rewardRules');
 const { createChibis } = require('./src/chibis');
 let chibis;
 const { TwitchRewards } = require('./src/twitchRewards');
+const { TwitchFollowers } = require('./src/twitchFollowers');
 const { registerTwitchSubscriptions } = require('./src/twitchSubscriptions');
 
 // Автообновление с нашего сервера (адрес — в package.json, поле build.publish).
@@ -1007,6 +1008,32 @@ function normalizeGiveawayWidget(widget = {}) {
   };
 }
 
+function normalizeDonationGiveawayParticipant(participant = {}) {
+  const user = String(participant.user || '').trim().slice(0, 120);
+  return {
+    key: user.toLowerCase(),
+    user,
+    source: participant.source === 'manual' ? 'manual' : 'donation',
+    joinedAt: String(participant.joinedAt || new Date().toISOString()),
+  };
+}
+
+function normalizeDonationGiveawayWidget(widget = {}) {
+  const participants = (Array.isArray(widget.participants) ? widget.participants : [])
+    .map(normalizeDonationGiveawayParticipant)
+    .filter((participant) => participant.user && participant.key)
+    .filter((participant, index, items) => items.findIndex((item) => item.key === participant.key) === index)
+    .slice(0, 10000);
+
+  return {
+    ...widget,
+    title: String(widget.title || 'Все донаты участвуют в розыгрыше').trim() || 'Все донаты участвуют в розыгрыше',
+    status: ['idle', 'running', 'paused'].includes(widget.status) ? widget.status : 'idle',
+    startedAt: String(widget.startedAt || ''),
+    participants,
+  };
+}
+
 function normalizeStreamWidget(widget = {}) {
   // Старые сохранённые экземпляры удалённых виджетов не возвращаем в overlay.
   if (
@@ -1105,6 +1132,16 @@ function normalizeStreamWidget(widget = {}) {
       ...widgetSource,
       id: base.id,
       type: 'giveaway',
+      createdAt: widget.createdAt || base.createdAt,
+    });
+  }
+
+  if (type === 'donation-giveaway') {
+    return normalizeDonationGiveawayWidget({
+      ...base,
+      ...widgetSource,
+      id: base.id,
+      type: 'donation-giveaway',
       createdAt: widget.createdAt || base.createdAt,
     });
   }
@@ -1508,6 +1545,7 @@ function widgetTitleByType(type) {
     goal: 'Сбор',
     poll: 'Голосование',
     giveaway: 'Розыгрыш',
+    'donation-giveaway': 'Все донаты участвуют в розыгрыше',
     countdown: 'Обратный отсчёт',
     texts: 'Тексты',
     tasks: 'Задачи на стрим',
@@ -1526,6 +1564,7 @@ function defaultWidgetPosition(type) {
     goal: { x: 18, y: 6, width: 64 },
     poll: { x: 60, y: 56, width: 34 },
     giveaway: { x: 28, y: 20, width: 44 },
+    'donation-giveaway': { x: 24, y: 18, width: 52 },
     countdown: { x: 72, y: 4, width: 18 },
     texts: { x: 8, y: 18, width: 44 },
     tasks: { x: 4, y: 8, width: 26 },
@@ -1593,6 +1632,37 @@ function updateStreamWidget(id, payload = {}) {
   saveStreamWidgets(streamWidgets);
   broadcastStreamWidgets();
   return getStreamWidgetsPayload();
+}
+
+function appendDonationGiveawayParticipant(widgetId, nickname, source = 'manual') {
+  const widget = streamWidgets.find((item) => item.id === String(widgetId || '') && item.type === 'donation-giveaway');
+  const user = String(nickname || '').trim().slice(0, 120);
+  if (!widget || !user) return false;
+
+  const key = user.toLowerCase();
+  if (widget.participants.length >= 10000 || widget.participants.some((participant) => participant.key === key)) return false;
+
+  updateStreamWidget(widget.id, {
+    participants: [
+      ...widget.participants,
+      { key, user, source, joinedAt: new Date().toISOString() },
+    ],
+  });
+  return true;
+}
+
+function registerDonationGiveawayDonor(donation = {}, { fromHistory = false } = {}) {
+  if (donation.isTest) return;
+  streamWidgets
+    .filter((widget) => widget.type === 'donation-giveaway' && widget.status === 'running')
+    .forEach((widget) => {
+      if (fromHistory) {
+        const donatedAt = Date.parse(donation.createdAt);
+        const startedAt = Date.parse(widget.startedAt);
+        if (!Number.isFinite(donatedAt) || !Number.isFinite(startedAt) || donatedAt < startedAt) return;
+      }
+      appendDonationGiveawayParticipant(widget.id, donation.username, 'donation');
+    });
 }
 
 function deleteStreamWidget(id) {
@@ -2438,6 +2508,12 @@ const seenRewards = new Set();
 const twitchRewards = new TwitchRewards({
   onReward: (event) => enqueueStickerFromReward(event),
   onStatus: (status) => mainWindow?.webContents?.send('rewards:twitch-status', status),
+});
+const twitchFollowers = new TwitchFollowers({
+  getChannel: () => parseTwitchChannel(currentChannels.twitch),
+  publish: (message) => broadcastChatMessage({ ...message, platformIcon: getPlatformIconUrl('twitch') }),
+  subscriberAlert: enqueueSubscriberAlert,
+  onStatus: (status) => mainWindow?.webContents?.send('followers:twitch-status', status),
 });
 
 function createDefaultStickerSettings() {
@@ -4084,6 +4160,9 @@ function normalizeRaid(payload = {}) {
 function enqueueDonationAlert(donation) {
   const normalizedDonation = normalizeDonation(donation);
   addDonationToGoal(normalizedDonation.amount);
+  if (String(donation?.username || '').trim()) {
+    registerDonationGiveawayDonor({ ...normalizedDonation, username: donation.username });
+  }
   const musicLinks = extractMusicLinks(normalizedDonation.message || '');
 
   if (musicLinks.length) {
@@ -5086,6 +5165,8 @@ async function syncDonationAlerts() {
     const newDonations = [];
 
     for (const donation of donations) {
+      // Restore donors missed while the app was closed, without replaying alerts.
+      registerDonationGiveawayDonor(donation, { fromHistory: true });
       if (!donationAlertsIds.has(donation.id)) {
         donationAlertsIds.add(donation.id);
 
@@ -5218,6 +5299,10 @@ async function connectChatSources(channels = currentChannels) {
 }
 
 async function connectTwitchChat(channel) {
+  if (twitchFollowers.token && twitchFollowers.info?.login?.toLowerCase() !== channel) {
+    twitchFollowers.stop();
+    twitchFollowers.report('Канал Twitch изменён. Подключите фолловеров заново.');
+  }
   if (twitchClient) {
     const previous = twitchClient;
     twitchClient = null;
@@ -6303,6 +6388,7 @@ app.on('will-quit', () => {
 
 app.on('before-quit', async () => {
   twitchRewards.stop();
+  twitchFollowers.stop();
   clearInterval(vkPollTimer);
   clearInterval(viewerPollTimer);
   clearInterval(donationAlertsTimer);
@@ -7211,6 +7297,16 @@ ipcMain.handle('rewards:twitch-disconnect', () => {
   twitchRewards.report('Не подключено');
   return twitchRewards.status;
 });
+ipcMain.handle('followers:twitch-status', () => twitchFollowers.status);
+ipcMain.handle('followers:twitch-connect', async (_event, token) => {
+  await twitchFollowers.start(token);
+  return twitchFollowers.status;
+});
+ipcMain.handle('followers:twitch-disconnect', () => {
+  twitchFollowers.stop();
+  twitchFollowers.report('Не подключено');
+  return twitchFollowers.status;
+});
 
 ipcMain.handle('stickers:save-settings', (_event, payload) => saveStickerSettings(payload));
 
@@ -7277,6 +7373,16 @@ ipcMain.handle('giveaway:finish', (_event, payload) => finishGiveaway(payload?.i
 ipcMain.handle('giveaway:reset', (_event, payload) => resetGiveaway(payload?.id));
 
 ipcMain.handle('giveaway:reset-all', () => resetAllGiveaways());
+
+ipcMain.handle('donation-giveaway:add-participant', (_event, payload) => {
+  const widget = streamWidgets.find((item) => item.id === String(payload?.id || '') && item.type === 'donation-giveaway');
+  if (!widget) throw new Error('Виджет донатов в розыгрыше не найден.');
+  const nickname = String(payload?.nickname || '').trim();
+  if (!nickname) throw new Error('Введите ник участника.');
+
+  const participantAdded = appendDonationGiveawayParticipant(widget.id, nickname, 'manual');
+  return { ...getStreamWidgetsPayload(), participantAdded };
+});
 
 ipcMain.handle('countdown:adjust', (_event, payload) => adjustCountdownWidget(payload?.id, payload?.deltaSeconds));
 

@@ -70,6 +70,8 @@ function renderCountdown() {
 function drawCountdown() {
   if (!activeWidget) return;
 
+  countdownRoot.querySelector('.stream-countdown__title').textContent = activeWidget.title || 'До конца стрима';
+
   const remaining = getRemainingSeconds(activeWidget);
   const parts = splitCountdown(remaining);
   const isFinished = activeWidget.status === 'finished' || remaining <= 0;

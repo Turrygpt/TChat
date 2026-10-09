@@ -102,7 +102,7 @@ test('Twitch subscribes, handles no-message purchases, deduplicates, migrates an
 
 test('Twitch rejects tokens without redemption scope and malformed events', async () => {
   const client = new TwitchRewards({ onReward: () => {}, onStatus: () => {}, Socket: FakeSocket,
-    fetchImpl: async () => ({ ok: true, json: async () => ({ user_id: '123', scopes: ['chat:read'] }) }),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ client_id: 'app', user_id: '123', scopes: ['chat:read'] }) }),
   });
   await client.start('secret');
   assert.match(client.status, /channel:read:redemptions/);

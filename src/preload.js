@@ -71,6 +71,14 @@ contextBridge.exposeInMainWorld('tchat', {
   getChatUiSettings: () => ipcRenderer.invoke('chat:get-ui-settings'),
   saveChatUiSettings: (payload) => ipcRenderer.invoke('chat:save-ui-settings', payload),
   updateChatFilters: (payload) => ipcRenderer.invoke('chat:update-filters', payload),
+  getTwitchFollowersStatus: () => ipcRenderer.invoke('followers:twitch-status'),
+  connectTwitchFollowers: (token) => ipcRenderer.invoke('followers:twitch-connect', token),
+  disconnectTwitchFollowers: () => ipcRenderer.invoke('followers:twitch-disconnect'),
+  onTwitchFollowersStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('followers:twitch-status', listener);
+    return () => ipcRenderer.removeListener('followers:twitch-status', listener);
+  },
   updateDonationAlerts: (payload) => ipcRenderer.invoke('donationalerts:update', payload),
   getDonationAlertsState: () => ipcRenderer.invoke('donationalerts:get-state'),
   getDonationAlertsAuthUrl: (payload) => ipcRenderer.invoke('donationalerts:get-auth-url', payload),
@@ -122,6 +130,7 @@ contextBridge.exposeInMainWorld('tchat', {
   finishGiveaway: (payload) => ipcRenderer.invoke('giveaway:finish', payload),
   resetGiveaway: (payload) => ipcRenderer.invoke('giveaway:reset', payload),
   resetAllGiveaways: () => ipcRenderer.invoke('giveaway:reset-all'),
+  addDonationGiveawayParticipant: (payload) => ipcRenderer.invoke('donation-giveaway:add-participant', payload),
   adjustCountdown: (payload) => ipcRenderer.invoke('countdown:adjust', payload),
   setCountdown: (payload) => ipcRenderer.invoke('countdown:set', payload),
   startCountdown: (payload) => ipcRenderer.invoke('countdown:start', payload),

@@ -1,6 +1,6 @@
 {
   "name": "tchat",
-  "version": "1.5.9",
+  "version": "1.5.10",
   "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
   "main": "main.js",
   "scripts": {
@@ -14,6 +14,7 @@
     "release": "node deploy/release.js",
     "test:twitch": "node scripts/test-twitch-subscriptions.js",
     "test:chat-keepalive": "node --test scripts/chat-keepalive.test.js && node scripts/test-chat-keepalive-integration.js",
+    "test:twitch-followers": "node --test scripts/twitch-followers.test.js && node scripts/test-twitch-followers-integration.js",
     "test:subscriber-goal": "node scripts/test-subscriber-goal.js && node scripts/test-subscriber-goal-overlay.js",
     "test:widget-types": "node scripts/test-widget-types.js"
   },

@@ -6,6 +6,7 @@ const streamCountdowns = document.querySelector('#streamCountdowns');
 const streamTexts = document.querySelector('#streamTexts');
 const streamStickerWidgets = document.querySelector('#streamStickerWidgets');
 const streamTasks = document.querySelector('#streamTasks');
+const streamDonationGiveaways = document.querySelector('#streamDonationGiveaways');
 const streamEmbeddedWidgets = document.querySelector('#streamEmbeddedWidgets');
 const streamPoll = document.querySelector('#streamPoll');
 const streamChat = document.querySelector('#streamChat');
@@ -23,11 +24,13 @@ window.TChatVkLikes?.mount({ socket, layer: document.querySelector('#vkLikeLayer
 
 const alertQueue = [];
 const queuedAlertIds = new Set();
+const MIN_DONATION_DISPLAY_MS = 15000;
 let isAlertPlaying = false;
 let displaySeconds = 8;
 let latestState = { items: [], poll: null };
 let pollTickTimer = null;
 let countdownRenderTimer = null;
+window.setInterval(sparkleDonationGiveaways, 5 * 60 * 1000);
 
 function normalizedWidgetScale(widget = {}) {
   return Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3);
@@ -182,6 +185,7 @@ function applyWidgetsState(state = {}) {
   renderTexts(latestState.items);
   renderStickerWidgets(latestState.items);
   renderTasks(latestState.items);
+  renderDonationGiveaways(latestState.items);
   renderEmbeddedWidgets(latestState.items);
   renderPoll(latestState.poll);
   applyChatWidgetLayout(latestState.items);
@@ -388,6 +392,8 @@ function setCountdownSegment(node, value) {
 }
 
 function updateCountdownNode(node, widget) {
+  node.querySelector('.stream-countdown__title').textContent = widget.title || 'До конца стрима';
+
   const remaining = getCountdownRemainingSeconds(widget);
   const parts = splitCountdownParts(remaining);
   const isFinished = widget.status === 'finished' || remaining <= 0;
@@ -685,6 +691,63 @@ function renderTasks(items) {
   });
 }
 
+function renderDonationGiveawayHtml(widget = {}) {
+  const participants = Array.isArray(widget.participants) ? widget.participants : [];
+  const participantsHtml = participants
+    .map((participant) => `<span class="donation-giveaway__participant">${escapeHtml(participant.user || 'Зритель')}</span>`)
+    .join('');
+
+  return `
+    <div class="donation-giveaway">
+      <header class="donation-giveaway__header">
+        <span class="donation-giveaway__eyebrow">Все донаты участвуют</span>
+        <h1>${escapeHtml(widget.title || 'Розыгрыш')}</h1>
+      </header>
+      <section class="donation-giveaway__list" aria-label="Участники розыгрыша"${participants.length ? '' : ' hidden'}>${participantsHtml}</section>
+    </div>
+  `;
+}
+
+function renderDonationGiveaways(items) {
+  if (!streamDonationGiveaways) return;
+
+  const widgets = items.filter((item) => item.type === 'donation-giveaway' && item.enabled !== false);
+  const activeIds = new Set(widgets.map((widget) => widget.id));
+  streamDonationGiveaways.querySelectorAll('[data-donation-giveaway-id]').forEach((node) => {
+    if (!activeIds.has(node.dataset.donationGiveawayId)) node.remove();
+  });
+
+  widgets.forEach((widget) => {
+    let node = streamDonationGiveaways.querySelector(`[data-donation-giveaway-id="${CSS.escape(widget.id)}"]`);
+    if (!node) {
+      node = document.createElement('article');
+      node.className = 'stream-donation-giveaway';
+      node.dataset.donationGiveawayId = widget.id;
+      streamDonationGiveaways.appendChild(node);
+    }
+
+    node.style.left = `${Number(widget.x ?? 24)}%`;
+    node.style.top = `${Number(widget.y ?? 18)}%`;
+    node.style.width = `${Number(widget.width ?? 52)}%`;
+    applyWidgetHeight(node, widget);
+    applyWidgetScale(node, widget);
+    const nextHtml = renderDonationGiveawayHtml(widget);
+    if (node.innerHTML !== nextHtml) node.innerHTML = nextHtml;
+  });
+}
+
+function sparkleDonationGiveaways() {
+  if (!streamDonationGiveaways) return;
+  streamDonationGiveaways.querySelectorAll('.stream-donation-giveaway:not([hidden])').forEach((node) => {
+    const card = node.querySelector('.donation-giveaway');
+    if (!card) return;
+    card.classList.remove('is-sparkling');
+    void card.offsetWidth;
+    card.classList.add('is-sparkling');
+    window.setTimeout(() => card.classList.remove('is-sparkling'), 1900);
+  });
+}
+
 // Виджеты, которые живут отдельной страницей со своим canvas и звуком, проще
 // вставить в overlay целиком (iframe), чем повторять их разметку здесь.
 function embeddedWidgetSrc(widget) {
@@ -853,8 +916,15 @@ async function playNextAlert() {
   void alertBox.offsetWidth;
   alertBox.classList.add('stream-alert--show');
 
+  const startedAt = Date.now();
+  const isDonation = item.kind === 'donation';
   await playAlertSound(item.rule || {});
-  await wait(Math.max(Number(item.displaySeconds || displaySeconds || 8), item.kind === 'firstMessage' ? 3 : 6) * 1000);
+  if (isDonation) {
+    await speakDonation(item.donation || {});
+  }
+  const displayMs = Math.max(Number(item.displaySeconds || displaySeconds || 8) * 1000,
+    isDonation ? MIN_DONATION_DISPLAY_MS : item.kind === 'firstMessage' ? 3000 : 6000);
+  await wait(isDonation ? Math.max(0, displayMs - (Date.now() - startedAt)) : displayMs);
 
   alertBox.classList.remove('stream-alert--show');
   alertBox.classList.add('stream-alert--hide');
@@ -926,6 +996,46 @@ function playAlertSound(rule) {
     alertSound.addEventListener('error', finish, { once: true });
     alertSound.play().catch(finish);
     window.setTimeout(finish, 30000);
+  });
+}
+
+function speakDonation(donation) {
+  const user = donation.username || 'Зритель';
+  const amount = `${formatMoney(donation.amount)} ${donation.currency || 'рублей'}`;
+  const message = donation.message || 'Без сообщения';
+  return playEdgeTts(`${user}. Донат ${amount}. ${message}`);
+}
+
+function playEdgeTts(text) {
+  const normalizedText = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 700);
+  if (!normalizedText) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const audio = new Audio(`/tts/edge?text=${encodeURIComponent(normalizedText)}`);
+    let resolved = false;
+    let timeout;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      window.clearTimeout(timeout);
+      audio.removeEventListener('ended', finish);
+      audio.removeEventListener('error', fail);
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      resolve();
+    };
+    const fail = (error) => {
+      console.warn('Не удалось озвучить донат через Edge TTS:', audio.error?.message || error?.message || 'аудио недоступно');
+      finish();
+    };
+
+    audio.addEventListener('ended', finish, { once: true });
+    audio.addEventListener('error', fail, { once: true });
+    // Две попытки синтеза на сервере могут занять до 40 секунд.
+    timeout = window.setTimeout(() => fail(new Error('Превышено время ожидания озвучки')),
+      45000 + Math.max(10000, normalizedText.length * 160));
+    audio.play().catch(fail);
   });
 }
 

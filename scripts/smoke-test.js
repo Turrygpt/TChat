@@ -175,6 +175,20 @@ check('stream overlay state endpoint', async () => {
   }
 });
 
+check('Twitch follower connection is available in desktop and web backoffice', () => {
+  const backoffice = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
+  const preload = fs.readFileSync(path.join(projectRoot, 'src', 'preload.js'), 'utf8');
+  const webShim = fs.readFileSync(path.join(projectRoot, 'src', 'headless', 'tchat-web-shim.js'), 'utf8');
+  if (!backoffice.includes('id="twitchFollowersToken"') || !backoffice.includes('id="twitchFollowersStatus"') || !backoffice.includes('moderator:read:followers')) {
+    throw new Error('Twitch follower connection controls missing');
+  }
+  for (const script of [preload, webShim]) {
+    for (const channel of ['followers:twitch-connect', 'followers:twitch-disconnect', 'followers:twitch-status']) {
+      if (!script.includes(channel)) throw new Error(`Twitch follower API missing: ${channel}`);
+    }
+  }
+});
+
 check('backoffice has music tab', async () => {
   const body = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');
   if (!body.includes('data-tab="music"') || !body.includes('id="musicSection"')) {
@@ -405,6 +419,16 @@ check('stream overlay bootstraps pending donation alerts', async () => {
   }
   if (body.includes("socket.emit('alert:played', { id: payload?.id })")) {
     throw new Error('disabled stream alerts still mark alerts as played');
+  }
+});
+
+check('combined stream overlay voices donations through edge tts', async () => {
+  const { response, body } = await request('/widgets/stream.js');
+  if (!response.ok || !body.includes('await speakDonation(item.donation || {})') || !body.includes('/tts/edge')) {
+    throw new Error('combined overlay donation speech missing');
+  }
+  if (!body.includes('MIN_DONATION_DISPLAY_MS = 15000')) {
+    throw new Error('combined overlay donation minimum display time missing');
   }
 });
 

@@ -86,6 +86,21 @@
     reconnectChat: function () {
       return invoke('chat:reconnect');
     },
+    getTwitchFollowersStatus: function () { return invoke('followers:twitch-status'); },
+    connectTwitchFollowers: function (token) { return invoke('followers:twitch-connect', token); },
+    disconnectTwitchFollowers: function () { return invoke('followers:twitch-disconnect'); },
+    onTwitchFollowersStatus: function (callback) { return on('followers:twitch-status', callback); },
+    // Twitch points and stickers share the desktop backoffice with followers.
+    getStickerState: function () { return invoke('stickers:get-state'); },
+    saveStickerSettings: function (p) { return invoke('stickers:save-settings', p); },
+    pickStickerAsset: function () { return invoke('stickers:pick-asset'); },
+    testSticker: function (p) { return invoke('stickers:test', p); },
+    clearStickers: function () { return invoke('stickers:clear'); },
+    onStickerState: function (callback) { return on('stickers:state', callback); },
+    getTwitchRewardsStatus: function () { return invoke('rewards:twitch-status'); },
+    connectTwitchRewards: function (token) { return invoke('rewards:twitch-connect', token); },
+    disconnectTwitchRewards: function () { return invoke('rewards:twitch-disconnect'); },
+    onTwitchRewardsStatus: function (callback) { return on('rewards:twitch-status', callback); },
     getChatStatus: function () {
       return invoke('chat:get-status');
     },
@@ -217,6 +232,11 @@
     },
     resetGiveaway: function (p) {
       return invoke('giveaway:reset', p);
+    },
+
+    // donation giveaway
+    addDonationGiveawayParticipant: function (p) {
+      return invoke('donation-giveaway:add-participant', p);
     },
 
     // countdown

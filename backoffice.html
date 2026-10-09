@@ -7,8 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=Montserrat+Alternates:wght@700;800;900&family=Rubik+Mono+One&family=Russo+One&family=Unbounded:wght@700;800;900&family=Yanone+Kaffeesatz:wght@600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./widgets/widget.css" />
     <link rel="stylesheet" href="./widgets/subscriber-goal.css" />
+    <link rel="stylesheet" href="./widgets/donation-giveaway.css?v=1" />
     <style>
       :root {
         color-scheme: dark;
@@ -2726,6 +2728,22 @@
               каналах — если чат где-то отвалился молча, это быстрее перезапуска TChat.</p>
           </article>
 
+          <article class="panel">
+            <h2>Новые фолловеры Twitch</h2>
+            <p class="muted">Новый фолловер появится в чате, в алерте «Новый подписчик» и в цели подписчиков Twitch. Подключите канал в разделе «Платформы», затем введите его токен.</p>
+            <label class="field">
+              <span>Токен владельца канала</span>
+              <input id="twitchFollowersToken" type="password" autocomplete="off" placeholder="Токен с правом moderator:read:followers" />
+            </label>
+            <p class="muted">При получении токена выберите право <code>moderator:read:followers</code>. После перезапуска TChat подключите фолловеров заново.</p>
+            <div class="button-row">
+              <button id="connectTwitchFollowersButton" class="button" type="button">Подключить фолловеров</button>
+              <button id="disconnectTwitchFollowersButton" class="button button--ghost" type="button">Отключить</button>
+              <button class="button button--ghost" type="button" data-open-url="https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/">Как получить токен</button>
+            </div>
+            <p id="twitchFollowersStatus" class="muted" role="status">Не подключено</p>
+          </article>
+
           <article class="panel panel--wide">
             <h2>Донаты</h2>
             <p class="muted">Сервисы донатов, с которых TChat принимает поступления. Донат с любого из них
@@ -2860,6 +2878,7 @@
                 <button id="quickCreateGoalButton" class="mini-button" type="button">+ Полоска</button>
                 <button id="quickCreatePollButton" class="mini-button" type="button">+ Голосование</button>
                 <button id="quickCreateGiveawayButton" class="mini-button" type="button">+ Розыгрыш</button>
+                <button id="quickCreateDonationGiveawayButton" class="mini-button" type="button">+ Донаты в розыгрыше</button>
                 <button id="quickCreateCountdownButton" class="mini-button" type="button">+ Таймер</button>
                 <button id="quickCreateTextsButton" class="mini-button" type="button">+ Тексты</button>
                 <button id="quickCreateTasksButton" class="mini-button" type="button">+ Задачи</button>
@@ -2910,6 +2929,10 @@
                   <button class="widget-type-card" type="button" data-widget-type="giveaway">
                     <strong>Розыгрыш</strong>
                     <span>Ключевое слово, участники и выбор победителей.</span>
+                  </button>
+                  <button class="widget-type-card" type="button" data-widget-type="donation-giveaway">
+                    <strong>Все донаты участвуют</strong>
+                    <span>Список донатеров с момента старта и ручное добавление ников.</span>
                   </button>
                   <button class="widget-type-card" type="button" data-widget-type="music">
                     <strong>Музыка</strong>
@@ -2971,6 +2994,10 @@
                 <div id="giveawayWidgetHint" hidden>
                   <p class="muted">Зрители входят по ключевому слову из чата. Завершите по таймеру или кнопкой.</p>
                   <button id="createGiveawayWidgetButton" class="button" type="button">Добавить розыгрыш</button>
+                </div>
+                <div id="donationGiveawayWidgetHint" hidden>
+                  <p class="muted">Виджет появится прямо в общем overlay. Новые донаты начнут добавлять уникальные ники после старта, ники также можно добавить вручную.</p>
+                  <button id="createDonationGiveawayWidgetButton" class="button" type="button">Добавить виджет донатов</button>
                 </div>
                 <div id="musicWidgetHint" hidden>
                   <p class="muted">Музыкальный виджет появится в общем overlay. Очередь и плеер берутся из раздела “Музыка”.</p>
@@ -4542,6 +4569,7 @@
           goal: 'Полоска сбора',
           poll: 'Голосование',
           giveaway: 'Розыгрыш',
+          'donation-giveaway': 'Донаты в розыгрыше',
           countdown: 'Обратный отсчёт',
           texts: 'Тексты',
           tasks: 'Задачи',
@@ -4860,7 +4888,7 @@
         return `
           <article class="${classes}">
             <div class="stream-countdown__glow" aria-hidden="true"></div>
-            <div class="stream-countdown__title">До конца стрима</div>
+            <div class="stream-countdown__title">${escapeHtml(widget.title || 'До конца стрима')}</div>
             <div class="stream-countdown__clock" aria-live="polite">
               ${hoursSegment}
               <span class="stream-countdown__segment">${String(parts.minutes).padStart(2, '0')}</span>
@@ -4999,6 +5027,12 @@
           if (widget.status === 'finished') return `Завершён · ${count} участников`;
           if (widget.status === 'running') return `Идёт · ${count} участников`;
           return 'Готов к запуску';
+        }
+        if (widget.type === 'donation-giveaway') {
+          const count = Array.isArray(widget.participants) ? widget.participants.length : 0;
+          if (widget.status === 'running') return `Сбор идёт · ${count} участников`;
+          if (widget.status === 'paused') return `Пауза · ${count} участников`;
+          return `Готов к запуску · ${count} участников`;
         }
         if (widget.type === 'countdown') {
           if (widget.enabled === false) return 'Таймер скрыт в overlay';
@@ -5287,6 +5321,17 @@
           `;
         }
 
+        if (widget.type === 'donation-giveaway') {
+          const participants = Array.isArray(widget.participants) ? widget.participants : [];
+          const roster = participants
+            .map((participant) => `<span class="donation-giveaway__participant">${escapeHtml(participant.user || 'Зритель')}</span>`)
+            .join('');
+          return `<article class="donation-giveaway">
+            <header class="donation-giveaway__header"><span class="donation-giveaway__eyebrow">Все донаты участвуют</span><h1>${escapeHtml(widget.title || 'Розыгрыш')}</h1></header>
+            <section class="donation-giveaway__list" aria-label="Участники розыгрыша"${participants.length ? '' : ' hidden'}>${roster}</section>
+          </article>`;
+        }
+
         if (widget.type === 'countdown') {
           return renderPreviewCountdownHtml(widget);
         }
@@ -5504,6 +5549,36 @@
               <button class="button button--danger" type="button" data-workspace-poll-hide>Скрыть</button>
               <button class="button button--ghost" type="button" data-workspace-poll-clear>Сбросить</button>
             </div>
+            <div class="button-row">
+              <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
+            </div>
+          `;
+          return;
+        }
+
+        if (widget.type === 'donation-giveaway') {
+          const participants = Array.isArray(widget.participants) ? widget.participants : [];
+          const visibleParticipants = participants.slice(-50);
+          workspaceConfigurator.innerHTML = `
+            <div class="workspace-poll-status">${escapeHtml(widgetStatusText(widget))}</div>
+            <label class="field">Название розыгрыша
+              <input data-donation-giveaway-field="title" type="text" maxlength="120" value="${escapeHtml(widget.title || 'Все донаты участвуют в розыгрыше')}" />
+            </label>
+            <p class="muted">После старта каждый новый донат добавляет ник. Повторные донаты того же участника не создают дубликаты.</p>
+            <form class="compact-grid" data-donation-giveaway-form>
+              <label class="field">Добавить участника вручную
+                <input data-donation-giveaway-nickname type="text" maxlength="120" placeholder="Ник зрителя" autocomplete="off" />
+              </label>
+              <button class="button" type="submit" data-donation-giveaway-add>Добавить ник</button>
+            </form>
+            <div class="button-row">
+              <button class="button" type="button" data-donation-giveaway-start>${widget.status === 'running' ? 'Перезапустить сбор' : widget.status === 'paused' ? 'Продолжить сбор' : 'Старт сбора'}</button>
+              <button class="button button--ghost" type="button" data-donation-giveaway-pause ${widget.status !== 'running' ? 'disabled' : ''}>Пауза</button>
+              <button class="button button--danger" type="button" data-donation-giveaway-reset>Сбросить список</button>
+            </div>
+            <p class="muted"><strong>Участники (${participants.length}):</strong> ${visibleParticipants.length
+              ? visibleParticipants.map((item) => escapeHtml(item.user)).join(', ')
+              : 'пока нет'}${participants.length > visibleParticipants.length ? ` … и ещё ${participants.length - visibleParticipants.length}` : ''}</p>
             <div class="button-row">
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
             </div>
@@ -5970,6 +6045,7 @@
               goal: `${widgetsState.urls.goal || 'http://localhost:3000/widgets/goal.html'}?id=${encodeURIComponent(widget.id)}`,
               music: widgetsState.urls.music || 'http://localhost:3000/widgets/music.html',
               giveaway: `${widgetsState.urls.giveaway || 'http://localhost:3000/widgets/giveaway.html'}?id=${encodeURIComponent(widget.id)}`,
+              'donation-giveaway': widgetsState.urls.stream || 'http://localhost:3000/widgets/stream.html',
               countdown: `${widgetsState.urls.countdown || 'http://localhost:3000/widgets/countdown.html'}?id=${encodeURIComponent(widget.id)}`,
               texts: `${widgetsState.urls.texts || 'http://localhost:3000/widgets/texts.html'}?id=${encodeURIComponent(widget.id)}`,
               tasks: `${widgetsState.urls.tasks || 'http://localhost:3000/widgets/tasks.html'}?id=${encodeURIComponent(widget.id)}`,
@@ -6206,6 +6282,31 @@
         const giveaway = payload.items.find((item) => item.type === 'giveaway');
         selectedWorkspaceWidgetId = giveaway?.id || selectedWorkspaceWidgetId;
         widgetsStudioState.textContent = 'Розыгрыш добавлен. Настройте его и нажмите «Старт».';
+        renderWidgetsState(payload);
+      }
+
+      async function createDonationGiveawayWidget() {
+        const existing = widgetsState.items.find((item) => item.type === 'donation-giveaway');
+        if (existing) {
+          selectedWorkspaceWidgetId = existing.id;
+          renderWorkspace();
+          widgetsStudioState.textContent = 'Виджет донатов уже в списке.';
+          return;
+        }
+
+        const payload = await window.tchat.createWidget({
+          type: 'donation-giveaway',
+          title: 'Все донаты участвуют в розыгрыше',
+          status: 'idle',
+          participants: [],
+          enabled: true,
+          x: 24,
+          y: 18,
+          width: 52,
+        });
+        const widget = payload.items.find((item) => item.type === 'donation-giveaway');
+        selectedWorkspaceWidgetId = widget?.id || selectedWorkspaceWidgetId;
+        widgetsStudioState.textContent = 'Виджет добавлен. Задайте название и нажмите «Старт сбора».';
         renderWidgetsState(payload);
       }
 
@@ -6513,7 +6614,7 @@
       }
 
       function selectWidgetType(type) {
-        selectedWidgetType = ['subscriber-goal', 'poll', 'giveaway', 'music', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay'].includes(type) ? type : 'goal';
+        selectedWidgetType = ['subscriber-goal', 'poll', 'giveaway', 'donation-giveaway', 'music', 'countdown', 'texts', 'tasks', 'sticker', 'video-overlay'].includes(type) ? type : 'goal';
         document.querySelectorAll('[data-widget-type]').forEach((button) => {
           button.classList.toggle('is-active', button.dataset.widgetType === selectedWidgetType);
         });
@@ -6521,6 +6622,7 @@
         goalWidgetForm.hidden = selectedWidgetType !== 'goal';
         pollWidgetHint.hidden = selectedWidgetType !== 'poll';
         document.querySelector('#giveawayWidgetHint').hidden = selectedWidgetType !== 'giveaway';
+        document.querySelector('#donationGiveawayWidgetHint').hidden = selectedWidgetType !== 'donation-giveaway';
         musicWidgetHint.hidden = selectedWidgetType !== 'music';
         if (document.querySelector('#countdownWidgetHint')) {
           document.querySelector('#countdownWidgetHint').hidden = selectedWidgetType !== 'countdown';
@@ -6599,9 +6701,78 @@
         }
       }
 
+      async function saveDonationGiveawayTitle(widgetId) {
+        try {
+          const title = workspaceConfigurator?.querySelector('[data-donation-giveaway-field="title"]')?.value.trim()
+            || 'Все донаты участвуют в розыгрыше';
+          const payload = await window.tchat.updateWidget({ id: widgetId, title });
+          renderWidgetsState(payload);
+        } catch (error) {
+          widgetsStudioState.textContent = error.message || 'Не удалось сохранить название розыгрыша.';
+        }
+      }
+
+      async function startDonationGiveawayFromWorkspace(widgetId) {
+        try {
+          const title = workspaceConfigurator?.querySelector('[data-donation-giveaway-field="title"]')?.value.trim()
+            || 'Все донаты участвуют в розыгрыше';
+          const current = widgetsState.items.find((item) => item.id === widgetId);
+          const restarting = current?.status === 'running';
+          const update = {
+            id: widgetId,
+            title,
+            status: 'running',
+            startedAt: restarting || !current?.startedAt ? new Date().toISOString() : current.startedAt,
+          };
+          if (restarting) update.participants = [];
+          const payload = await window.tchat.updateWidget(update);
+          widgetsStudioState.textContent = restarting
+            ? 'Сбор запущен заново. Старый список очищен.'
+            : 'Сбор запущен. Теперь новые донаты добавляют участников.';
+          renderWidgetsState(payload);
+        } catch (error) {
+          widgetsStudioState.textContent = error.message || 'Не удалось запустить сбор.';
+        }
+      }
+
+      async function pauseDonationGiveawayFromWorkspace(widgetId) {
+        const payload = await window.tchat.updateWidget({ id: widgetId, status: 'paused' });
+        widgetsStudioState.textContent = 'Сбор приостановлен. Список участников сохранён.';
+        renderWidgetsState(payload);
+      }
+
+      async function resetDonationGiveawayFromWorkspace(widgetId) {
+        const payload = await window.tchat.updateWidget({ id: widgetId, status: 'idle', startedAt: '', participants: [] });
+        widgetsStudioState.textContent = 'Список очищен. Нажмите «Старт сбора», чтобы начать заново.';
+        renderWidgetsState(payload);
+      }
+
+      async function addDonationGiveawayNickname(widgetId) {
+        const input = workspaceConfigurator?.querySelector('[data-donation-giveaway-nickname]');
+        const nickname = input?.value.trim() || '';
+        if (!nickname) {
+          widgetsStudioState.textContent = 'Введите ник участника.';
+          return;
+        }
+
+        try {
+          const payload = await window.tchat.addDonationGiveawayParticipant({ id: widgetId, nickname });
+          widgetsStudioState.textContent = payload.participantAdded
+            ? `Участник «${nickname}» добавлен.`
+            : `Ник «${nickname}» уже есть в списке.`;
+          renderWidgetsState(payload);
+        } catch (error) {
+          widgetsStudioState.textContent = error.message || 'Не удалось добавить ник.';
+        }
+      }
+
       workspaceConfigurator?.addEventListener('change', (event) => {
         if (!selectedWorkspaceWidgetId) return;
         const widget = widgetsState.items.find((item) => item.id === selectedWorkspaceWidgetId);
+        if (widget?.type === 'donation-giveaway' && event.target.matches('[data-donation-giveaway-field="title"]')) {
+          void saveDonationGiveawayTitle(selectedWorkspaceWidgetId);
+          return;
+        }
         if (widget?.type === 'giveaway' && event.target.matches('[data-giveaway-field]')) {
           void saveGiveawayFromWorkspace(selectedWorkspaceWidgetId, { silent: true });
           return;
@@ -6618,6 +6789,13 @@
         if (event.target.matches('[data-task-done]')) {
           void saveTasksWidget(selectedWorkspaceWidgetId);
         }
+      });
+
+      workspaceConfigurator?.addEventListener('submit', (event) => {
+        if (!event.target.matches('[data-donation-giveaway-form]')) return;
+        event.preventDefault();
+        const widget = widgetsState.items.find((item) => item.id === selectedWorkspaceWidgetId);
+        if (widget?.type === 'donation-giveaway') void addDonationGiveawayNickname(widget.id);
       });
 
       document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
@@ -6651,6 +6829,7 @@
       document.querySelector('#quickCreateGoalButton').addEventListener('click', createGoalWidget);
       document.querySelector('#quickCreatePollButton').addEventListener('click', createPollWidget);
       document.querySelector('#quickCreateGiveawayButton').addEventListener('click', createGiveawayWidget);
+      document.querySelector('#quickCreateDonationGiveawayButton').addEventListener('click', createDonationGiveawayWidget);
       document.querySelector('#quickCreateCountdownButton').addEventListener('click', createCountdownWidget);
       document.querySelector('#quickCreateTextsButton').addEventListener('click', createTextsWidget);
       document.querySelector('#quickCreateTasksButton').addEventListener('click', createTasksWidget);
@@ -6659,6 +6838,7 @@
       document.querySelector('#createMusicWidgetButton').addEventListener('click', createMusicWidget);
       document.querySelector('#createPollWidgetButton')?.addEventListener('click', createPollWidget);
       document.querySelector('#createGiveawayWidgetButton')?.addEventListener('click', createGiveawayWidget);
+      document.querySelector('#createDonationGiveawayWidgetButton')?.addEventListener('click', createDonationGiveawayWidget);
       document.querySelector('#createCountdownWidgetButton')?.addEventListener('click', createCountdownWidget);
       document.querySelector('#createTextsWidgetButton')?.addEventListener('click', createTextsWidget);
       document.querySelector('#createTasksWidgetButton')?.addEventListener('click', createTasksWidget);
@@ -6701,6 +6881,9 @@
         const giveawayFinishButton = event.target.closest('[data-giveaway-finish]');
         const giveawayResetButton = event.target.closest('[data-giveaway-reset]');
         const giveawayResetAllButton = event.target.closest('[data-giveaway-reset-all]');
+        const donationGiveawayStartButton = event.target.closest('[data-donation-giveaway-start]');
+        const donationGiveawayPauseButton = event.target.closest('[data-donation-giveaway-pause]');
+        const donationGiveawayResetButton = event.target.closest('[data-donation-giveaway-reset]');
         const countdownSetButton = event.target.closest('[data-countdown-set]');
         const countdownStartButton = event.target.closest('[data-countdown-start]');
         const countdownPauseButton = event.target.closest('[data-countdown-pause]');
@@ -6735,6 +6918,21 @@
         if (giveawayResetAllButton) {
           if (!window.confirm('Сбросить все розыгрыши? Участники, победители, собранные ники и журнал будут удалены.')) return;
           window.tchat.resetAllGiveaways().then(renderWidgetsState);
+          return;
+        }
+
+        if (donationGiveawayStartButton && selectedWorkspaceWidgetId) {
+          void startDonationGiveawayFromWorkspace(selectedWorkspaceWidgetId);
+          return;
+        }
+
+        if (donationGiveawayPauseButton && selectedWorkspaceWidgetId) {
+          void pauseDonationGiveawayFromWorkspace(selectedWorkspaceWidgetId);
+          return;
+        }
+
+        if (donationGiveawayResetButton && selectedWorkspaceWidgetId) {
+          void resetDonationGiveawayFromWorkspace(selectedWorkspaceWidgetId);
           return;
         }
 
@@ -7332,6 +7530,30 @@
           seconds: 6, size: 280, position: 'center', animation: 'pop', loop: true,
         }));
         stickersState.textContent = 'Лайк добавлен. Нажмите «Тест», затем «Сохранить стикеры».';
+      });
+      const twitchFollowersStatus = document.querySelector('#twitchFollowersStatus');
+      if (window.tchat.getTwitchFollowersStatus) {
+        window.tchat.getTwitchFollowersStatus()
+          .then((status) => { twitchFollowersStatus.textContent = status; })
+          .catch(() => { twitchFollowersStatus.textContent = 'Не удалось получить состояние Twitch.'; });
+        window.tchat.onTwitchFollowersStatus((status) => { twitchFollowersStatus.textContent = status; });
+      }
+      document.querySelector('#connectTwitchFollowersButton').addEventListener('click', async () => {
+        const input = document.querySelector('#twitchFollowersToken');
+        const token = input.value.trim();
+        if (!token) { twitchFollowersStatus.textContent = 'Введите токен владельца канала Twitch.'; return; }
+        if (!window.tchat.connectTwitchFollowers) { twitchFollowersStatus.textContent = 'Подключение доступно после обновления TChat.'; return; }
+        input.value = '';
+        const button = document.querySelector('#connectTwitchFollowersButton');
+        button.disabled = true;
+        try { twitchFollowersStatus.textContent = await window.tchat.connectTwitchFollowers(token); }
+        catch { twitchFollowersStatus.textContent = 'Не удалось подключиться. Повторите попытку.'; }
+        finally { button.disabled = false; }
+      });
+      document.querySelector('#disconnectTwitchFollowersButton').addEventListener('click', async () => {
+        try {
+          if (window.tchat.disconnectTwitchFollowers) twitchFollowersStatus.textContent = await window.tchat.disconnectTwitchFollowers();
+        } catch { twitchFollowersStatus.textContent = 'Не удалось отключиться. Повторите попытку.'; }
       });
       const twitchRewardsStatus = document.querySelector('#twitchRewardsStatus');
       if (window.tchat.getTwitchRewardsStatus) {

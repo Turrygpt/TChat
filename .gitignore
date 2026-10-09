@@ -50,3 +50,6 @@ assets/alerts/*
 
 # Локальный адрес прокси может содержать логин и пароль
 /youtube-proxy.json
+
+# Local recovery lists and installed-app backups
+/recovery/
