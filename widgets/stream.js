@@ -174,13 +174,13 @@ function enqueueAlertForPlayback(payload) {
   playNextAlert();
 }
 
-function applyWidgetsState(state = {}) {
+function applyWidgetsState(state = {}, donationEffect) {
   latestState = {
     items: Array.isArray(state.items) ? state.items : [],
     poll: state.poll || null,
   };
   applyAlertWidgetLayout();
-  renderGoals(latestState.items);
+  renderGoals(latestState.items, donationEffect);
   renderCountdowns(latestState.items);
   renderTexts(latestState.items);
   renderStickerWidgets(latestState.items);
@@ -304,27 +304,75 @@ function applyAlertWidgetLayout() {
   }
 }
 
-function renderGoals(items) {
+function renderGoals(items, donationEffect) {
   const goals = items.filter((item) => item.type === 'goal' && item.enabled !== false);
-  streamGoals.innerHTML = goals
-    .map((goal) => {
-      const target = Math.max(Number(goal.target || 1), 1);
-      const current = Math.max(Number(goal.current || 0), 0);
-      const percent = Math.min((current / target) * 100, 100);
-      const style = `left: ${Number(goal.x || 18)}%; top: ${Number(goal.y || 6)}%; width: ${Number(goal.width || 64)}%; ${widgetHeightCss(goal)} ${widgetScaleCss(goal)}`;
-      return `
-        <article class="stream-goal" style="${style}">
-          <div class="stream-goal__top">
-            <strong>${escapeHtml(goal.title || 'Сбор')}</strong>
-            <span>${formatMoney(current)} / ${formatMoney(target)} ${escapeHtml(goal.currency || 'RUB')}</span>
-          </div>
-          <div class="stream-goal__track">
-            <div class="stream-goal__fill" style="width: ${percent}%"></div>
-          </div>
-        </article>
-      `;
-    })
-    .join('');
+  const nodes = new Map(Array.from(streamGoals.children, (node) => [node.dataset.goalId, node]));
+  let sound = true;
+  for (const goal of goals) {
+    const id = String(goal.id);
+    let node = nodes.get(id);
+    nodes.delete(id);
+    if (!node) {
+      node = document.createElement('article');
+      node.className = 'stream-goal';
+      node.dataset.goalId = id;
+      node.innerHTML = '<div class="stream-goal__top"><strong></strong><span></span></div>' +
+        '<div class="stream-goal__track"><div class="stream-goal__fill"></div></div>';
+      streamGoals.append(node);
+    }
+
+    node.style.left = `${Number(goal.x ?? 18)}%`;
+    node.style.top = `${Number(goal.y ?? 6)}%`;
+    node.style.width = `${Number(goal.width ?? 64)}%`;
+    applyWidgetHeight(node, goal);
+    applyWidgetScale(node, goal);
+    node.querySelector('strong').textContent = goal.title || 'Сбор';
+
+    const target = Math.max(Number(goal.target) || 1, 1);
+    const current = Math.max(Number(goal.current) || 0, 0);
+    const currency = goal.currency || 'RUB';
+    const stateKey = JSON.stringify([current, target, currency]);
+    if (node.dataset.goalState === stateKey) continue;
+    node.dataset.goalState = stateKey;
+    const track = node.querySelector('.stream-goal__track');
+    const fill = track.firstElementChild;
+    const amountText = node.querySelector('.stream-goal__top span');
+    const percent = Math.min(current / target * 100, 100);
+    const render = (animate = false) => {
+      if (node.dataset.goalState !== stateKey) return;
+      fill.style.width = `${percent}%`;
+      const showAmount = (value) => {
+        node.dataset.displayedCurrent = String(value);
+        amountText.textContent = `${formatMoney(value)} / ${formatMoney(target)} ${currency}`;
+      };
+      if (!animate) {
+        showAmount(current);
+        return;
+      }
+      const from = Number(node.dataset.displayedCurrent) || 0;
+      const start = performance.now();
+      const tick = (now) => {
+        if (!node.isConnected || node.dataset.goalState !== stateKey) return;
+        const progress = Math.min((now - start) / 650, 1);
+        showAmount(from + (current - from) * (1 - (1 - progress) ** 3));
+        if (progress < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    const amount = donationEffect?.amount;
+    if (amount > 0 && window.TChatGoalEffects?.play({ track, amount, currency, percent, sound, onImpact: () => render(true) })) {
+      if (!amountText.textContent) {
+        const previous = Math.max(current - amount, 0);
+        node.dataset.displayedCurrent = String(previous);
+        amountText.textContent = `${formatMoney(previous)} / ${formatMoney(target)} ${currency}`;
+        fill.style.width = `${Math.min(previous / target * 100, 100)}%`;
+      }
+      sound = false;
+    } else {
+      render();
+    }
+  }
+  for (const node of nodes.values()) node.remove();
 }
 
 function getCountdownRemainingSeconds(widget = {}) {
@@ -1000,10 +1048,8 @@ function playAlertSound(rule) {
 }
 
 function speakDonation(donation) {
-  const user = donation.username || 'Зритель';
-  const amount = `${formatMoney(donation.amount)} ${donation.currency || 'рублей'}`;
-  const message = donation.message || 'Без сообщения';
-  return playEdgeTts(`${user}. Донат ${amount}. ${message}`);
+  if (donation.isMusic) return;
+  return playEdgeTts(donation.message);
 }
 
 function playEdgeTts(text) {

@@ -1,9 +1,12 @@
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 const express = require('express');
 const { Server } = require('socket.io');
 const { createChibis } = require('../chibis');
+const { createDonationTtsHandler } = require('./donationTts');
+const { extractMusicLinks } = require('../musicLinks');
 
 const APP_VERSION = require('../../package.json').version;
 
@@ -33,6 +36,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
   };
 
   app.use(express.json());
+  app.get('/tts/edge', createDonationTtsHandler(path.join(os.tmpdir(), 'tchat-tts')));
   const chibis = createChibis({ emit: (name, item) => io.emit(name, item) });
   app.get('/chibis/state', (_request, response) => response.json(chibis.state()));
   app.post('/demo/chibi', (request, response) => response.json({ ok: true, item: chibis.show(request.body) }));
@@ -202,11 +206,20 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
 
   app.post('/demo/donation', (request, response) => {
     const payload = normalizeDonation(request.body);
-    const item = createDonationAlertItem(payload);
-    io.emit('donation:alert', payload);
-    io.emit('alert:play', item);
+    const item = emitDonation(payload);
     response.json({ ok: true, payload, item });
   });
+
+  function emitDonation(donation) {
+    if (Number.isFinite(donation.amount) && donation.amount > 0) {
+      goalState = normalizeGoal({ ...goalState, current: goalState.current + donation.amount });
+      io.emit('goal:update', goalState, { amount: donation.amount });
+    }
+    const item = createDonationAlertItem(donation);
+    io.emit('donation:alert', donation);
+    io.emit('alert:play', item);
+    return item;
+  }
 
   app.post('/demo/goal', (request, response) => {
     goalState = normalizeGoal(request.body);
@@ -257,13 +270,12 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
     },
 
     emitDonationAlert(payload) {
-      const donation = normalizeDonation(payload);
-      io.emit('donation:alert', donation);
-      io.emit('alert:play', createDonationAlertItem(donation));
+      emitDonation(normalizeDonation(payload));
     },
 
     emitGoalUpdate(payload) {
-      io.emit('goal:update', normalizeGoal(payload));
+      goalState = normalizeGoal(payload);
+      io.emit('goal:update', goalState);
     },
   };
 }
@@ -312,7 +324,8 @@ function normalizeDonation(payload = {}) {
     username: payload.username || 'Зритель',
     amount: Number(payload.amount || 0),
     currency: payload.currency || 'RUB',
-    message: payload.message || 'Без сообщения',
+    message: payload.message || '',
+    isMusic: extractMusicLinks(payload.message).length > 0,
     createdAt: payload.createdAt || new Date().toISOString(),
   };
 }

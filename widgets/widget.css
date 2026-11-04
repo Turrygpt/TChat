@@ -422,6 +422,7 @@ body {
 .stream-embedded-widget--music {
   min-height: 260px;
   background: transparent !important;
+  color-scheme: normal;
 }
 
 .stream-embedded-widget--music.is-empty {
@@ -634,15 +635,7 @@ body {
   display: grid;
   gap: 10px;
   width: min(420px, calc(100vw - 36px));
-  border: 1px solid rgb(var(--cs-gold-rgb) / 26%);
-  border-radius: var(--cs-radius);
-  background:
-    radial-gradient(circle at 12% 0%, rgb(var(--cs-gold-rgb) / 8%), transparent 40%),
-    var(--cs-glass);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 6%),
-    0 18px 60px rgb(0 0 0 / 48%);
-  backdrop-filter: blur(12px);
+  background: transparent;
   padding: 12px;
 }
 

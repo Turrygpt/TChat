@@ -23,7 +23,7 @@ const knownReadyIds = new Set();
 let musicVolumePercent = 50;
 const MUSIC_LEADER_KEY = 'tchat.music.leader';
 const TRACK_END_GUARD_MS = 3000;
-const DEFAULT_PLAYBACK_FALLBACK_MS = 15 * 60 * 1000;
+let maxTrackSeconds = 6 * 60;
 const LEADER_TTL_MS = 5000;
 const isEmbeddedPlayer = new URLSearchParams(window.location.search).get('embedded') === '1';
 const playerInstanceId = `music-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -182,6 +182,8 @@ function upsertQueueItem(item) {
 }
 
 function renderMusicState(state) {
+  const limit = Number(state?.maxDurationSeconds);
+  if (Number.isFinite(limit) && limit > 0) maxTrackSeconds = Math.min(limit, 6 * 60);
   const nextVolume = Number(state?.settings?.volume);
   if (Number.isFinite(nextVolume)) {
     const clamped = Math.min(Math.max(Math.round(nextVolume), 0), 100);
@@ -227,7 +229,6 @@ function playNextReady() {
     setNowTitle('');
     musicPlayer.hidden = true;
     musicPlayer.removeAttribute('src');
-    musicPlayer.src = '';
     return;
   }
 
@@ -263,7 +264,12 @@ function startPlayback(item) {
   clearYouTubeSoundRetries();
 
   currentId = item.id;
-  playbackStartedAt = Date.now();
+  const previousStart = Date.parse(item.startedAt);
+  playbackStartedAt = Number.isFinite(previousStart) ? Math.min(previousStart, Date.now()) : Date.now();
+  if (Date.now() - playbackStartedAt >= maxTrackSeconds * 1000) {
+    finishCurrentTrack();
+    return;
+  }
   lastKnownDuration = Number(item.duration) || 0;
   socket.emit('music:started', { id: item.id });
   setNowTitle(decodeHtml(item.title || 'Музыкальная заявка'));
@@ -287,13 +293,7 @@ function startPlayback(item) {
 
   musicPlayer.src = embedUrl;
 
-  playTimer = window.setTimeout(() => {
-    if (currentId !== item.id) {
-      return;
-    }
-
-    finishCurrentTrack();
-  }, getPlaybackFallbackMs(item));
+  schedulePlaybackDeadline(lastKnownDuration);
 }
 
 function finishCurrentTrack() {
@@ -308,6 +308,7 @@ function finishCurrentTrack() {
   clearTimeout(finalizeTimer);
   playTimer = null;
   finalizeTimer = null;
+  queue = queue.filter((item) => item.id !== itemId);
   socket.emit('music:played', { id: itemId });
   stopPlayback(true);
   finishingTrackId = '';
@@ -350,40 +351,24 @@ function finalizePlayback(item) {
   }, 900);
 }
 
-function getPlaybackFallbackMs(item = {}) {
-  const duration = Number(item.duration);
-
-  if (Number.isFinite(duration) && duration > 0) {
-    return Math.max((duration + 45) * 1000, 45000);
-  }
-
-  return DEFAULT_PLAYBACK_FALLBACK_MS;
-}
-
-function resetPlaybackFallbackTimer(durationSeconds) {
+function schedulePlaybackDeadline(duration) {
   clearTimeout(playTimer);
-
-  const duration = Number(durationSeconds);
-  if (!Number.isFinite(duration) || duration <= 0) {
-    return;
-  }
-
-  playTimer = window.setTimeout(() => {
-    if (currentId) {
-      finishCurrentTrack();
-    }
-  }, Math.max((duration + 45) * 1000, 45000));
+  const fallbackSeconds = duration > 0 ? duration + 45 : maxTrackSeconds;
+  const deadline = playbackStartedAt + Math.min(fallbackSeconds, maxTrackSeconds) * 1000;
+  playTimer = window.setTimeout(finishCurrentTrack, Math.max(0, deadline - Date.now()));
 }
 
 function trackPlaybackProgress(currentTime, duration) {
-  if (!currentId || !Number.isFinite(currentTime) || !Number.isFinite(duration) || duration <= 0) {
+  if (!currentId || !Number.isFinite(currentTime)) {
     return;
   }
 
-  lastKnownDuration = duration;
-  resetPlaybackFallbackTimer(duration);
+  if (Number.isFinite(duration) && duration > 0 && duration !== lastKnownDuration) {
+    lastKnownDuration = duration;
+    schedulePlaybackDeadline(duration);
+  }
 
-  if (shouldFinishNearEnd(currentTime, duration)) {
+  if (currentTime >= maxTrackSeconds || shouldFinishNearEnd(currentTime, lastKnownDuration)) {
     finishCurrentTrack();
   }
 }
@@ -600,9 +585,8 @@ function handlePlayerMessage(event) {
     const duration = Number(data.info.duration ?? data.info.videoDuration ?? data.info.length);
     const reportedTitle = decodeHtml(data.info.videoData?.title || data.info.title || '').trim();
 
-    if (Number.isFinite(currentTime) && Number.isFinite(duration) && duration > 0) {
-      trackPlaybackProgress(currentTime, duration);
-    }
+    trackPlaybackProgress(currentTime, duration);
+    if (!currentId) return;
 
     if (isUsableReportedTitle(reportedTitle) && reportedTitle !== lastReportedTitle) {
       lastReportedTitle = reportedTitle;
@@ -637,7 +621,12 @@ function handlePlayerMessage(event) {
   }
 
   if (isRutubeItem({ embedUrl: musicPlayer.src })) {
-    if (data.type === 'player:ready' || data.type === 'player:init') {
+    if (data.type === 'player:durationChange') {
+      trackPlaybackProgress(0, Number(data.data?.duration));
+    } else if (data.type === 'player:currentTime') {
+      trackPlaybackProgress(Number(data.data?.time), lastKnownDuration);
+      if (!currentId) return;
+    } else if (data.type === 'player:ready' || data.type === 'player:init') {
       startRutubePlayback();
     } else if (data.type === 'player:playStart') {
       enableRutubeSound(true);
@@ -689,7 +678,6 @@ function stopPlayback(continueQueue) {
   delete musicPlayer.dataset.embedUrl;
   musicPlayer.hidden = true;
   musicPlayer.removeAttribute('src');
-  musicPlayer.src = '';
   setNowTitle('');
   renderQueue();
 
@@ -865,8 +853,12 @@ function ensureAutoplayUrl(url = '', platform = '') {
   }
 }
 
+function getWaitingItems() {
+  return queue.filter((item) => item.id !== currentId && ['checking', 'ready', 'playing'].includes(item.status) && !item.played);
+}
+
 function renderQueue() {
-  const waitingItems = queue.filter((item) => item.id !== currentId && item.status !== 'played' && !item.played);
+  const waitingItems = getWaitingItems();
 
   if (!waitingItems.length) {
     musicQueue.innerHTML = '';
@@ -905,8 +897,7 @@ function syncWidgetVisibility() {
     return;
   }
 
-  const waitingItems = queue.filter((item) => item.id !== currentId && item.status !== 'played' && !item.played);
-  const hasContent = Boolean(currentId) || waitingItems.length > 0 || !musicNowTitle.hidden || !musicPlayer.hidden;
+  const hasContent = Boolean(currentId) || getWaitingItems().length > 0;
   musicWidget.hidden = !hasContent;
   if (isEmbeddedPlayer && window.parent !== window) {
     window.parent.postMessage({ type: 'tchat:music-visibility', visible: hasContent }, window.location.origin);

@@ -7,15 +7,25 @@ const goalCurrencyTarget = document.querySelector('#goalCurrencyTarget');
 const goalPercent = document.querySelector('#goalPercent');
 const goalProgress = document.querySelector('#goalProgress');
 const goalCard = document.querySelector('#goalCard');
+const goalTrack = goalProgress.parentElement;
 
 const state = {
   displayedCurrent: 0,
-  targetCurrent: 0,
+  requestedCurrent: null,
   goal: 1,
   currency: 'RUB',
   animationId: null,
 };
 const widgetId = new URLSearchParams(window.location.search).get('id');
+
+function applyWidgetGoal(payload, donationEffect) {
+  const widgetGoal = payload.items?.find((item) => item.id === widgetId && item.type === 'goal');
+  const enabled = Boolean(widgetGoal && widgetGoal.enabled !== false);
+  goalCard.hidden = !enabled;
+  if (enabled) applyGoal(widgetGoal, donationEffect);
+}
+
+if (widgetId) goalCard.hidden = true;
 
 fetch(widgetId ? '/widgets/state' : '/goal/state')
   .then((response) => response.json())
@@ -25,19 +35,14 @@ fetch(widgetId ? '/widgets/state' : '/goal/state')
       return;
     }
 
-    const widgetGoal = payload.items?.find((item) => item.id === widgetId);
-    if (widgetGoal) applyGoal(widgetGoal);
+    applyWidgetGoal(payload);
   })
   .catch(() => {});
 
-socket.on('goal:update', applyGoal);
-socket.on('widgets:state', (payload) => {
-  if (!widgetId) return;
-  const widgetGoal = payload.items?.find((item) => item.id === widgetId);
-  if (widgetGoal) applyGoal(widgetGoal);
-});
+if (widgetId) socket.on('widgets:state', applyWidgetGoal);
+else socket.on('goal:update', applyGoal);
 
-function applyGoal(payload = {}) {
+function applyGoal(payload = {}, donationEffect) {
   const current = Number(payload.current || 0);
   state.goal = Math.max(Number(payload.target || 1), 1);
   state.currency = payload.currency || 'RUB';
@@ -46,15 +51,28 @@ function applyGoal(payload = {}) {
   goalTarget.textContent = formatMoney(state.goal);
   goalCurrencyCurrent.textContent = state.currency;
   goalCurrencyTarget.textContent = state.currency;
-  animateCurrentTo(current);
-  flashReminder();
+  if (state.requestedCurrent === current) {
+    renderGoal();
+    return;
+  }
+  state.requestedCurrent = current;
+  const render = () => {
+    if (state.requestedCurrent !== current) return;
+    animateCurrentTo(current);
+    flashReminder();
+  };
+  const amount = donationEffect?.amount;
+  const percent = Math.min(current / state.goal * 100, 100);
+  if (amount > 0 && window.TChatGoalEffects?.play({
+    track: goalTrack, amount, currency: state.currency, percent, sound: true, onImpact: render,
+  })) return;
+  render();
 }
 
 function animateCurrentTo(current) {
-  state.targetCurrent = current;
-
   if (state.animationId) {
     cancelAnimationFrame(state.animationId);
+    state.animationId = null;
   }
 
   const from = state.displayedCurrent;

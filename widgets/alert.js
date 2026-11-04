@@ -46,12 +46,13 @@ async function playNextDonation() {
 }
 
 function speakDonation(payload) {
-  return playEdgeTts(buildSpeechText(payload));
+  if (payload.isMusic) return;
+  return playEdgeTts(payload.message);
 }
 
 function playEdgeTts(text) {
   return new Promise((resolve) => {
-    const normalizedText = String(text || '').replace(/\s+/g, ' ').trim();
+    const normalizedText = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 700);
     if (!normalizedText) {
       resolve();
       return;
@@ -59,26 +60,29 @@ function playEdgeTts(text) {
 
     const audio = new Audio(`/tts/edge?text=${encodeURIComponent(normalizedText)}`);
     let resolved = false;
+    let timeout;
     const finish = () => {
       if (resolved) return;
       resolved = true;
+      window.clearTimeout(timeout);
       audio.removeEventListener('ended', finish);
-      audio.removeEventListener('error', finish);
+      audio.removeEventListener('error', fail);
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
       resolve();
+    };
+    const fail = (error) => {
+      console.warn('Не удалось озвучить алерт:', audio.error?.message || error?.message || 'аудио недоступно');
+      finish();
     };
 
     audio.addEventListener('ended', finish, { once: true });
-    audio.addEventListener('error', finish, { once: true });
-    audio.play().catch(finish);
-    window.setTimeout(finish, Math.max(10000, normalizedText.length * 160));
+    audio.addEventListener('error', fail, { once: true });
+    timeout = window.setTimeout(() => fail(new Error('Превышено время ожидания озвучки')),
+      45000 + Math.max(10000, normalizedText.length * 160));
+    audio.play().catch(fail);
   });
-}
-
-function buildSpeechText(payload) {
-  const user = payload.username || 'Зритель';
-  const amount = `${formatMoney(payload.amount)} ${payload.currency || 'рублей'}`;
-  const message = payload.message || 'Без сообщения';
-  return `${user}. Донат ${amount}. ${message}`;
 }
 
 function wait(ms) {

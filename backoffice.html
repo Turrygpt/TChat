@@ -4429,7 +4429,7 @@
                 <div class="queue-row">
                   <span class="queue-title">${index + 1}. ${escapeHtml(item.title || 'Музыкальная заявка')}</span>
                   <span>${views}</span>
-                  <span class="${statusClass}">${escapeHtml(status)}</span>
+                  <span class="${statusClass}">${escapeHtml(item.reason || status)}</span>
                 </div>
                 <div class="queue-message">${escapeHtml(item.donation?.username || 'Зритель')}: ${escapeHtml(item.url || '')}</div>
                 <div class="button-row">

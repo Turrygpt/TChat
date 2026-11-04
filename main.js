@@ -11,7 +11,8 @@ const { Server } = require('socket.io');
 const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut } = require('electron');
 const { LiveChat } = require('youtube-chat');
 const { tmi, singleFlight, watchTwitchConnection, retireTwitchClient } = require('./src/net/chatKeepAlive');
-const { EdgeTTS } = require('node-edge-tts');
+const { createDonationTtsHandler } = require('./src/server/donationTts');
+const { extractMusicLinks } = require('./src/musicLinks');
 const announce = require('./src/announce');
 const restream = require('./src/restream');
 const profiles = require('./src/profiles');
@@ -99,7 +100,7 @@ const DONATION_ALERTS_SCOPE = 'oauth-donation-index';
 // Здесь пользователь регистрирует своё приложение и получает Client ID/secret.
 const DONATION_ALERTS_APPS_URL = 'https://www.donationalerts.com/application/clients';
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-const EDGE_TTS_DEFAULT_VOICE = 'ru-RU-SvetlanaNeural';
+const MAX_MUSIC_DURATION_SECONDS = 6 * 60;
 const FIRST_MESSAGE_BELL_IMAGE =
   'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22%3E%3Crect width=%22128%22 height=%22128%22 rx=%2228%22 fill=%22%2313191f%22/%3E%3Cpath d=%22M64 112a14 14 0 0 0 13.6-10.7H50.4A14 14 0 0 0 64 112Z%22 fill=%22%23ffd166%22/%3E%3Cpath d=%22M104 91H24c7.5-7.2 11.3-17.2 11.3-30V51c0-17.2 10.7-31.8 25.8-36.1V9h5.8v5.9C82 19.2 92.7 33.8 92.7 51v10c0 12.8 3.8 22.8 11.3 30Z%22 fill=%22%23ffd166%22/%3E%3Cpath d=%22M91.2 24.8 99.8 16l6.2 6.1-8.6 8.8-6.2-6.1ZM22 22.1l6.2-6.1 8.6 8.8-6.2 6.1L22 22.1Z%22 fill=%22%23f77f00%22/%3E%3C/svg%3E';
 
@@ -1596,11 +1597,11 @@ function getStreamWidgetsPayload() {
   };
 }
 
-function broadcastStreamWidgets() {
+function broadcastStreamWidgets(donationEffect) {
   const payload = getStreamWidgetsPayload();
   mainWindow?.webContents.send('widgets:state', payload);
   chatWindow?.webContents.send('widgets:state', payload);
-  socketServer?.emit('widgets:state', payload);
+  socketServer?.emit('widgets:state', payload, donationEffect);
 }
 
 function createStreamWidget(payload = {}) {
@@ -2951,70 +2952,6 @@ function normalizeMessageParts(text = '', parts = []) {
   return [{ type: 'text', text: String(text) }];
 }
 
-function normalizeTtsText(value = '') {
-  return String(value)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 700);
-}
-
-function getEdgeTtsCachePath(text, options = {}) {
-  const cacheDir = path.join(getUserAssetsDir(), 'tts');
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const hash = crypto
-    .createHash('sha1')
-    .update(JSON.stringify({ text, ...options }))
-    .digest('hex');
-
-  return path.join(cacheDir, `${hash}.mp3`);
-}
-
-async function getEdgeTtsAudioPath(text, options = {}) {
-  const normalizedText = normalizeTtsText(text);
-  if (!normalizedText) {
-    throw new Error('text is required');
-  }
-
-  const ttsOptions = {
-    voice: options.voice || EDGE_TTS_DEFAULT_VOICE,
-    lang: options.lang || 'ru-RU',
-    outputFormat: options.outputFormat || 'audio-24khz-48kbitrate-mono-mp3',
-    rate: options.rate || '+0%',
-    volume: options.volume || '+0%',
-    pitch: options.pitch || '+0Hz',
-    timeout: 20000,
-  };
-  const filePath = getEdgeTtsCachePath(normalizedText, ttsOptions);
-
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1024) {
-    return filePath;
-  }
-
-  // node-edge-tts сам экранирует XML. Повторное экранирование ломало фразы с
-  // &, < и >. Пишем сначала во временный файл: оборванный запрос больше не
-  // оставляет «валидный» кэш, который браузер затем не может проиграть.
-  let lastError = null;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-    try {
-      fs.rmSync(temporaryPath, { force: true });
-      const edgeTts = new EdgeTTS(ttsOptions);
-      await edgeTts.ttsPromise(normalizedText, temporaryPath);
-      if (!fs.existsSync(temporaryPath) || fs.statSync(temporaryPath).size <= 1024) {
-        throw new Error('EdgeTTS вернул пустой аудиофайл');
-      }
-      fs.renameSync(temporaryPath, filePath);
-      return filePath;
-    } catch (error) {
-      lastError = error;
-      fs.rmSync(temporaryPath, { force: true });
-      fs.rmSync(filePath, { force: true });
-    }
-  }
-
-  throw lastError || new Error('EdgeTTS не создал аудиофайл');
-}
-
 function createLocalServer() {
   const expressApp = express();
   const widgetsPath = path.join(__dirname, 'widgets');
@@ -3060,22 +2997,7 @@ function createLocalServer() {
     response.redirect('/widgets/remote.html');
   });
 
-  expressApp.get('/tts/edge', async (request, response) => {
-    try {
-      const filePath = await getEdgeTtsAudioPath(request.query?.text || '', {
-        voice: request.query?.voice,
-        rate: request.query?.rate,
-        volume: request.query?.volume,
-        pitch: request.query?.pitch,
-      });
-
-      response.setHeader('Cache-Control', 'no-store');
-      response.type('audio/mpeg').sendFile(filePath);
-    } catch (error) {
-      console.error(`Edge TTS error: ${error.message}`);
-      response.status(500).json({ ok: false, error: error.message });
-    }
-  });
+  expressApp.get('/tts/edge', createDonationTtsHandler(path.join(getUserAssetsDir(), 'tts')));
 
   expressApp.get('/health', (_request, response) => {
     response.json({
@@ -3829,6 +3751,7 @@ function getMusicQueuePayload() {
       .filter((item) => item.status !== 'played' && !item.played)
       .slice(0, 50),
     minViews: 5000,
+    maxDurationSeconds: MAX_MUSIC_DURATION_SECONDS,
     settings: musicSettings,
   };
 }
@@ -3856,18 +3779,18 @@ function broadcastMusicChatRequest(item) {
   socketServer?.emit('chat:music-request', item);
 }
 
-function broadcastGoalState() {
+function broadcastGoalState(donationEffect) {
   mainWindow?.webContents.send('goal:state', goalState);
   chatWindow?.webContents.send('goal:state', goalState);
-  socketServer?.emit('goal:update', goalState);
+  socketServer?.emit('goal:update', goalState, donationEffect);
 }
 
-function updateGoalState(payload = {}) {
+function updateGoalState(payload = {}, donationEffect) {
   goalState = saveGoalState({
     ...goalState,
     ...payload,
   });
-  broadcastGoalState();
+  broadcastGoalState(donationEffect);
   return goalState;
 }
 
@@ -3876,12 +3799,13 @@ function updateGoalState(payload = {}) {
 // копятся втихую, чтобы выскочить цифрой при включении.
 function addDonationToGoal(amount) {
   const value = Math.max(Number(amount || 0), 0);
-  if (!value) {
+  if (!Number.isFinite(value) || !value) {
     return goalState;
   }
 
   const goalWidgets = streamWidgets.filter((widget) => widget.type === 'goal');
   const activeGoalWidgets = goalWidgets.filter((widget) => widget.enabled !== false);
+  const donationEffect = { amount: value };
 
   // Отдельный виджет сбора (/widgets/goal.html) живёт своим состоянием: если на
   // рабочей области нет ни одного сбора, он и есть тот самый сбор — считаем.
@@ -3889,7 +3813,7 @@ function addDonationToGoal(amount) {
   if (!goalWidgets.length || activeGoalWidgets.length) {
     updateGoalState({
       current: Number(goalState.current || 0) + value,
-    });
+    }, donationEffect);
   }
 
   let hasGoalWidgets = false;
@@ -3907,7 +3831,7 @@ function addDonationToGoal(amount) {
 
   if (hasGoalWidgets) {
     saveStreamWidgets(streamWidgets);
-    broadcastStreamWidgets();
+    broadcastStreamWidgets(donationEffect);
   }
 
   return goalState;
@@ -4164,12 +4088,15 @@ function enqueueDonationAlert(donation) {
     registerDonationGiveawayDonor({ ...normalizedDonation, username: donation.username });
   }
   const musicLinks = extractMusicLinks(normalizedDonation.message || '');
+  normalizedDonation.isMusic = musicLinks.length > 0;
 
   if (musicLinks.length) {
-    enqueueMusicDonation(normalizedDonation, musicLinks[0]).catch((error) => {
+    enqueueMusicDonation({ ...normalizedDonation }, musicLinks[0]).catch((error) => {
       console.error(`Не удалось обработать музыкальный донат: ${error.message}`);
     });
-    return null;
+    const comment = musicLinks.reduce((message, url) => message.replaceAll(url, ' '), String(normalizedDonation.message)).trim();
+    if (!comment) return null;
+    normalizedDonation.message = comment;
   }
 
   const classification = classifyDonationAlert(normalizedDonation);
@@ -4179,8 +4106,8 @@ function enqueueDonationAlert(donation) {
     donation: normalizedDonation,
     rule: classification.rule,
     reason: classification.reason,
-    isMusic: classification.isMusic,
-    musicLinks: classification.musicLinks,
+    isMusic: normalizedDonation.isMusic,
+    musicLinks,
     played: false,
     queuedAt: new Date().toISOString(),
   };
@@ -4247,12 +4174,15 @@ async function enqueueMusicDonation(donation, url, options = {}) {
 
     const hasVerifiedViews = metadata.views !== null && metadata.views !== undefined && Number.isFinite(Number(metadata.views));
     const isAllowed = skipViewsCheck || !hasVerifiedViews || Number(metadata.views) >= musicItem.minViews;
+    const reason = metadata.duration > MAX_MUSIC_DURATION_SECONDS
+      ? 'Трек длиннее 6 минут'
+      : isAllowed ? '' : 'Недостаточно просмотров';
     return {
       ...item,
       ...metadata,
       viewsVerified: skipViewsCheck ? false : hasVerifiedViews,
-      status: isAllowed ? 'ready' : 'rejected',
-      reason: isAllowed ? '' : 'Недостаточно просмотров',
+      status: reason ? 'rejected' : 'ready',
+      reason,
     };
   });
 
@@ -4430,19 +4360,11 @@ function classifyDonationAlert(donation) {
   return {
     rule: selectedRule,
     reason: exactAmountRule ? 'amount' : nicknameRule ? 'nickname' : intervalRule ? 'interval' : 'fallback',
-    isMusic: false,
-    musicLinks: [],
   };
 }
 
 function sameText(left, right) {
   return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
-}
-
-function extractMusicLinks(text = '') {
-  const urlMatches = String(text).match(/https?:\/\/[^\s<>"']+/gi) || [];
-  const musicDomains = /(youtube\.com|youtu\.be|rutube\.ru|vk\.com\/video|vkvideo\.ru\/video|vk\.com\/clip|vkvideo\.ru\/clip)/i;
-  return urlMatches.filter((url) => musicDomains.test(url));
 }
 
 function detectMusicPlatform(url = '') {
@@ -4489,7 +4411,7 @@ function normalizeMusicMetadata(fallback, metadata = {}) {
     ...metadata,
     title,
     views,
-    duration: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : null,
+    duration: Number.isFinite(duration) && duration > 0 ? duration : null,
     viewsVerified: views !== null && views !== undefined && Number.isFinite(Number(views)),
     embedUrl: metadata.embedUrl || fallback.embedUrl,
   };
@@ -4502,7 +4424,7 @@ function extractYouTubeDuration(html = '') {
   }
 
   const milliseconds = String(html).match(/"approxDurationMs":"(\d+)"/)?.[1];
-  return milliseconds ? Math.round(Number(milliseconds) / 1000) : null;
+  return milliseconds ? Number(milliseconds) / 1000 : null;
 }
 
 function extractVkDuration(html = '') {
@@ -4863,6 +4785,7 @@ async function fetchRutubeMusicMetadata(url) {
     platform: 'rutube',
     title: extractTitleFromHtml(html, 'Rutube'),
     views,
+    duration: extractFirstNumber(html, [/<meta\s+property="og:video:duration"\s+content="(\d+)"/i]),
     embedUrl: buildMusicEmbedUrl(url, 'rutube'),
   };
 }
@@ -6281,7 +6204,7 @@ function normalizeDonation(payload = {}) {
     username: payload.username || 'Зритель',
     amount: Number(payload.amount || 0),
     currency: payload.currency || 'RUB',
-    message: payload.message || 'Без сообщения',
+    message: payload.message || '',
     createdAt: payload.createdAt || new Date().toISOString(),
     isTest: Boolean(payload.isTest),
     showInChat: Boolean(payload.showInChat),
