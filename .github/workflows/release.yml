@@ -6,6 +6,7 @@ on:
     paths:
       - package.json
       - .github/workflows/release.yml
+      - deploy/publish-github-release.js
   workflow_dispatch:
 
 permissions:
@@ -28,6 +29,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Verify release publication
+        run: node --test deploy/publish-github-release.test.js
       - name: Install dependencies
         run: npm ci
       - name: Verify subscriptions and server
@@ -50,10 +53,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path dist/latest.yml)) { throw 'Missing update manifest' }
       - name: Publish installer and update manifest
-        run: |
-          $version = node -p "require('./package.json').version"
-          $installer = "dist/TChat-Setup-$version.exe"
-          if (!(Test-Path $installer)) { throw 'Missing installer' }
-          $assets = @($installer, "${installer}.blockmap", 'dist/latest.yml')
-          gh release create "v$version" @assets --target $env:GITHUB_SHA --title "TChat $version" --notes-file dist/release-notes.md --latest
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: node deploy/publish-github-release.js
