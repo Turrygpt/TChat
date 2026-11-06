@@ -35,6 +35,12 @@ Keep context small. Read this file first, then open only the files needed for th
 - After chat, widget, server or integration changes, run at least `npm.cmd run server:check`.
 - Run `npm.cmd run smoke:test` when behavior touches browser-visible widgets or socket events.
 
+## OBS Widget Transparency
+
+- Always keep the OBS widget canvas transparent. Make the root and body transparent from the first paint, including the empty and loading states.
+- For embedded widgets, make the iframe transparent and match its color scheme to the embedded document. Preserve intentional backgrounds inside the widget, such as cards and badges.
+- Check transparency around the widget in the combined OBS overlay and the backoffice preview. Verify it against a non-white background.
+
 ## Web / Build / Deploy (v1.0.0)
 
 - Headless web server: `src/server/widgetServer.js` + `scripts/serve.js` (`npm run serve`).
