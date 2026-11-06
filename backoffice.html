@@ -10,7 +10,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./widgets/widget.css" />
     <link rel="stylesheet" href="./widgets/subscriber-goal.css" />
-    <link rel="stylesheet" href="./widgets/donation-giveaway.css?v=1" />
     <style>
       :root {
         color-scheme: dark;
@@ -2931,8 +2930,8 @@
                     <span>Ключевое слово, участники и выбор победителей.</span>
                   </button>
                   <button class="widget-type-card" type="button" data-widget-type="donation-giveaway">
-                    <strong>Все донаты участвуют</strong>
-                    <span>Список донатеров с момента старта и ручное добавление ников.</span>
+                    <strong>Розыгрыш по донатам</strong>
+                    <span>Сбор участников по донатам и выбор одного победителя.</span>
                   </button>
                   <button class="widget-type-card" type="button" data-widget-type="music">
                     <strong>Музыка</strong>
@@ -2996,7 +2995,7 @@
                   <button id="createGiveawayWidgetButton" class="button" type="button">Добавить розыгрыш</button>
                 </div>
                 <div id="donationGiveawayWidgetHint" hidden>
-                  <p class="muted">Виджет появится прямо в общем overlay. Новые донаты начнут добавлять уникальные ники после старта, ники также можно добавить вручную.</p>
+                  <p class="muted">В общем оверлее. Каждый ник участвует один раз. Победителя выбирает кнопка «Выбрать победителя».</p>
                   <button id="createDonationGiveawayWidgetButton" class="button" type="button">Добавить виджет донатов</button>
                 </div>
                 <div id="musicWidgetHint" hidden>
@@ -5032,6 +5031,7 @@
           const count = Array.isArray(widget.participants) ? widget.participants.length : 0;
           if (widget.status === 'running') return `Сбор идёт · ${count} участников`;
           if (widget.status === 'paused') return `Пауза · ${count} участников`;
+          if (widget.status === 'finished') return `Завершён · ${count} участников`;
           return `Готов к запуску · ${count} участников`;
         }
         if (widget.type === 'countdown') {
@@ -5217,7 +5217,6 @@
         const wrapper = frame.closest('[data-preview-widget]');
         if (wrapper?.classList.contains('has-explicit-height')) return;
         const height = Math.max(Number(event.data.height) || 0, 0);
-        frame.hidden = height === 0;
         frame.style.height = height ? `${height}px` : '0px';
       });
 
@@ -5309,8 +5308,9 @@
           return renderPreviewPollHtml(widgetsState.poll);
         }
 
-        if (widget.type === 'giveaway') {
-          const source = `${widgetsState.urls?.giveaway || 'http://localhost:3000/widgets/giveaway.html'}?preview=1&id=${encodeURIComponent(widget.id)}`;
+        if (['giveaway', 'donation-giveaway'].includes(widget.type)) {
+          const mode = widget.type === 'donation-giveaway' ? '&type=donation' : '';
+          const source = `${widgetsState.urls?.giveaway || 'http://localhost:3000/widgets/giveaway.html'}?preview=1&id=${encodeURIComponent(widget.id)}${mode}`;
           return `
             <iframe
               class="preview-giveaway-frame"
@@ -5319,17 +5319,6 @@
               title="${escapeHtml(widget.title || 'Розыгрыш')}"
               allowtransparency="true"></iframe>
           `;
-        }
-
-        if (widget.type === 'donation-giveaway') {
-          const participants = Array.isArray(widget.participants) ? widget.participants : [];
-          const roster = participants
-            .map((participant) => `<span class="donation-giveaway__participant">${escapeHtml(participant.user || 'Зритель')}</span>`)
-            .join('');
-          return `<article class="donation-giveaway">
-            <header class="donation-giveaway__header"><span class="donation-giveaway__eyebrow">Все донаты участвуют</span><h1>${escapeHtml(widget.title || 'Розыгрыш')}</h1></header>
-            <section class="donation-giveaway__list" aria-label="Участники розыгрыша"${participants.length ? '' : ' hidden'}>${roster}</section>
-          </article>`;
         }
 
         if (widget.type === 'countdown') {
@@ -5558,31 +5547,50 @@
 
         if (widget.type === 'donation-giveaway') {
           const participants = Array.isArray(widget.participants) ? widget.participants : [];
-          const visibleParticipants = participants.slice(-50);
+          const finished = widget.status === 'finished';
+          const collecting = widget.status === 'running';
+          const previousInput = workspaceConfigurator.querySelector('[data-donation-giveaway-nickname]');
+          const preserveDraft = previousInput?.dataset.widgetId === widget.id && !finished;
+          const draft = preserveDraft ? previousInput.value : '';
+          const restoreFocus = preserveDraft && document.activeElement === previousInput;
+          const selection = restoreFocus ? [previousInput.selectionStart, previousInput.selectionEnd] : [];
+          const previousList = workspaceConfigurator.querySelector('[data-donation-giveaway-list]');
+          const listOpen = previousList?.dataset.widgetId === widget.id && previousList.open;
           workspaceConfigurator.innerHTML = `
             <div class="workspace-poll-status">${escapeHtml(widgetStatusText(widget))}</div>
             <label class="field">Название розыгрыша
-              <input data-donation-giveaway-field="title" type="text" maxlength="120" value="${escapeHtml(widget.title || 'Все донаты участвуют в розыгрыше')}" />
+              <input data-donation-giveaway-field="title" type="text" maxlength="120" value="${escapeHtml(widget.title || 'Розыгрыш по донатам')}" />
             </label>
-            <p class="muted">После старта каждый новый донат добавляет ник. Повторные донаты того же участника не создают дубликаты.</p>
-            <form class="compact-grid" data-donation-giveaway-form>
+            ${finished && widget.winner ? `<p><strong>Победитель — ${escapeHtml(widget.winner.user)}</strong></p>` : ''}
+            ${!finished ? `<form class="compact-grid" data-donation-giveaway-form>
               <label class="field">Добавить участника вручную
-                <input data-donation-giveaway-nickname type="text" maxlength="120" placeholder="Ник зрителя" autocomplete="off" />
+                <input data-donation-giveaway-nickname data-widget-id="${escapeHtml(widget.id)}" type="text" maxlength="120" placeholder="Ник зрителя" autocomplete="off" value="${escapeHtml(draft)}" />
               </label>
               <button class="button" type="submit" data-donation-giveaway-add>Добавить ник</button>
-            </form>
+            </form>` : ''}
             <div class="button-row">
-              <button class="button" type="button" data-donation-giveaway-start>${widget.status === 'running' ? 'Перезапустить сбор' : widget.status === 'paused' ? 'Продолжить сбор' : 'Старт сбора'}</button>
-              <button class="button button--ghost" type="button" data-donation-giveaway-pause ${widget.status !== 'running' ? 'disabled' : ''}>Пауза</button>
-              <button class="button button--danger" type="button" data-donation-giveaway-reset>Сбросить список</button>
+              ${!finished ? `
+                <button class="button" type="button" data-donation-giveaway-start ${collecting ? 'disabled' : ''}>${widget.status === 'paused' ? 'Продолжить сбор' : 'Старт сбора'}</button>
+                <button class="button button--ghost" type="button" data-donation-giveaway-pause ${collecting ? '' : 'disabled'}>Пауза</button>
+                <button class="button" type="button" data-donation-giveaway-finish ${participants.length ? '' : 'disabled'}>Выбрать победителя</button>
+              ` : ''}
+              <button class="button button--danger" type="button" data-donation-giveaway-reset>${finished ? 'Новый розыгрыш' : 'Сбросить список'}</button>
             </div>
-            <p class="muted"><strong>Участники (${participants.length}):</strong> ${visibleParticipants.length
-              ? visibleParticipants.map((item) => escapeHtml(item.user)).join(', ')
-              : 'пока нет'}${participants.length > visibleParticipants.length ? ` … и ещё ${participants.length - visibleParticipants.length}` : ''}</p>
+            <details data-donation-giveaway-list data-widget-id="${escapeHtml(widget.id)}" ${listOpen ? 'open' : ''}>
+              <summary>Участники (${participants.length})</summary>
+              <p class="muted" style="max-height: 160px; overflow: auto; overflow-wrap: anywhere;">${participants.length
+                ? participants.map((item) => escapeHtml(item.user)).join(', ')
+                : 'Пока нет участников'}</p>
+            </details>
             <div class="button-row">
               <button class="button button--ghost" type="button" data-toggle-selected>${widget.enabled === false ? 'Показать виджет' : 'Скрыть виджет'}</button>
             </div>
           `;
+          if (restoreFocus) {
+            const input = workspaceConfigurator.querySelector('[data-donation-giveaway-nickname]');
+            input.focus({ preventScroll: true });
+            input.setSelectionRange(...selection);
+          }
           return;
         }
 
@@ -6296,7 +6304,7 @@
 
         const payload = await window.tchat.createWidget({
           type: 'donation-giveaway',
-          title: 'Все донаты участвуют в розыгрыше',
+          title: 'Розыгрыш по донатам',
           status: 'idle',
           participants: [],
           enabled: true,
@@ -6704,7 +6712,7 @@
       async function saveDonationGiveawayTitle(widgetId) {
         try {
           const title = workspaceConfigurator?.querySelector('[data-donation-giveaway-field="title"]')?.value.trim()
-            || 'Все донаты участвуют в розыгрыше';
+            || 'Розыгрыш по донатам';
           const payload = await window.tchat.updateWidget({ id: widgetId, title });
           renderWidgetsState(payload);
         } catch (error) {
@@ -6715,20 +6723,16 @@
       async function startDonationGiveawayFromWorkspace(widgetId) {
         try {
           const title = workspaceConfigurator?.querySelector('[data-donation-giveaway-field="title"]')?.value.trim()
-            || 'Все донаты участвуют в розыгрыше';
+            || 'Розыгрыш по донатам';
           const current = widgetsState.items.find((item) => item.id === widgetId);
-          const restarting = current?.status === 'running';
-          const update = {
+          if (!current || ['running', 'finished'].includes(current.status)) return;
+          const payload = await window.tchat.updateWidget({
             id: widgetId,
             title,
             status: 'running',
-            startedAt: restarting || !current?.startedAt ? new Date().toISOString() : current.startedAt,
-          };
-          if (restarting) update.participants = [];
-          const payload = await window.tchat.updateWidget(update);
-          widgetsStudioState.textContent = restarting
-            ? 'Сбор запущен заново. Старый список очищен.'
-            : 'Сбор запущен. Теперь новые донаты добавляют участников.';
+            startedAt: new Date().toISOString(),
+          });
+          widgetsStudioState.textContent = 'Сбор открыт.';
           renderWidgetsState(payload);
         } catch (error) {
           widgetsStudioState.textContent = error.message || 'Не удалось запустить сбор.';
@@ -6741,7 +6745,19 @@
         renderWidgetsState(payload);
       }
 
+      async function finishDonationGiveawayFromWorkspace(widgetId) {
+        try {
+          const payload = await window.tchat.finishDonationGiveaway({ id: widgetId });
+          widgetsStudioState.textContent = 'Победитель выбран.';
+          renderWidgetsState(payload);
+        } catch (error) {
+          widgetsStudioState.textContent = error.message || 'Не удалось выбрать победителя.';
+        }
+      }
+
       async function resetDonationGiveawayFromWorkspace(widgetId) {
+        const current = widgetsState.items.find((item) => item.id === widgetId);
+        if (current?.participants?.length && !window.confirm('Очистить список участников розыгрыша?')) return;
         const payload = await window.tchat.updateWidget({ id: widgetId, status: 'idle', startedAt: '', participants: [] });
         widgetsStudioState.textContent = 'Список очищен. Нажмите «Старт сбора», чтобы начать заново.';
         renderWidgetsState(payload);
@@ -6757,6 +6773,10 @@
 
         try {
           const payload = await window.tchat.addDonationGiveawayParticipant({ id: widgetId, nickname });
+          const currentInput = workspaceConfigurator?.querySelector('[data-donation-giveaway-nickname]');
+          if (payload.participantAdded && currentInput?.dataset.widgetId === widgetId && currentInput.value.trim() === nickname) {
+            currentInput.value = '';
+          }
           widgetsStudioState.textContent = payload.participantAdded
             ? `Участник «${nickname}» добавлен.`
             : `Ник «${nickname}» уже есть в списке.`;
@@ -6883,6 +6903,7 @@
         const giveawayResetAllButton = event.target.closest('[data-giveaway-reset-all]');
         const donationGiveawayStartButton = event.target.closest('[data-donation-giveaway-start]');
         const donationGiveawayPauseButton = event.target.closest('[data-donation-giveaway-pause]');
+        const donationGiveawayFinishButton = event.target.closest('[data-donation-giveaway-finish]');
         const donationGiveawayResetButton = event.target.closest('[data-donation-giveaway-reset]');
         const countdownSetButton = event.target.closest('[data-countdown-set]');
         const countdownStartButton = event.target.closest('[data-countdown-start]');
@@ -6928,6 +6949,11 @@
 
         if (donationGiveawayPauseButton && selectedWorkspaceWidgetId) {
           void pauseDonationGiveawayFromWorkspace(selectedWorkspaceWidgetId);
+          return;
+        }
+
+        if (donationGiveawayFinishButton && selectedWorkspaceWidgetId) {
+          void finishDonationGiveawayFromWorkspace(selectedWorkspaceWidgetId);
           return;
         }
 

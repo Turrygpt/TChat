@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('tchat', {
   finishGiveaway: (payload) => ipcRenderer.invoke('giveaway:finish', payload),
   resetGiveaway: (payload) => ipcRenderer.invoke('giveaway:reset', payload),
   resetAllGiveaways: () => ipcRenderer.invoke('giveaway:reset-all'),
+  finishDonationGiveaway: (payload) => ipcRenderer.invoke('donation-giveaway:finish', payload),
   addDonationGiveawayParticipant: (payload) => ipcRenderer.invoke('donation-giveaway:add-participant', payload),
   adjustCountdown: (payload) => ipcRenderer.invoke('countdown:adjust', payload),
   setCountdown: (payload) => ipcRenderer.invoke('countdown:set', payload),

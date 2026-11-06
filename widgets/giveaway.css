@@ -206,3 +206,38 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; }
 }
+
+.giveaway--donation {
+  zoom: 1;
+  overflow-wrap: anywhere;
+}
+
+.giveaway--donation .giveaway__header {
+  padding: 12px 16px 10px;
+}
+
+.giveaway--donation h1 {
+  font-size: clamp(19px, 5vw, 27px);
+  line-height: 1.15;
+}
+
+.giveaway--donation .giveaway__participants,
+.giveaway--donation .giveaway__winners {
+  margin: 0 16px 12px;
+}
+
+.giveaway--donation .giveaway__person {
+  max-width: 100%;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.giveaway--donation .giveaway__winner {
+  display: block;
+  font-size: clamp(21px, 5vw, 32px);
+}
+
+.giveaway--donation .giveaway__footer {
+  padding: 8px 16px 10px;
+}

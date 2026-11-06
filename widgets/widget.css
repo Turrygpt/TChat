@@ -439,6 +439,11 @@ body {
   color-scheme: normal;
 }
 
+.stream-embedded-widget--donation-giveaway {
+  min-width: 0;
+  aspect-ratio: auto;
+}
+
 .stream-embedded-widget--video-overlay {
   min-width: 0;
   min-height: 0;

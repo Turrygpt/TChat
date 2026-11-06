@@ -6,7 +6,6 @@ const streamCountdowns = document.querySelector('#streamCountdowns');
 const streamTexts = document.querySelector('#streamTexts');
 const streamStickerWidgets = document.querySelector('#streamStickerWidgets');
 const streamTasks = document.querySelector('#streamTasks');
-const streamDonationGiveaways = document.querySelector('#streamDonationGiveaways');
 const streamEmbeddedWidgets = document.querySelector('#streamEmbeddedWidgets');
 const streamPoll = document.querySelector('#streamPoll');
 const streamChat = document.querySelector('#streamChat');
@@ -30,7 +29,6 @@ let displaySeconds = 8;
 let latestState = { items: [], poll: null };
 let pollTickTimer = null;
 let countdownRenderTimer = null;
-window.setInterval(sparkleDonationGiveaways, 5 * 60 * 1000);
 
 function normalizedWidgetScale(widget = {}) {
   return Math.min(Math.max(Number(widget.scale) || 1, 0.25), 3);
@@ -101,16 +99,16 @@ window.addEventListener('message', (event) => {
   if (event.data?.type !== 'tchat:giveaway-size') return;
   const id = String(event.data.id || '');
   const frame = streamEmbeddedWidgets?.querySelector(
-    `.stream-embedded-widget--giveaway[data-embedded-widget-id="${CSS.escape(id)}"]`,
+    `[data-embedded-widget-id="${CSS.escape(id)}"]`,
   );
-  if (!frame) return;
+  if (!frame || frame.contentWindow !== event.source) return;
 
   const widget = latestState.items.find((item) => item.id === id);
   const hasExplicitHeight = Number.isFinite(Number(widget?.height)) && Number(widget.height) > 0;
+  const height = Math.max(Number(event.data.height) || 0, 0);
+  frame.dataset.contentHeight = String(height);
   if (hasExplicitHeight) return;
 
-  const height = Math.max(Number(event.data.height) || 0, 0);
-  frame.hidden = height === 0;
   frame.style.height = height ? `${height}px` : '0px';
   frame.style.aspectRatio = 'auto';
 });
@@ -185,7 +183,6 @@ function applyWidgetsState(state = {}, donationEffect) {
   renderTexts(latestState.items);
   renderStickerWidgets(latestState.items);
   renderTasks(latestState.items);
-  renderDonationGiveaways(latestState.items);
   renderEmbeddedWidgets(latestState.items);
   renderPoll(latestState.poll);
   applyChatWidgetLayout(latestState.items);
@@ -739,63 +736,6 @@ function renderTasks(items) {
   });
 }
 
-function renderDonationGiveawayHtml(widget = {}) {
-  const participants = Array.isArray(widget.participants) ? widget.participants : [];
-  const participantsHtml = participants
-    .map((participant) => `<span class="donation-giveaway__participant">${escapeHtml(participant.user || 'Зритель')}</span>`)
-    .join('');
-
-  return `
-    <div class="donation-giveaway">
-      <header class="donation-giveaway__header">
-        <span class="donation-giveaway__eyebrow">Все донаты участвуют</span>
-        <h1>${escapeHtml(widget.title || 'Розыгрыш')}</h1>
-      </header>
-      <section class="donation-giveaway__list" aria-label="Участники розыгрыша"${participants.length ? '' : ' hidden'}>${participantsHtml}</section>
-    </div>
-  `;
-}
-
-function renderDonationGiveaways(items) {
-  if (!streamDonationGiveaways) return;
-
-  const widgets = items.filter((item) => item.type === 'donation-giveaway' && item.enabled !== false);
-  const activeIds = new Set(widgets.map((widget) => widget.id));
-  streamDonationGiveaways.querySelectorAll('[data-donation-giveaway-id]').forEach((node) => {
-    if (!activeIds.has(node.dataset.donationGiveawayId)) node.remove();
-  });
-
-  widgets.forEach((widget) => {
-    let node = streamDonationGiveaways.querySelector(`[data-donation-giveaway-id="${CSS.escape(widget.id)}"]`);
-    if (!node) {
-      node = document.createElement('article');
-      node.className = 'stream-donation-giveaway';
-      node.dataset.donationGiveawayId = widget.id;
-      streamDonationGiveaways.appendChild(node);
-    }
-
-    node.style.left = `${Number(widget.x ?? 24)}%`;
-    node.style.top = `${Number(widget.y ?? 18)}%`;
-    node.style.width = `${Number(widget.width ?? 52)}%`;
-    applyWidgetHeight(node, widget);
-    applyWidgetScale(node, widget);
-    const nextHtml = renderDonationGiveawayHtml(widget);
-    if (node.innerHTML !== nextHtml) node.innerHTML = nextHtml;
-  });
-}
-
-function sparkleDonationGiveaways() {
-  if (!streamDonationGiveaways) return;
-  streamDonationGiveaways.querySelectorAll('.stream-donation-giveaway:not([hidden])').forEach((node) => {
-    const card = node.querySelector('.donation-giveaway');
-    if (!card) return;
-    card.classList.remove('is-sparkling');
-    void card.offsetWidth;
-    card.classList.add('is-sparkling');
-    window.setTimeout(() => card.classList.remove('is-sparkling'), 1900);
-  });
-}
-
 // Виджеты, которые живут отдельной страницей со своим canvas и звуком, проще
 // вставить в overlay целиком (iframe), чем повторять их разметку здесь.
 function embeddedWidgetSrc(widget) {
@@ -807,13 +747,14 @@ function embeddedWidgetSrc(widget) {
     const duration = Math.min(Math.max(Number(widget.durationSeconds || 15), 1), 3600);
     return `/widgets/video-overlay.html?embedded=1&interval=${encodeURIComponent(interval)}&duration=${encodeURIComponent(duration)}`;
   }
-  return `/widgets/giveaway.html?embedded=1&id=${encodeURIComponent(widget.id)}`;
+  const mode = widget.type === 'donation-giveaway' ? '&type=donation' : '';
+  return `/widgets/giveaway.html?embedded=1&id=${encodeURIComponent(widget.id)}${mode}`;
 }
 
 function renderEmbeddedWidgets(items) {
   if (!streamEmbeddedWidgets) return;
 
-  const widgets = items.filter((item) => ['music', 'giveaway', 'video-overlay'].includes(item.type) && item.enabled !== false);
+  const widgets = items.filter((item) => ['music', 'giveaway', 'donation-giveaway', 'video-overlay'].includes(item.type) && item.enabled !== false);
   const activeIds = new Set(widgets.map((widget) => widget.id));
 
   streamEmbeddedWidgets.querySelectorAll('[data-embedded-widget-id]').forEach((node) => {
@@ -835,7 +776,12 @@ function renderEmbeddedWidgets(items) {
         node.setAttribute('src', src);
       }
       node.setAttribute('title', widget.title || 'Музыка');
-      node.setAttribute('style', style);
+      const hasExplicitHeight = Boolean(widgetHeightCss(widget));
+      const contentHeight = node.dataset.contentHeight;
+      const autoHeight = !hasExplicitHeight && contentHeight !== undefined
+        ? `height: ${contentHeight}px; aspect-ratio: auto;`
+        : '';
+      node.setAttribute('style', style + autoHeight);
       return;
     }
 
