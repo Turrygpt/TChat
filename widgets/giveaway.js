@@ -3,12 +3,17 @@ document.documentElement.style.setProperty('background', 'transparent', 'importa
 document.body.style.setProperty('background', 'transparent', 'important');
 const root = document.querySelector('#giveaway');
 const confetti = document.querySelector('#confetti');
-const requestedId = new URLSearchParams(window.location.search).get('id');
+const params = new URLSearchParams(window.location.search);
+const requestedId = params.get('id');
+const donationMode = params.get('type') === 'donation';
+const isPreview = params.has('preview');
 let latestWidget = null;
 let tickTimer = null;
 let renderedSignature = '';
 let timerKey = '';
 let autoHideTimer = null;
+let donationRosterTimer = null;
+const DONATION_NAMES_PER_PAGE = 10;
 
 fetch('/widgets/state')
   .then((response) => response.json())
@@ -19,13 +24,13 @@ socket.on('widgets:state', applyState);
 
 function applyState(state = {}) {
   const giveaways = (Array.isArray(state.items) ? state.items : []).filter(
-    (widget) => widget.type === 'giveaway' && widget.enabled !== false,
+    (widget) => widget.type === (donationMode ? 'donation-giveaway' : 'giveaway') && widget.enabled !== false,
   );
   const widget = requestedId ? giveaways.find((item) => item.id === requestedId) : giveaways[0];
   latestWidget = widget || null;
   clearTimeout(autoHideTimer);
   autoHideTimer = null;
-  if (widget?.status === 'finished' && widget.finishedAt) {
+  if (!donationMode && widget?.status === 'finished' && widget.finishedAt) {
     const hideDelay = new Date(widget.finishedAt).getTime() + 5 * 60 * 1000 - Date.now();
     if (hideDelay <= 0) {
       latestWidget = null;
@@ -49,7 +54,7 @@ function applyState(state = {}) {
     tickTimer = nextTimerKey ? setInterval(updateTimer, 1000) : null;
   }
 
-  if (widget?.status === 'finished' && widget.revealId && !isRevealCelebrated(widget)) {
+  if (!(donationMode && isPreview) && widget?.status === 'finished' && widget.revealId && !isRevealCelebrated(widget)) {
     markRevealCelebrated(widget);
     celebrate();
   }
@@ -83,6 +88,7 @@ function updateTimer() {
 }
 
 function render() {
+  clearInterval(donationRosterTimer);
   const widget = latestWidget;
   if (!widget) {
     root.hidden = true;
@@ -91,6 +97,11 @@ function render() {
   }
 
   root.hidden = false;
+  if (donationMode) {
+    renderDonationGiveaway(widget);
+    return;
+  }
+
   const participants = Array.isArray(widget.participants) ? widget.participants : [];
   const winners = Array.isArray(widget.winners) ? widget.winners : [];
   const pendingNicknames = winners.filter((winner) => !widget.winnerNicknames?.[winner.key]);
@@ -143,6 +154,49 @@ function render() {
     <footer class="giveaway__footer">${participants.length} ${plural(participants.length, 'участник', 'участника', 'участников')}</footer>
   `;
   reportHeight();
+}
+
+function renderDonationGiveaway(widget) {
+  const finished = widget.status === 'finished';
+  const participants = widget.participants || [];
+  const pageCount = Math.ceil(participants.length / DONATION_NAMES_PER_PAGE);
+  const status = { idle: 'Ожидание', running: 'Сбор открыт', paused: 'Пауза', finished: 'Победитель' }[widget.status];
+  root.className = `giveaway giveaway--donation${finished ? ' giveaway--finished' : ''}`;
+  root.innerHTML = `
+    <header class="giveaway__header">
+      <div>
+        <span class="giveaway__eyebrow">${escapeHtml(status)}</span>
+        <h1>${escapeHtml(widget.title || 'Розыгрыш по донатам')}</h1>
+      </div>
+    </header>
+    ${finished
+      ? `<section class="giveaway__winners"><div class="giveaway__winner">${escapeHtml(widget.winner?.user || '')}</div></section>`
+      : pageCount
+        ? '<section class="giveaway__participants" aria-label="Участники"></section>'
+        : ''}
+    <footer class="giveaway__footer">${participants.length} ${plural(participants.length, 'участник', 'участника', 'участников')}</footer>
+  `;
+  if (finished || !pageCount) {
+    reportHeight();
+    return;
+  }
+
+  const roster = root.querySelector('.giveaway__participants');
+  let page = pageCount - 1;
+  const renderPage = () => {
+    const start = page * DONATION_NAMES_PER_PAGE;
+    roster.innerHTML = participants.slice(start, start + DONATION_NAMES_PER_PAGE)
+      .map((participant) => `<span class="giveaway__person">${escapeHtml(participant.user)}</span>`)
+      .join('');
+    reportHeight();
+  };
+  renderPage();
+  if (pageCount > 1) {
+    donationRosterTimer = setInterval(() => {
+      page = (page + 1) % pageCount;
+      renderPage();
+    }, 8000);
+  }
 }
 
 function reportHeight() {

@@ -1020,18 +1020,25 @@ function normalizeDonationGiveawayParticipant(participant = {}) {
 }
 
 function normalizeDonationGiveawayWidget(widget = {}) {
+  const participantKeys = new Set();
   const participants = (Array.isArray(widget.participants) ? widget.participants : [])
     .map(normalizeDonationGiveawayParticipant)
-    .filter((participant) => participant.user && participant.key)
-    .filter((participant, index, items) => items.findIndex((item) => item.key === participant.key) === index)
+    .filter((participant) => {
+      if (!participant.key || participantKeys.has(participant.key)) return false;
+      participantKeys.add(participant.key);
+      return true;
+    })
     .slice(0, 10000);
+  const status = ['idle', 'running', 'paused', 'finished'].includes(widget.status) ? widget.status : 'idle';
 
   return {
     ...widget,
-    title: String(widget.title || 'Все донаты участвуют в розыгрыше').trim() || 'Все донаты участвуют в розыгрыше',
-    status: ['idle', 'running', 'paused'].includes(widget.status) ? widget.status : 'idle',
+    title: String(widget.title || 'Розыгрыш по донатам').trim() || 'Розыгрыш по донатам',
+    status,
     startedAt: String(widget.startedAt || ''),
     participants,
+    winner: status === 'finished' ? participants.find((participant) => participant.key === widget.winner?.key) || null : null,
+    revealId: status === 'finished' ? String(widget.revealId || '') : '',
   };
 }
 
@@ -1546,7 +1553,7 @@ function widgetTitleByType(type) {
     goal: 'Сбор',
     poll: 'Голосование',
     giveaway: 'Розыгрыш',
-    'donation-giveaway': 'Все донаты участвуют в розыгрыше',
+    'donation-giveaway': 'Розыгрыш по донатам',
     countdown: 'Обратный отсчёт',
     texts: 'Тексты',
     tasks: 'Задачи на стрим',
@@ -1635,10 +1642,28 @@ function updateStreamWidget(id, payload = {}) {
   return getStreamWidgetsPayload();
 }
 
+function getDonationGiveawayWidget(id) {
+  return streamWidgets.find((widget) => widget.id === String(id || '') && widget.type === 'donation-giveaway');
+}
+
+function finishDonationGiveaway(id) {
+  const widget = getDonationGiveawayWidget(id);
+  if (!widget) throw new Error('Розыгрыш по донатам не найден.');
+  if (widget.status === 'finished') return getStreamWidgetsPayload();
+  if (!widget.participants.length) throw new Error('Добавьте хотя бы одного участника.');
+
+  const [winner] = chooseGiveawayWinners(widget.participants, 1);
+  return updateStreamWidget(widget.id, {
+    status: 'finished',
+    winner,
+    revealId: crypto.randomUUID(),
+  });
+}
+
 function appendDonationGiveawayParticipant(widgetId, nickname, source = 'manual') {
-  const widget = streamWidgets.find((item) => item.id === String(widgetId || '') && item.type === 'donation-giveaway');
+  const widget = getDonationGiveawayWidget(widgetId);
   const user = String(nickname || '').trim().slice(0, 120);
-  if (!widget || !user) return false;
+  if (!widget || !user || widget.status === 'finished') return false;
 
   const key = user.toLowerCase();
   if (widget.participants.length >= 10000 || widget.participants.some((participant) => participant.key === key)) return false;
@@ -4081,10 +4106,10 @@ function normalizeRaid(payload = {}) {
   };
 }
 
-function enqueueDonationAlert(donation) {
+function enqueueDonationAlert(donation, { registerDonor = true } = {}) {
   const normalizedDonation = normalizeDonation(donation);
   addDonationToGoal(normalizedDonation.amount);
-  if (String(donation?.username || '').trim()) {
+  if (registerDonor && String(donation?.username || '').trim()) {
     registerDonationGiveawayDonor({ ...normalizedDonation, username: donation.username });
   }
   const musicLinks = extractMusicLinks(normalizedDonation.message || '');
@@ -5118,7 +5143,7 @@ async function syncDonationAlerts() {
     donationAlertsBootstrapped = true;
 
     for (const donation of newDonations) {
-      enqueueDonationAlert(donation);
+      enqueueDonationAlert(donation, { registerDonor: false });
     }
 
     broadcastDonationAlertsState();
@@ -7297,9 +7322,12 @@ ipcMain.handle('giveaway:reset', (_event, payload) => resetGiveaway(payload?.id)
 
 ipcMain.handle('giveaway:reset-all', () => resetAllGiveaways());
 
+ipcMain.handle('donation-giveaway:finish', (_event, payload) => finishDonationGiveaway(payload?.id));
+
 ipcMain.handle('donation-giveaway:add-participant', (_event, payload) => {
-  const widget = streamWidgets.find((item) => item.id === String(payload?.id || '') && item.type === 'donation-giveaway');
-  if (!widget) throw new Error('Виджет донатов в розыгрыше не найден.');
+  const widget = getDonationGiveawayWidget(payload?.id);
+  if (!widget) throw new Error('Розыгрыш по донатам не найден.');
+  if (widget.status === 'finished') throw new Error('Розыгрыш завершён. Сбросьте список для нового розыгрыша.');
   const nickname = String(payload?.nickname || '').trim();
   if (!nickname) throw new Error('Введите ник участника.');
 

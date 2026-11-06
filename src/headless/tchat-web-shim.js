@@ -235,6 +235,9 @@
     },
 
     // donation giveaway
+    finishDonationGiveaway: function (p) {
+      return invoke('donation-giveaway:finish', p);
+    },
     addDonationGiveawayParticipant: function (p) {
       return invoke('donation-giveaway:add-participant', p);
     },

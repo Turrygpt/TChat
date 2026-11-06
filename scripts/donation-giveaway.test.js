@@ -7,21 +7,26 @@ const source = fs.readFileSync(process.env.TCHAT_TEST_MAIN || path.join(__dirnam
 
 function harness() {
   const state = vm.createContext({
+    crypto: require('node:crypto'),
     streamWidgets: [], donationAlertsToken: 'isolated-test', donationAlertsBootstrapped: false,
     donationAlertsIds: new Set(), donationAlertsState: { donations: [] }, alertQueue: [],
     broadcastDonationAlertsState() {}, alerts: [], console,
     enqueueDonationAlert(donation) { state.alerts.push(donation); },
   });
-  for (const name of ['normalizeDonationGiveawayParticipant', 'normalizeDonationGiveawayWidget', 'appendDonationGiveawayParticipant', 'registerDonationGiveawayDonor', 'normalizeDonationAlert', 'syncDonationAlerts']) {
+  for (const name of ['normalizeDonationGiveawayParticipant', 'normalizeDonationGiveawayWidget', 'getDonationGiveawayWidget', 'finishDonationGiveaway', 'chooseGiveawayWinners', 'appendDonationGiveawayParticipant', 'registerDonationGiveawayDonor', 'normalizeDonationAlert', 'syncDonationAlerts']) {
     const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
     const end = source.indexOf('\n}', start) + 2;
     assert.ok(start >= 0 && end > start, name);
     vm.runInContext(source.slice(start, end), state);
   }
   vm.runInContext(`
+    function getStreamWidgetsPayload() {
+      return { items: streamWidgets };
+    }
     function updateStreamWidget(id, patch) {
       streamWidgets = streamWidgets.map(widget => widget.id === id
         ? normalizeDonationGiveawayWidget({ ...widget, ...patch }) : widget);
+      return getStreamWidgetsPayload();
     }
     streamWidgets = [normalizeDonationGiveawayWidget({
       id: 'october', type: 'donation-giveaway', enabled: true, status: 'running',
@@ -68,4 +73,33 @@ test('live donation, manual entry, pause, hidden collection and persisted roster
   `, state);
   assert.deepEqual(Array.from(state.streamWidgets[0].participants, p => p.user), ['Донатер', 'Вручную', 'Скрыт']);
   assert.equal(state.streamWidgets[0].participants[1].source, 'manual');
+});
+
+test('draw picks one unique participant, freezes the roster and persists the same winner', () => {
+  const state = harness();
+  const result = vm.runInContext(`
+    registerDonationGiveawayDonor({username:'Донатер'});
+    appendDonationGiveawayParticipant('october',' донатер ','manual');
+    appendDonationGiveawayParticipant('october','Вручную','manual');
+    finishDonationGiveaway('october');
+    const winner = streamWidgets[0].winner;
+    const reveal = streamWidgets[0].revealId;
+    registerDonationGiveawayDonor({username:'Поздний донат'});
+    appendDonationGiveawayParticipant('october','Поздний ник','manual');
+    streamWidgets = JSON.parse(JSON.stringify(streamWidgets)).map(normalizeDonationGiveawayWidget);
+    finishDonationGiveaway('october');
+    ({ winner, reveal });
+  `, state);
+  const [widget] = state.streamWidgets;
+  assert.equal(widget.status, 'finished');
+  assert.equal(widget.participants.length, 2);
+  assert.ok(widget.participants.some((participant) => participant.key === result.winner.key));
+  assert.equal(widget.winner.user, result.winner.user);
+  assert.equal(widget.revealId, result.reveal);
+});
+
+test('an empty draw remains open', () => {
+  const state = harness();
+  assert.throws(() => vm.runInContext("finishDonationGiveaway('october')", state), /хотя бы одного/);
+  assert.equal(state.streamWidgets[0].status, 'running');
 });
