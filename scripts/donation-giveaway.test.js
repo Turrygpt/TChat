@@ -103,3 +103,17 @@ test('an empty draw remains open', () => {
   assert.throws(() => vm.runInContext("finishDonationGiveaway('october')", state), /хотя бы одного/);
   assert.equal(state.streamWidgets[0].status, 'running');
 });
+
+test('DonationAlerts timestamps without an offset are UTC and include the opening second', async () => {
+  const state = harness();
+  state.rows = [
+    { id: 'before', username: 'До старта', created_at: '2026-10-05 15:16:31' },
+    { id: 'opening', username: 'В секунду старта', created_at: '2026-10-05 15:16:32' },
+    { id: 'after', username: 'После старта', created_at: '2026-10-05 15:16:33' },
+    { id: 'offset', username: 'С часовым поясом', created_at: '2026-10-05T18:16:34+03:00' },
+    { id: 'unknown', username: 'Без даты' },
+  ];
+  await vm.runInContext('syncDonationAlerts()', state);
+  assert.deepEqual(Array.from(state.streamWidgets[0].participants, p => p.user),
+    ['В секунду старта', 'После старта', 'С часовым поясом']);
+});

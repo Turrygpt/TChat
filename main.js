@@ -1685,7 +1685,9 @@ function registerDonationGiveawayDonor(donation = {}, { fromHistory = false } = 
       if (fromHistory) {
         const donatedAt = Date.parse(donation.createdAt);
         const startedAt = Date.parse(widget.startedAt);
-        if (!Number.isFinite(donatedAt) || !Number.isFinite(startedAt) || donatedAt < startedAt) return;
+        // DonationAlerts reports time to the second, so a payment in the opening second counts.
+        const firstSecond = Math.floor(startedAt / 1000) * 1000;
+        if (!Number.isFinite(donatedAt) || !Number.isFinite(firstSecond) || donatedAt < firstSecond) return;
       }
       appendDonationGiveawayParticipant(widget.id, donation.username, 'donation');
     });
@@ -5161,6 +5163,12 @@ async function syncDonationAlerts() {
 
 function normalizeDonationAlert(item = {}) {
   const amount = Number(item.amount || item.amount_in_user_currency || 0);
+  const timestamp = String(item.created_at || item.createdAt || '').trim();
+  // The API returns UTC without a timezone suffix. Parsing that as local time
+  // can move a fresh donation to before the giveaway started.
+  const createdAt = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(timestamp)
+    ? `${timestamp.replace(' ', 'T')}Z`
+    : timestamp;
 
   return {
     id: String(item.id || item.alert_id || item.created_at || ''),
@@ -5168,7 +5176,7 @@ function normalizeDonationAlert(item = {}) {
     amount,
     currency: item.currency || item.currency_code || 'RUB',
     message: item.message || '',
-    createdAt: item.created_at || item.createdAt || new Date().toISOString(),
+    createdAt,
     isNew: false,
   };
 }
