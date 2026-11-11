@@ -8,7 +8,7 @@ const readline = require('node:readline');
 const os = require('node:os');
 const express = require('express');
 const { Server } = require('socket.io');
-const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut, safeStorage } = require('electron');
 const { LiveChat } = require('youtube-chat');
 const { tmi, singleFlight, watchTwitchConnection, retireTwitchClient } = require('./src/net/chatKeepAlive');
 const { createDonationTtsHandler } = require('./src/server/donationTts');
@@ -201,6 +201,7 @@ let donationAlertsState = {
 const donationAlertsIds = new Set();
 // Каналы не зашиты в приложение: подтягиваются из настроек (channels.json)
 // или задаются в бэкофисе / импортом конфига.
+let twitchFollowersTokenFile = '';
 let currentChannels = {
   twitch: '',
   vk: '',
@@ -431,6 +432,7 @@ function setupDonationAlertsStorage() {
   musicSettingsFile = path.join(storageDir, 'music.json');
   botConfigFile = path.join(storageDir, 'bot-config.json');
   channelsFile = path.join(storageDir, 'channels.json');
+  twitchFollowersTokenFile = path.join(storageDir, 'twitch-followers-token.bin');
   loadDonationAlertsToken();
   migrateUploadedAssetsToUserData();
   loadAlertSettings();
@@ -2541,8 +2543,35 @@ const twitchFollowers = new TwitchFollowers({
   getChannel: () => parseTwitchChannel(currentChannels.twitch),
   publish: (message) => broadcastChatMessage({ ...message, platformIcon: getPlatformIconUrl('twitch') }),
   subscriberAlert: enqueueSubscriberAlert,
+  onConnected: saveTwitchFollowersToken,
   onStatus: (status) => mainWindow?.webContents?.send('followers:twitch-status', status),
 });
+
+function saveTwitchFollowersToken(token) {
+  if (!twitchFollowersTokenFile) return;
+  try {
+    if (!token) {
+      fs.rmSync(twitchFollowersTokenFile, { force: true });
+    } else if (safeStorage?.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text') {
+      fs.writeFileSync(twitchFollowersTokenFile, safeStorage.encryptString(token), { mode: 0o600 });
+    }
+  } catch {
+    console.error('Не удалось сохранить настройки подключения фолловеров Twitch.');
+  }
+}
+
+function restoreTwitchFollowers() {
+  if (!fs.existsSync(twitchFollowersTokenFile)) return;
+  try {
+    if (!safeStorage?.isEncryptionAvailable() || safeStorage.getSelectedStorageBackend?.() === 'basic_text') {
+      throw new Error('Защищённое хранилище недоступно');
+    }
+    const token = safeStorage.decryptString(fs.readFileSync(twitchFollowersTokenFile));
+    void twitchFollowers.start(token);
+  } catch {
+    twitchFollowers.report('Не удалось восстановить подключение фолловеров Twitch. Введите токен заново.');
+  }
+}
 
 function createDefaultStickerSettings() {
   return {
@@ -5215,6 +5244,7 @@ function parseTwitchChannel(value = '') {
 
 async function connectChatSources(channels = currentChannels) {
   const previousVkChannel = currentChannels.vk;
+  const previousTwitchChannel = parseTwitchChannel(currentChannels.twitch);
   currentChannels = {
     ...currentChannels,
     ...channels,
@@ -5239,7 +5269,9 @@ async function connectChatSources(channels = currentChannels) {
   }
 
   startChatPolling();
-  await connectTwitchChat(parseTwitchChannel(currentChannels.twitch));
+  const twitchChannel = parseTwitchChannel(currentChannels.twitch);
+  if (previousTwitchChannel !== twitchChannel) saveTwitchFollowersToken('');
+  await connectTwitchChat(twitchChannel);
   await connectYouTubeChat(currentChannels.youtube);
   // Rutube's page fetch must not hold VK chat startup hostage. Its viewer
   // request is bounded below, and the Rutube status updates independently.
@@ -6311,6 +6343,7 @@ app.whenReady().then(async () => {
   if (donationAlertsToken) {
     startDonationAlertsSync(donationAlertsToken);
   }
+  restoreTwitchFollowers();
   await connectChatSources(currentChannels);
   ensureCountdownTicking();
   setupAutoUpdater();
@@ -7260,6 +7293,7 @@ ipcMain.handle('followers:twitch-connect', async (_event, token) => {
 });
 ipcMain.handle('followers:twitch-disconnect', () => {
   twitchFollowers.stop();
+  saveTwitchFollowersToken('');
   twitchFollowers.report('Не подключено');
   return twitchFollowers.status;
 });

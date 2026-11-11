@@ -2,8 +2,8 @@ const WebSocket = require('ws');
 
 // Credentials stay in the main process; only human-readable status is published.
 class TwitchEventSub {
-  constructor({ onEvent, onStatus, label, fetchImpl = fetch, Socket = WebSocket }) {
-    Object.assign(this, { onEvent, onStatus, label, fetch: fetchImpl, Socket });
+  constructor({ onEvent, onStatus, onConnected, label, fetchImpl = fetch, Socket = WebSocket }) {
+    Object.assign(this, { onEvent, onStatus, onConnected, label, fetch: fetchImpl, Socket });
     this.generation = 0;
     this.sockets = new Set();
     this.seen = new Set();
@@ -101,6 +101,7 @@ class TwitchEventSub {
             });
             if (generation !== this.generation || !this.sockets.has(socket)) return;
             if (!response.ok) throw new Error(`Не удалось подключить ${this.label} Twitch (HTTP ${response.status}). Подключите заново.`);
+            this.onConnected?.(this.token);
           }
           this.report(`Подключено: ${this.info.login} · ${this.label}`);
         } else if (type === 'session_reconnect') {

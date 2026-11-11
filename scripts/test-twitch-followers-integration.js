@@ -22,6 +22,14 @@ async function run() {
     Object.assign(process.env, { TCHAT_USER_DATA: storage, TCHAT_PORT: String(port), TCHAT_HOST: '127.0.0.1' });
     fs.mkdirSync(path.join(storage, 'settings'));
     fs.writeFileSync(path.join(storage, 'settings', 'channels.json'), JSON.stringify({ twitch: 'streamer' }));
+    const tokenFile = path.join(storage, 'settings', 'twitch-followers-token.bin');
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value) => Buffer.from(Buffer.from(value).toString('base64')),
+      decryptString: (value) => Buffer.from(value.toString(), 'base64').toString(),
+    };
+    require('../src/headless/electron-shim').safeStorage = safeStorage;
+    fs.writeFileSync(tokenFile, safeStorage.encryptString('test-secret'));
 
     require('tmi.js').Client = class extends EventEmitter {
       async connect() { this.emit('connected'); }
@@ -74,8 +82,8 @@ async function run() {
 
     const state = await invoke('widgets:create', { type: 'subscriber-goal', title: 'Фолловеры Twitch', target: 10, platform: 'twitch' });
     const goalId = state.items.find((item) => item.type === 'subscriber-goal').id;
-    await invoke('followers:twitch-connect', 'oauth:test-secret');
     const socket = [...followers.sockets][0];
+    assert.ok(socket, 'the saved token must start EventSub without manual connection');
     socket.message('session_welcome', { session: { id: 'test-session' } });
     await new Promise((resolve) => setImmediate(resolve));
     assert.match(await invoke('followers:twitch-status'), /Подключено: streamer/);
@@ -109,7 +117,16 @@ async function run() {
     assert.equal(saved.items.find((item) => item.id === goalId).current, 2);
     assert.ok(!JSON.stringify(packets).includes('test-secret'), 'tokens must never be emitted to chat or OBS');
 
+    assert.equal(await invoke('followers:twitch-disconnect'), 'Не подключено');
+    assert.equal(fs.existsSync(tokenFile), false, 'disconnect forgets the token');
+    await invoke('followers:twitch-connect', 'oauth:new-secret');
+    const newSocket = [...followers.sockets][0];
+    newSocket.message('session_welcome', { session: { id: 'new-session' } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(safeStorage.decryptString(fs.readFileSync(tokenFile)), 'new-secret');
+
     await invoke('chat:update-channels', { twitch: 'another' });
+    assert.equal(fs.existsSync(tokenFile), false, 'switching channel forgets the old token');
     assert.equal(followers.token, '');
     assert.match(await invoke('followers:twitch-status'), /Канал Twitch изменён/);
     assert.equal(await invoke('followers:twitch-disconnect'), 'Не подключено');
