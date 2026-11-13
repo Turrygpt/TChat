@@ -1,8 +1,19 @@
 (() => {
   const layer=document.createElement('div');layer.id='arenaLayer';document.body.append(layer);
+  const commands=document.createElement('aside');commands.id='arenaCommands';commands.hidden=true;
+  commands.innerHTML='<div class="arena-command-row"><strong class="arena-command-title">АРЕНА ЗРИТЕЛЕЙ</strong><span><b>!бой</b> — вступить</span><span><b>!выход</b> — выйти</span></div><div class="arena-command-row"><span><b>!бой имя</b> — выбрать бойца · <b>!перс имя</b> — сменить вне боя</span><span class="arena-character-list">бабка · весло · алкоголик · офис · слесарь</span></div>';
+  document.body.append(commands);
+  const fitArena=()=>{layer.style.bottom=commands.hidden?'0px':Math.ceil(commands.getBoundingClientRect().height+8)+'px';};
+  new ResizeObserver(fitArena).observe(commands);
   const style=document.createElement('style');
   style.textContent=`
     #arenaLayer{position:fixed;inset:0;pointer-events:none;overflow:hidden;background:transparent;z-index:8}
+    #arenaCommands{position:fixed;bottom:4px;left:50%;transform:translateX(-50%);z-index:9;max-width:calc(100% - 24px);width:max-content;box-sizing:border-box;padding:6px 14px;border:1px solid #86bbd94d;border-radius:9px;background:rgba(9,15,25,.92);box-shadow:0 2px 12px #0008;color:#f3f6ff;font:500 clamp(14px,.9vw,20px)/1.4 Arial;pointer-events:none;text-align:center}
+    #arenaCommands[hidden]{display:none}
+    .arena-command-row{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:3px 16px}
+    .arena-command-row b{color:#ffe08a;font-weight:800}
+    .arena-command-title{font-size:.8em;letter-spacing:.08em;color:#82e8f0}
+    .arena-character-list{color:#bac9dd;font-size:.9em}
     .arena-fighter{position:absolute;bottom:0;transition:left .1s linear;transform:translateX(-50%);text-align:center}
     .arena-labels{display:flex;align-items:center;flex-direction:column;gap:3px;margin-bottom:5px}
     .arena-name,.arena-rank{box-sizing:border-box;background:rgba(10,15,25,.93);border:1px solid rgba(255,255,255,.35);box-shadow:0 2px 5px #0009;border-radius:6px;text-shadow:0 1px 2px #000}
@@ -65,7 +76,9 @@
   let atlas=null,lastState=null;
   fetch('/assets/arena/frames.json').then(r=>r.json()).then(value=>{atlas=value;if(lastState)render(lastState);}).catch(console.warn);
   function render(state){
-    lastState=state;if(!atlas)return;
+    lastState=state;commands.hidden=!state.settings.enabled;
+    commands.querySelector('.arena-command-title').textContent=state.settings.paused?'АРЕНА · ПАУЗА':'АРЕНА ЗРИТЕЛЕЙ';
+    fitArena();if(!atlas)return;
     const visible=state.settings.enabled?state.fighters:[], ids=new Set(visible.map(f=>f.id));
     for(const [id,node] of nodes)if(!ids.has(id)){node.remove();nodes.delete(id);}
     for(const f of visible){
@@ -99,5 +112,5 @@
   }
   const socket=io();socket.on('arena:state',render);
   socket.on('connect',()=>{seenEffects.clear();return fetch('/arena/state').then(r=>r.json()).then(render).catch(console.warn);});
-  socket.on('disconnect',()=>{layer.replaceChildren();nodes.clear();});
+  socket.on('disconnect',()=>{layer.replaceChildren();nodes.clear();commands.hidden=true;fitArena();});
 })();

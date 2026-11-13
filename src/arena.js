@@ -19,7 +19,9 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
     const parts=String(m.text||'').trim().toLowerCase().split(/\s+/), cmd=parts[0];
     if(!['!бой','!fight','!перс','!выход'].includes(cmd))return false;
     const user=String(m.userId || m.user || m.username || '').trim(); if(!user || !m.platform)return false;
-    const key=String(m.platform)+':'+user.toLowerCase();
+    const key=String(m.platform).trim().toLowerCase()+':'+user.toLowerCase();
+    // Repeated join/character commands never replace, heal or duplicate a fighter.
+    if(cmd!=='!выход' && fighters.has(key))return false;
     const eventId=m.id && String(m.platform)+':'+m.id; if(eventId && seen.has(eventId))return false;
     if(eventId){seen.add(eventId);if(seen.size>2000)seen.delete(seen.values().next().value);}
     let p=profiles[key];

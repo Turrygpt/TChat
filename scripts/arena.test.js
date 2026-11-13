@@ -32,3 +32,17 @@ test('combat effects expire and knockout is emitted only once',()=>{
  for(let n=0;n<300;n++){advance(100);for(const e of arena.state().effects)if(e.knockout)knockouts.add(e.id);}
  assert.equal(knockouts.size,1);advance(1100);assert.deepEqual(arena.state().effects,[]);
 });
+
+test('one viewer keeps one fighter despite repeated joins, new message IDs and renamed display names',()=>{
+ const {arena,advance}=setup();
+ arena.command({...msg('Viewer','!бой бабка','1'),userId:'42'});
+ arena.command({...msg('Opponent','!бой бабка','2'),userId:'43'});
+ advance(1000);advance(700);advance(300);
+ const before=arena.state().fighters.find(f=>f.id==='twitch:42');
+ assert.ok(before.hp<before.maxHp);
+ for(const text of ['!бой','!бой слесарь','!fight','!перс офис']){
+  assert.equal(arena.command({platform:'TWITCH',userId:'42',user:'Renamed',text,id:text}),false);
+ }
+ assert.equal(arena.state().fighters.length,2,'different viewers may choose the same character');
+ assert.deepEqual(arena.state().fighters.find(f=>f.id==='twitch:42'),before,'rejoining must not heal, reset or change the fighter');
+});

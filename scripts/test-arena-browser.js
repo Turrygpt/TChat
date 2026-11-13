@@ -34,11 +34,14 @@ async function browser(base) {
   await win.loadURL(base + '/widgets/stream.html');
   await wait("document.querySelectorAll('.arena-fighter').length === 3");
   assert.deepEqual(await js("[document.documentElement, document.body, document.querySelector('#arenaLayer')].map(e=>getComputedStyle(e).backgroundColor)"), Array(3).fill('rgba(0, 0, 0, 0)'));
+  assert.equal(await js("document.querySelector('#arenaCommands').hidden"),false);
+  assert.match(await js("document.querySelector('#arenaCommands').textContent"),/!бой.*!выход/);
   const loaded = await js("new Promise(resolve=>{const image=new Image();image.onload=()=>resolve(image.naturalWidth>0);image.onerror=()=>resolve(false);image.src='/assets/arena/mechanic.png'})");
   assert.equal(loaded, true);
   for (const [width,height] of [[1280,720],[1920,1080],[2560,1440]]) {
     win.setContentSize(width,height);
     await wait(`innerWidth===${width} && innerHeight===${height}`);
+    await wait("Math.abs(document.querySelector('.arena-sprite').getBoundingClientRect().bottom-(innerHeight-Math.ceil(document.querySelector('#arenaCommands').getBoundingClientRect().height+8)))<1");
     const labels=await js(`Array.from(document.querySelectorAll('.arena-fighter')).map(node=>({
       bottom:node.querySelector('.arena-sprite').getBoundingClientRect().bottom,
       name:node.querySelector('.arena-name').textContent,
@@ -52,7 +55,8 @@ async function browser(base) {
     assert.deepEqual(labels.map(n=>n.earned).sort(),[1,2,3]);
     assert.deepEqual(labels.map(n=>n.level).sort(),['Ур. 1','Ур. 10','Ур. 5']);
     for (const label of labels) {
-      assert.ok(Math.abs(label.bottom-height)<1,'feet must touch the screen bottom');
+      const floor=await js("innerHeight-document.querySelector('#arenaCommands').getBoundingClientRect().height-8");
+      assert.ok(Math.abs(label.bottom-floor)<1,'feet must sit immediately above the command strip');
       assert.ok(label.font>=16 && label.labelBottom<=label.artTop,'readable badges must stay above the fighter');
       assert.notEqual(label.nameBackground,'rgba(0, 0, 0, 0)');
     }
@@ -83,6 +87,8 @@ async function browser(base) {
   await control.webContents.executeJavaScript('window.tchat.saveArena({paused:true})');
   await new Promise(resolve=>setTimeout(resolve,1200));
   assert.equal(await js("document.querySelectorAll('.arena-impact').length"),0,'effects clean up after combat pauses');
+  await control.webContents.executeJavaScript('window.tchat.saveArena({enabled:false})');
+  await wait("document.querySelector('#arenaCommands').hidden && !document.querySelector('.arena-fighter')");
   control.destroy();
 
   await win.loadURL(base + '/backoffice');
