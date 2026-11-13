@@ -9,6 +9,7 @@
 //   HOST=0.0.0.0 PORT=3000 node scripts/serve.js
 
 const os = require('node:os');
+const path = require('node:path');
 const { createWidgetServer } = require('../src/server/widgetServer');
 
 const PORT = Number(process.env.PORT || process.env.TCHAT_PORT || 3000);
@@ -28,7 +29,9 @@ function localIps() {
 }
 
 async function main() {
-  const server = createWidgetServer({ port: PORT, host: HOST });
+  const server = createWidgetServer({ port: PORT, host: HOST,
+    quizStorageFile: path.join(process.env.TCHAT_USER_DATA || path.join(os.homedir(), '.tchat'), 'settings', 'quiz-evening.json'),
+  });
   await server.start();
 
   const lines = [

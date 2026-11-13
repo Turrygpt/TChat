@@ -61,6 +61,9 @@
   }
 
   window.tchat = {
+    getArenaState: function () { return invoke('arena:state'); },
+    saveArena: function (p) { return invoke('arena:save', p); },
+    clearArena: function () { return invoke('arena:clear'); },
     getChibiState: function () { return invoke('chibis:get-state'); },
     saveChibiSettings: function (p) { return invoke('chibis:save', p); },
     testChibi: function (p) { return invoke('chibis:test', p); },

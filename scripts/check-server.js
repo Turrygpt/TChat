@@ -1,6 +1,7 @@
 const { createWidgetServer } = require('../src/server/widgetServer');
 
-const server = createWidgetServer({ port: Number(process.env.TCHAT_PORT || 3000) });
+// Mutations belong only to this isolated server, never to the live app.
+const server = createWidgetServer({ port: Number(process.env.TCHAT_PORT || 0), host: '127.0.0.1' });
 
 async function check() {
   try {

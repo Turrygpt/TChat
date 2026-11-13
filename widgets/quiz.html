@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Викторина · TChat</title>
+  <link rel="stylesheet" href="./quiz.css">
+</head>
+<body>
+  <div id="viewport">
+    <main id="stage" class="stage waiting" aria-label="Экран викторины">
+      <header class="masthead">
+        <div class="contestant" id="player">Выберите игрока</div>
+        <div class="score"><span>Баллы</span><strong id="score">0</strong></div>
+      </header>
+      <section class="game-area">
+        <section class="main-area">
+          <div id="characterPresenter" class="character-presenter" hidden><img id="characterPortrait" alt=""><div><strong id="characterName"></strong><span id="characterNation"></span></div></div>
+          <section class="question-block" aria-live="polite">
+            <div class="question-meta"><span id="questionNumber">НОВАЯ ИГРА</span><span id="atStake"></span></div>
+            <h1 id="question">Введите или выберите ник игрока</h1>
+            <div id="answers" class="answers"></div>
+            <div class="question-footer"><span id="phaseText">Ожидаем начала</span><span id="guaranteed">Несгораемая · 0 баллов</span></div>
+          </section>
+          <div class="lifelines" aria-label="Подсказки">
+            <span id="life-fifty" class="life">50 / 50</span><span id="life-chat" class="life">Помощь чата</span><span id="life-friend" class="life">Звонок ИИ</span>
+          </div>
+          <section id="assistance" class="assistance" hidden aria-live="polite"></section>
+        </section>
+        <aside class="ladder-area" aria-label="Баллы и информация вечера">
+          <div class="ladder-column"><div class="ladder-title">БАЛЛЫ</div><ol id="ladder" reversed start="15"></ol><div class="ladder-note">Несгораемые:<br>1&nbsp;000 · 32&nbsp;000</div></div>
+          <div class="evening-info"><section class="ranking-panel"><h2>Игроки · баллы</h2><ol id="playerScores"></ol><p id="noScores">Пока нет результатов</p></section><section class="prizes-panel"><h2>Призы</h2><ul id="prizeList"></ul><p>Выдача вручную</p></section></div>
+        </aside>
+      </section>
+      <footer class="stage-footer"><span id="resultNote"></span></footer>
+      <section id="eveningScreen" class="evening-screen" hidden aria-label="Итоги вечера">
+        <div><h1>Итоги вечера</h1><p>Лучший результат каждого игрока</p><ol id="standings"></ol></div>
+        <div><h2>Список призов</h2><p>Выдаём вручную. Список не связан с местами в таблице.</p><div id="finalPool" class="final-pool"></div></div>
+      </section>
+    </main>
+    <div id="connection" class="connection">Подключаемся к TChat…</div>
+    <button id="unlockAudio" class="unlock-audio" hidden>Включить звук на этом экране</button>
+  </div>
+  <section id="controls" class="controls" hidden aria-label="Управление ведущего">
+    <div class="control-top"><strong>Викторина</strong><span id="eveningStatus"></span><span id="hostStatus" role="status"></span><button id="newGame" disabled>Новая игра</button><button id="resetGame" disabled>Сбросить игру</button><button id="openSettings" aria-haspopup="dialog">Настройки и итоги</button></div>
+    <div class="control-row setup-row"><label>Игрок <input id="playerInput" type="text" list="playerNames" maxlength="50" placeholder="Введите или выберите ник" autocomplete="off"><datalist id="playerNames"></datalist></label><label>Режим <select id="modeInput"><option value="history">Исторический</option><option value="characters">Корабледевушки</option></select></label><button id="start" data-action="start" disabled>Начать игру</button></div>
+    <div id="characterSelection" class="character-selection" hidden></div>
+    <div id="hostAnswers" class="host-answers" hidden></div>
+    <div class="control-row action-row"><button id="begin" data-action="begin" class="primary" hidden>Начать вопросы →</button><button data-action="clear" id="clear">Снять выбор</button><button id="lock" data-action="lock" class="primary">Зафиксировать</button><button id="reveal" data-action="reveal" class="reveal">Раскрыть ответ</button><button id="next" data-action="next">Далее →</button><button id="finish" data-action="finish">Завершить игру</button><button id="retire">Забрать баллы</button></div>
+    <div class="control-row help-row"><span class="control-label">Подсказки</span><button id="fifty" data-action="fifty">50 / 50</button><button id="chat" data-action="chat">Помощь чата</button><button id="chatClose" data-action="chat-close">Закрыть голосование</button><button id="friend" data-action="friend">Звонок ИИ</button><button id="showTastes" hidden>Её вкусы</button><span id="chatStatus"></span></div>
+    <dialog id="settingsDialog" aria-labelledby="settingsTitle"><div class="settings-heading"><strong id="settingsTitle">Настройки и итоги</strong><button id="closeSettings" aria-label="Закрыть настройки">Закрыть ×</button></div><div class="settings-content">
+    <div class="control-row"><a id="obsLink" href="./quiz.html" target="_blank" rel="noopener">Чистый экран OBS ↗</a><button id="copyObs">Скопировать URL OBS</button></div>
+    <details><summary>Итоги вечера</summary><p>Максимум 25 игр, у каждой героини — 5 участий. Вопросы не повторяются даже после раннего выхода. В таблице — лучший результат каждого игрока. Призы выдаются вручную.</p><div class="control-row"><button id="closeEvening">Завершить вечер · показать итоги</button><button id="newEvening">Начать новый вечер</button></div><div id="hostStandings"></div></details>
+    <details id="loreDetails" hidden><summary>Досье выбранных героинь</summary><div id="loreText"></div></details>
+    <details id="sourceDetails" hidden><summary>Ответ и источники</summary><div id="sourceText"></div></details>
+    <details><summary>Звук и подключение OBS</summary><div class="control-row"><label><input id="audioEnabled" type="checkbox"> Фоновая музыка и сигналы в OBS</label><label>Громкость <input id="volume" type="range" min="0" max="100" value="25"><output id="volumeText">25%</output></label><label><input id="monitorAudio" type="checkbox"> Слушать также на этом пульте</label><span id="audioStatus"></span></div><p>Источник OBS «Браузер»: <code id="obsUrl"></code> · 1920 × 1080 · включите «Управлять аудио через OBS». Фон и сигналы синтезируются самим TChat. При блокировке звука используйте «Взаимодействовать» → «Включить звук».</p><p>Порядок: выбрать → зафиксировать → раскрыть → следующий. При ошибке остаётся несгораемая сумма; «Забрать баллы» сохраняет текущую. Вечер и использованные вопросы сохраняются в настройках TChat.</p></details>
+    <details id="chatDetails"><summary>Подключённый чат · ведущий выбирает ответ вручную</summary><p>Помощь чата: точные A/B/C/D (А/В/С/Д) или 1–4. Один голос на зрителя в пределах площадки; новый голос заменяет предыдущий. Подсказки не выбирают ответ за участника. ИИ использует существующие настройки TChat и может ошибаться.</p><div id="chatFeed" class="chat-feed"></div></details>
+    </div></dialog>
+  </section>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="./quiz-audio.js"></script>
+  <script src="./quiz.js"></script>
+</body>
+</html>

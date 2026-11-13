@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TChat Stream Overlay</title>
+    <style>html, body { background: transparent; color-scheme: dark; }</style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=Montserrat+Alternates:wght@700;800;900&family=Rubik+Mono+One&family=Russo+One&family=Unbounded:wght@700;800;900&family=Yanone+Kaffeesatz:wght@600;700&display=swap" rel="stylesheet" />
@@ -13,9 +14,11 @@
     <link rel="stylesheet" href="./stickers.css?v=2" />
     <link rel="stylesheet" href="./chibis.css?v=8" />
   <link rel="stylesheet" href="./vk-likes.css?v=1" />
-  <link rel="stylesheet" href="./subscriber-goal.css"></head>
+  <link rel="stylesheet" href="./subscriber-goal.css">
+  <link rel="stylesheet" href="./camera.css" /></head>
   <body class="widget-page widget-page--stream">
     <main class="stream-overlay">
+      <img id="snapCameraFeed" class="stream-camera" alt="" hidden />
       <section id="streamAlert" class="stream-alert stream-alert--overlay" aria-live="polite">
         <img id="streamAlertImage" class="stream-alert__image" alt="" />
         <div class="stream-alert__body">
@@ -39,11 +42,13 @@
     <div id="vkLikeLayer" class="vk-like-layer" aria-hidden="true"></div>
     <script src="/socket.io/socket.io.js"></script>
     <script src="./stickers.js?v=2"></script>
+    <script src="./arena.js"></script>
     <script src="./chibis.js?v=8"></script>
     <script src="./vk-likes.js?v=1"></script>
     <section id="subscriberGoals" class="subscriber-goal-layer" aria-live="polite"></section>
     <script src="./subscriber-goal.js"></script>
     <script src="./goal-effects.js?v=3"></script>
     <script src="./stream.js?v=13"></script>
+    <script src="./camera-feed.js"></script>
   </body>
 </html>

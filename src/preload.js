@@ -1,6 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('tchat', {
+  ...(process.platform === 'win32' ? {
+    getCameraState: () => ipcRenderer.invoke('camera:get-state'),
+    listCameraDevices: () => ipcRenderer.invoke('camera:list-devices'),
+    startCamera: (payload) => ipcRenderer.invoke('camera:start', payload),
+    stopCamera: () => ipcRenderer.invoke('camera:stop'),
+  } : {}),
+  getArenaState: () => ipcRenderer.invoke('arena:state'),
+  saveArena: (payload) => ipcRenderer.invoke('arena:save', payload),
+  clearArena: () => ipcRenderer.invoke('arena:clear'),
   getChibiState: () => ipcRenderer.invoke('chibis:get-state'),
   saveChibiSettings: (payload) => ipcRenderer.invoke('chibis:save', payload),
   testChibi: (payload) => ipcRenderer.invoke('chibis:test', payload),

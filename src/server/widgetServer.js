@@ -4,13 +4,15 @@ const os = require('node:os');
 const path = require('node:path');
 const express = require('express');
 const { Server } = require('socket.io');
+const { createArena } = require('../arena');
 const { createChibis } = require('../chibis');
+const { mountQuiz } = require('../quiz/quiz');
 const { createDonationTtsHandler } = require('./donationTts');
 const { extractMusicLinks } = require('../musicLinks');
 
 const APP_VERSION = require('../../package.json').version;
 
-function createWidgetServer({ port, host = '0.0.0.0' }) {
+function createWidgetServer({ port, host = '0.0.0.0', quizStorageFile, arenaSettings } = {}) {
   const app = express();
   const server = http.createServer(app);
   let goalState = normalizeGoal({});
@@ -37,6 +39,10 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
 
   app.use(express.json());
   app.get('/tts/edge', createDonationTtsHandler(path.join(os.tmpdir(), 'tchat-tts')));
+  const quiz = mountQuiz({ app, io, storageFile: quizStorageFile, getChatStatus: () => ({ platforms: 0, statuses: {}, standalone: true }) });
+  const arena = createArena({ emit: (name, value) => io.emit(name, value) });
+  if (arenaSettings) arena.save(arenaSettings);
+  app.get('/arena/state', (_req, res) => res.json(arena.state()));
   const chibis = createChibis({ emit: (name, item) => io.emit(name, item) });
   app.get('/chibis/state', (_request, response) => response.json(chibis.state()));
   app.post('/demo/chibi', (request, response) => response.json({ ok: true, item: chibis.show(request.body) }));
@@ -92,6 +98,8 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         stickers: '/widgets/stream.html',
         chibis: '/widgets/stream.html',
         videoOverlay: '/widgets/video-overlay.html',
+        quiz: '/widgets/quiz.html',
+        quizControl: '/widgets/quiz.html?control=1',
       },
     });
   });
@@ -131,6 +139,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         stickers: `http://localhost:${port}/widgets/stream.html`,
         chibis: `http://localhost:${port}/widgets/stream.html`,
         videoOverlay: `http://localhost:${port}/widgets/video-overlay.html`,
+        quiz: `http://localhost:${port}/widgets/quiz.html`,
       },
     });
   });
@@ -200,6 +209,8 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
 
   app.post('/demo/chat', (request, response) => {
     const payload = normalizeChatMessage(request.body);
+    quiz.ingestChat(payload);
+    arena.command(payload);
     io.emit('chat:message', payload);
     response.json({ ok: true, payload });
   });
@@ -246,6 +257,7 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
         server.once('error', reject);
         server.listen(port, host, () => {
           server.off('error', reject);
+          port = server.address().port;
           resolve({
             isReady: true,
             port,
@@ -258,6 +270,8 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
     },
 
     stop() {
+      quiz.destroy();
+      arena.close();
       return new Promise((resolve) => {
         io.close(() => {
           server.close(() => resolve());
@@ -266,7 +280,10 @@ function createWidgetServer({ port, host = '0.0.0.0' }) {
     },
 
     emitChatMessage(payload) {
-      io.emit('chat:message', normalizeChatMessage(payload));
+      const message = normalizeChatMessage(payload);
+      quiz.ingestChat(message);
+      arena.command(message);
+      io.emit('chat:message', message);
     },
 
     emitDonationAlert(payload) {
@@ -364,6 +381,8 @@ function normalizeGoal(payload = {}) {
 
 function renderLandingPage() {
   const widgets = [
+    ['quiz', 'Викторина «Высота»', '15 вопросов · экран для OBS'],
+    ['quiz.html?control=1', 'Вести викторину', 'Выбор, фиксация, раскрытие — вручную'],
     ['remote', 'Пульт (мобильный)', 'Управление со смартфона'],
     ['stream', 'Оверлей стрима', 'Полный оверлей для Prizm/OBS'],
     ['chat', 'Чат', 'Агрегированный чат'],
@@ -379,10 +398,11 @@ function renderLandingPage() {
 
   const cards = widgets
     .map(function (w) {
-      return '<a class="card" href="/widgets/' + w[0] + '.html" target="_blank" rel="noopener">' +
+      const widgetUrl = '/widgets/' + w[0] + (w[0].includes('?') ? '' : '.html');
+      return '<a class="card" href="' + widgetUrl + '" target="_blank" rel="noopener">' +
         '<span class="card__title">' + w[1] + '</span>' +
         '<span class="card__subtitle">' + w[2] + '</span>' +
-        '<code class="card__url">/widgets/' + w[0] + '.html</code></a>';
+        '<code class="card__url">' + widgetUrl + '</code></a>';
     })
     .join('') +
     '<a class="card" href="/download/latest">' +

@@ -119,6 +119,17 @@ check('widget pages are served', async () => {
   }
 });
 
+check('quiz screen and read-only state are available', async () => {
+  const page = await request('/widgets/quiz.html');
+  const game = await request('/quiz/state');
+  if (!page.response.ok || !page.body.includes('quiz-audio.js') || !game.response.ok || !game.body.session || game.body.pointSteps?.length !== 15) {
+    throw new Error('quiz screen or session is unavailable');
+  }
+  if (['question', 'selected', 'locked'].includes(game.body.phase) && game.body.question?.correct !== undefined) {
+    throw new Error('quiz leaks an unrevealed answer');
+  }
+});
+
 check('VK likes alert has socket event and flight effect', async () => {
   const main = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
   const backoffice = fs.readFileSync(path.join(projectRoot, 'backoffice.html'), 'utf8');

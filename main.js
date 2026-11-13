@@ -2,6 +2,7 @@ const { normalizeSubscriberGoal, advanceSubscriberGoals } = require('./src/subsc
 const { resolveWidgetType } = require('./src/widgetTypes');
 const http = require('node:http');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const readline = require('node:readline');
@@ -12,6 +13,7 @@ const { app, BrowserWindow, Menu, ipcMain, shell, dialog, globalShortcut, safeSt
 const { LiveChat } = require('youtube-chat');
 const { tmi, singleFlight, watchTwitchConnection, retireTwitchClient } = require('./src/net/chatKeepAlive');
 const { createDonationTtsHandler } = require('./src/server/donationTts');
+const { createSnapCamera } = require('./src/camera/snapCamera');
 const { extractMusicLinks } = require('./src/musicLinks');
 const announce = require('./src/announce');
 const restream = require('./src/restream');
@@ -20,7 +22,11 @@ const { parseNicknameCommand } = require('./src/giveawayNicknames');
 const donatepay = require('./src/donatepay');
 const { findRewardRule } = require('./src/rewardRules');
 const { createChibis } = require('./src/chibis');
+const { mountQuiz } = require('./src/quiz/quiz');
+let quiz;
 let chibis;
+const { createArena } = require('./src/arena');
+let arena;
 const { TwitchRewards } = require('./src/twitchRewards');
 const { TwitchFollowers } = require('./src/twitchFollowers');
 const { registerTwitchSubscriptions } = require('./src/twitchSubscriptions');
@@ -90,6 +96,8 @@ installBrokenPipeGuard();
 
 const SERVER_HOST = '0.0.0.0';
 const SERVER_PORT = Number(process.env.TCHAT_PORT || 3000);
+const snapCamera = process.platform === 'win32' && process.versions.electron && !process.env.TCHAT_HEADLESS
+  ? createSnapCamera() : null;
 const DONATION_ALERTS_REDIRECT_PATH = '/oauth/donationalerts';
 // Public base URL for OAuth redirects. On a hosted (headless) copy set
 // TCHAT_PUBLIC_URL, e.g. http://195.62.49.244:3100 — desktop keeps localhost.
@@ -415,6 +423,7 @@ function setupDonationAlertsStorage() {
   donationAlertsSettingsFile = path.join(storageDir, 'donationalerts.json');
   alertSettingsFile = path.join(storageDir, 'alert-rules.json');
   stickerSettingsFile = path.join(storageDir, 'stickers.json');
+  arena = createArena({ file: path.join(storageDir, 'arena.json'), emit: (name, value) => socketServer?.emit(name, value) });
   chibis = createChibis({
     file: path.join(storageDir, 'chibis.json'),
     emit: (name, value) => socketServer?.emit(name, value),
@@ -3010,6 +3019,7 @@ function normalizeMessageParts(text = '', parts = []) {
 
 function createLocalServer() {
   const expressApp = express();
+  snapCamera?.mount(expressApp);
   const widgetsPath = path.join(__dirname, 'widgets');
   const assetsPath = path.join(__dirname, 'assets');
   const noCacheStaticOptions = {
@@ -3075,6 +3085,8 @@ function createLocalServer() {
         tasks: '/widgets/tasks.html',
         videoOverlay: '/widgets/video-overlay.html',
         remote: '/widgets/remote.html',
+        quiz: '/widgets/quiz.html',
+        quizControl: '/widgets/quiz.html?control=1',
       },
     });
   });
@@ -3293,6 +3305,7 @@ function createLocalServer() {
     response.json({ ok: Boolean(item), item });
   });
 
+  expressApp.get('/arena/state', (_request, response) => response.json(arena.state()));
   expressApp.get('/chibis/state', (_request, response) => response.json(chibis.state()));
   expressApp.post('/demo/chibi', (request, response) => response.json({ ok: true, item: chibis.show(request.body) }));
 
@@ -3329,6 +3342,15 @@ function createLocalServer() {
       origin: '*',
       methods: ['GET', 'POST'],
     },
+  });
+
+  quiz = mountQuiz({ app: expressApp, io: socketServer, getChatStatus: getChatStatusPayload,
+    storageFile: path.join(app.getPath('userData'), 'settings', 'quiz-evening.json'),
+    getPlayerNames: () => profiles.list().map(profile => profile.nickname || profile.displayName || profile.user),
+    askFriend: prompt => requestProfileCompletion([
+      { role: 'system', content: 'Ты помощник участника викторины. Дай короткую, честную подсказку, не изображай всезнание.' },
+      { role: 'user', content: prompt },
+    ]),
   });
 
   socketServer.on('connection', (socket) => {
@@ -3736,10 +3758,12 @@ function setChatHiddenFilters(payload = {}) {
 }
 
 function broadcastChatMessage(message) {
+  quiz?.ingestChat(message);
   saveChatMessage(message);
   chatStats.messages += 1;
   chatStats.users.add(`${message.platform}:${message.user}`.toLowerCase());
   if (!message.systemEvent) {
+    arena?.command(message);
     registerPollVote(message);
     registerGiveawayParticipant(message);
     registerGiveawayWinnerNickname(message);
@@ -5719,6 +5743,8 @@ async function fetchRutubeViewerCount(channelUrl) {
 
 async function createTwitchMessage(tags, message) {
   return {
+    id: tags.id,
+    userId: tags['user-id'] || tags.username,
     platform: 'twitch',
     platformIcon: getPlatformIconUrl('twitch'),
     user: tags['display-name'] || tags.username || 'Зритель',
@@ -6376,6 +6402,7 @@ app.on('will-quit', () => {
 });
 
 app.on('before-quit', async () => {
+  snapCamera?.stop();
   twitchRewards.stop();
   twitchFollowers.stop();
   clearInterval(vkPollTimer);
@@ -6501,6 +6528,23 @@ ipcMain.handle('restream:get-state', () => restream.getState());
 ipcMain.handle('restream:start', () => restream.start());
 ipcMain.handle('restream:stop', () => restream.stop());
 ipcMain.handle('restream:save-config', (_event, payload) => restream.saveConfig(payload || {}));
+
+if (snapCamera) {
+  const backofficeUrl = pathToFileURL(path.join(__dirname, 'backoffice.html')).href;
+  for (const [action, handler] of Object.entries({
+    'get-state': snapCamera.getState,
+    'list-devices': snapCamera.listDevices,
+    start: snapCamera.start,
+    stop: snapCamera.stop,
+  })) {
+    ipcMain.handle(`camera:${action}`, (event, payload) => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame?.url !== backofficeUrl) {
+        throw new Error('Управление камерой доступно в бэкоффисе TChat.');
+      }
+      return handler(payload);
+    });
+  }
+}
 
 // --- Профили зрителей ---------------------------------------------------------
 
@@ -7445,3 +7489,8 @@ ipcMain.handle('demo:send-raid-alert', (_event, payload) => {
 ipcMain.handle('demo:update-goal', (_event, payload) => {
   return updateGoalState(payload);
 });
+
+ipcMain.handle('arena:state', () => arena.state());
+ipcMain.handle('arena:save', (_event, payload) => arena.save(payload));
+ipcMain.handle('arena:clear', () => arena.clear());
+app.on('before-quit', () => arena?.close());
