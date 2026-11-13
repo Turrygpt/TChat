@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const {createArena,level}=require('../src/arena');
+const {createArena,level,statsForLevel,rollDamage}=require('../src/arena');
 function setup(){let time=100000;const arena=createArena({now:()=>time,random:()=>.5,autoStart:false});arena.save({enabled:true});return {arena,advance(n){time+=n;arena.tick();}};}
 const msg=(user,text='!бой',id)=>({platform:'twitch',user,text,id});
 test('spawn, duplicate protection, platform isolation and cap',()=>{const {arena}=setup();arena.save({maxPlayers:2});assert.equal(arena.command(msg('A','!бой бабка','1')),true);assert.equal(arena.command(msg('A','!бой','1')),false);assert.equal(arena.command({...msg('A'),platform:'vk'}),true);assert.equal(arena.command(msg('B')),false);assert.equal(arena.state().fighters.length,2);assert.equal(arena.state().fighters[0].character,'granny');});
@@ -45,4 +45,67 @@ test('one viewer keeps one fighter despite repeated joins, new message IDs and r
  }
  assert.equal(arena.state().fighters.length,2,'different viewers may choose the same character');
  assert.deepEqual(arena.state().fighters.find(f=>f.id==='twitch:42'),before,'rejoining must not heal, reset or change the fighter');
+});
+
+test('levels improve max HP, strength and attack rate throughout progression',()=>{
+ let previous=statsForLevel(1);
+ assert.deepEqual(previous,{maxHp:100,strength:12,attackIntervalMs:1000});
+ for(let rank=2;rank<=30;rank++){
+  const current=statsForLevel(rank);
+  assert.ok(current.maxHp>previous.maxHp && current.strength>previous.strength && current.attackIntervalMs<previous.attackIntervalMs);
+  previous=current;
+ }
+});
+test('damage has broad variance and a separate critical chance',()=>{
+ const roll=(spread,crit)=>{const values=[spread,crit];return rollDamage(12,()=>values.shift());};
+ assert.deepEqual(roll(0,.9),{damage:6,critical:false});
+ assert.deepEqual(roll(.999,.9),{damage:19,critical:false});
+ assert.deepEqual(roll(.999,.1),{damage:35,critical:true});
+});
+test('a kill heals 25 percent of max HP, capped, and never auto-respawns the victim',()=>{
+ const {arena,advance}=setup();arena.command(msg('A'));arena.command(msg('B'));
+ let death;
+ for(let n=0;n<300&&!death;n++){
+  const before=arena.state();advance(100);const after=arena.state();
+  const hit=after.effects.find(e=>e.knockout);
+  if(!hit)continue;
+  const killer=after.fighters.find(f=>f.id===hit.attackerId),prior=before.fighters.find(f=>f.id===hit.attackerId);
+  const hpBeforeHeal=prior.hp+(killer.maxHp-prior.maxHp);
+  assert.equal(hit.heal,Math.min(killer.maxHp-hpBeforeHeal,Math.ceil(killer.maxHp*.25)));
+  assert.equal(killer.hp,hpBeforeHeal+hit.heal);assert.ok(killer.hp<=killer.maxHp && hit.heal>0);
+  death=hit;
+ }
+ assert.ok(death);advance(61000);
+ assert.equal(arena.state().fighters.some(f=>f.id===death.targetId),false);
+ assert.equal(arena.state().fighters.length,1);
+ assert.equal(arena.command(msg(death.targetId.split(':')[1],'!бой бабка')),true);
+ assert.equal(arena.state().fighters.length,2);
+});
+test('equal-level duels can be won by either fighter under seeded randomness',()=>{
+ const winners=new Set();
+ for(let seed=1;seed<=60;seed++){
+  let time=100000,value=seed,spawning=true;
+  const arena=createArena({autoStart:false,now:()=>time,random:()=>{if(spawning)return .5;value=(Math.imul(value,1664525)+1013904223)>>>0;return value/4294967296;}});
+  arena.save({enabled:true});arena.command(msg('A','!бой бабка'));arena.command(msg('B','!бой алкоголик'));spawning=false;
+  for(let n=0;n<600;n++){
+   time+=100;arena.tick();const hit=arena.state().effects.find(e=>e.knockout);
+   if(hit){winners.add(hit.attackerId);break;}
+  }
+  arena.close();
+ }
+ assert.deepEqual(winners,new Set(['twitch:a','twitch:b']));
+});
+test('level-up updates a living fighter immediately and faster levels schedule shorter windups',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'arena-stats-'));const file=path.join(dir,'arena.json');
+ let time=100000;
+ try{
+  fs.writeFileSync(file,JSON.stringify({settings:{enabled:true},profiles:{'twitch:a':{xp:29,wins:0,deaths:0,character:'granny',readyAt:0,lastCommand:0},'twitch:b':{xp:2430,wins:0,deaths:0,character:'pirate',readyAt:0,lastCommand:0}}}));
+  const arena=createArena({file,autoStart:false,now:()=>time,random:()=>.5});arena.command(msg('A'));arena.command(msg('B'));
+  time+=1000;arena.tick();const winding=arena.state().fighters;
+  assert.ok(winding[1].next<winding[0].next,'higher level must attack sooner');
+  for(let n=0;n<10;n++){time+=100;arena.tick();}
+  const fighter=arena.state().fighters.find(f=>f.id==='twitch:a');assert.equal(fighter.level,2);
+  const stats=statsForLevel(2);assert.equal(fighter.maxHp,stats.maxHp);assert.equal(fighter.strength,stats.strength);assert.equal(fighter.attackIntervalMs,stats.attackIntervalMs);assert.ok(fighter.hp<=fighter.maxHp);
+  arena.close();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

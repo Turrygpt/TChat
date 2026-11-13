@@ -1,7 +1,7 @@
 (() => {
   const layer=document.createElement('div');layer.id='arenaLayer';document.body.append(layer);
   const commands=document.createElement('aside');commands.id='arenaCommands';commands.hidden=true;
-  commands.innerHTML='<div class="arena-command-row"><strong class="arena-command-title">АРЕНА ЗРИТЕЛЕЙ</strong><span><b>!бой</b> — вступить</span><span><b>!выход</b> — выйти</span></div><div class="arena-command-row"><span><b>!бой имя</b> — выбрать бойца · <b>!перс имя</b> — сменить вне боя</span><span class="arena-character-list">бабка · весло · алкоголик · офис · слесарь</span></div>';
+  commands.innerHTML='<div class="arena-command-row"><strong class="arena-command-title">АРЕНА ЗРИТЕЛЕЙ</strong><span><b>!бой + персонаж</b> — начать или возродиться</span></div><div class="arena-command-row arena-character-list"><b>!бой бабка</b><b>!бой весло</b><b>!бой алкоголик</b><b>!бой офис</b><b>!бой слесарь</b></div><div class="arena-command-row arena-command-note">После смерти — новая команда через 30 с. Автовозрождения нет.</div>';
   document.body.append(commands);
   const fitArena=()=>{layer.style.bottom=commands.hidden?'0px':Math.ceil(commands.getBoundingClientRect().height+8)+'px';};
   new ResizeObserver(fitArena).observe(commands);
@@ -13,6 +13,7 @@
     .arena-command-row{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:3px 16px}
     .arena-command-row b{color:#ffe08a;font-weight:800}
     .arena-command-title{font-size:.8em;letter-spacing:.08em;color:#82e8f0}
+    .arena-command-note{color:#c7d3e2;font-size:.85em}
     .arena-character-list{color:#bac9dd;font-size:.9em}
     .arena-fighter{position:absolute;bottom:0;transition:left .1s linear;transform:translateX(-50%);text-align:center}
     .arena-labels{display:flex;align-items:center;flex-direction:column;gap:3px;margin-bottom:5px}
@@ -34,6 +35,9 @@
     .arena-spark{position:absolute;width:5px;height:5px;border-radius:2px;background:var(--hit-color);box-shadow:0 0 6px var(--hit-color);animation:arena-spark .5s ease-out both}
     .arena-damage{position:absolute;left:-35px;top:-35px;width:70px;text-align:center;color:#fff4bd;font:900 27px/1 Arial;-webkit-text-stroke:1px #492416;text-shadow:0 2px 0 #1b0e16,0 0 10px #ff743d;animation:arena-damage 1s ease-out both}
     .arena-ko{position:absolute;left:-70px;top:-75px;width:140px;text-align:center;font:900 22px/1.2 Arial;color:#ffd166;-webkit-text-stroke:1px #75301d;text-shadow:0 3px 0 #1b0e16,0 0 14px #ff7a32;animation:arena-damage 1s ease-out both}
+    .arena-heal{position:absolute;z-index:13;color:#8effbc;font:900 22px/1.2 Arial;text-shadow:0 2px 2px #073524,0 0 9px #42ffab;animation:arena-damage 1s ease-out both;pointer-events:none}
+    .is-critical .arena-damage{width:140px;left:-70px;color:#ffe278;font-size:30px}
+    .is-critical .arena-hit-star{background:#fff5ba;filter:drop-shadow(0 0 12px #ff7045)}
     .is-ko .arena-hit-ring{border-width:5px;width:110px;height:110px;left:-55px;top:-55px}
     @keyframes arena-burst{0%{opacity:1;transform:scale(.3) rotate(-20deg)}60%{opacity:.9}100%{opacity:0;transform:scale(1.3) rotate(25deg)}}
     @keyframes arena-ring{from{opacity:1;transform:scale(.2)}to{opacity:0;transform:scale(1.6)}}
@@ -57,12 +61,12 @@
       attacker?.querySelector('.arena-art').animate([{transform:'translateX(0)'},{transform:`translateX(${effect.face*12}px)`,offset:.3},{transform:'translateX(0)'}],{duration:260});
       target?.querySelector('.arena-art').animate([{filter:'brightness(1)',transform:'translateX(0)'},{filter:'brightness(2.2) drop-shadow(0 0 8px #ffb16b)',transform:`translateX(${effect.face*7}px)`},{filter:'brightness(1)',transform:'translateX(0)'}],{duration:300});
     }
-    const fx=document.createElement('div');fx.className='arena-impact'+(effect.knockout?' is-ko':'');
+    const fx=document.createElement('div');fx.className='arena-impact'+(effect.knockout?' is-ko':'')+(effect.critical?' is-critical':'');
     fx.style.left=(6+effect.x*88)+'%';fx.style.bottom=(state.settings.size*.55)+'px';
     fx.style.setProperty('--hit-color',colors[effect.character]||'#ffd166');
     fx.style.setProperty('--hit-direction',effect.face);
     fx.innerHTML='<i class="arena-hit-glow"></i><i class="arena-hit-ring"></i><i class="arena-hit-slash"></i><i class="arena-hit-star"></i><strong class="arena-damage"></strong>';
-    fx.querySelector('.arena-damage').textContent='−'+effect.damage;
+    fx.querySelector('.arena-damage').textContent=(effect.critical?'КРИТ! −':'−')+effect.damage;
     for(let i=0;i<7;i++){
       const spark=document.createElement('i');spark.className='arena-spark';
       const angle=i*Math.PI*2/7;
@@ -70,6 +74,11 @@
     }
     if(effect.knockout){const ko=document.createElement('b');ko.className='arena-ko';ko.textContent='НОКАУТ!';fx.append(ko);}
     layer.append(fx);
+    if(effect.heal>0){
+      const heal=document.createElement('strong');heal.className='arena-heal';heal.textContent='+'+effect.heal+' HP';
+      heal.style.left=(6+effect.healX*88)+'%';heal.style.bottom=(state.settings.size*.8)+'px';layer.append(heal);
+      setTimeout(()=>heal.remove(),1100);
+    }
     const active=layer.querySelectorAll('.arena-impact');if(active.length>40)active[0].remove();
     setTimeout(()=>fx.remove(),1100);
   }
@@ -90,6 +99,7 @@
       node.querySelector('.arena-name').textContent=f.name;
       node.querySelector('.arena-name').title=f.name;
       node.querySelector('.arena-level').textContent='Ур. '+f.level;
+      node.querySelector('.arena-rank').title=`HP ${f.hp}/${f.maxHp} · Сила ${f.strength||12} · Удар каждые ${((f.attackIntervalMs||1000)/1000).toFixed(2)} с`;
       node.querySelector('.arena-hp i').style.width=(100*f.hp/f.maxHp)+'%';
       node.querySelector('.arena-hp i').style.backgroundColor=f.hp/f.maxHp<.3?'#ff6379':f.hp/f.maxHp<.6?'#ffd166':'#71eaa3';
       const sheet=atlas[f.character];if(!sheet)continue;
@@ -107,7 +117,7 @@
       sprite.style.backgroundPosition=`${-x*scale}px ${-y*scale}px`;
       sprite.style.transform=`scaleX(${f.face})`;
     }
-    if(!state.settings.enabled)layer.querySelectorAll('.arena-impact').forEach(node=>node.remove());
+    if(!state.settings.enabled)layer.querySelectorAll('.arena-impact,.arena-heal').forEach(node=>node.remove());
     for(const effect of state.effects||[])showHit(effect,state);
   }
   const socket=io();socket.on('arena:state',render);

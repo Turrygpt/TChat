@@ -35,7 +35,8 @@ async function browser(base) {
   await wait("document.querySelectorAll('.arena-fighter').length === 3");
   assert.deepEqual(await js("[document.documentElement, document.body, document.querySelector('#arenaLayer')].map(e=>getComputedStyle(e).backgroundColor)"), Array(3).fill('rgba(0, 0, 0, 0)'));
   assert.equal(await js("document.querySelector('#arenaCommands').hidden"),false);
-  assert.match(await js("document.querySelector('#arenaCommands').textContent"),/!бой.*!выход/);
+  assert.match(await js("document.querySelector('#arenaCommands').textContent"),/!бой бабка.*!бой весло/);
+  assert.doesNotMatch(await js("document.querySelector('#arenaCommands').textContent"),/!выход|!перс|вступить/);
   const loaded = await js("new Promise(resolve=>{const image=new Image();image.onload=()=>resolve(image.naturalWidth>0);image.onerror=()=>resolve(false);image.src='/assets/arena/mechanic.png'})");
   assert.equal(loaded, true);
   for (const [width,height] of [[1280,720],[1920,1080],[2560,1440]]) {

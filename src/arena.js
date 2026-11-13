@@ -1,6 +1,15 @@
 const fs = require('node:fs');
 const CATALOG = [ ['granny','Бабка','бабка'], ['paddler','Девушка с веслом','весло'], ['pirate','Алкоголик','алкоголик'], ['office','Офисный работник','офис'], ['mechanic','Слесарь','слесарь'] ].map(([id,name,command]) => ({id,name,command}));
 const level = xp => Math.min(30, 1 + Math.floor(Math.sqrt(xp / 30)));
+function statsForLevel(value) {
+  const rank=Math.min(30,Math.max(1,Math.floor(Number(value)||1)));
+  return {maxHp:100+(rank-1)*8,strength:Number((12*(1+(rank-1)*.035)).toFixed(2)),attackIntervalMs:Math.round(1000/(1+(rank-1)*.025))};
+}
+function rollDamage(strength,random=Math.random) {
+  const spread=.5+random()*1.1;
+  const critical=random()<.15;
+  return {damage:Math.max(1,Math.round(strength*spread*(critical?1.8:1))),critical};
+}
 function createArena({file, emit = () => {}, now = Date.now, random = Math.random, autoStart = true} = {}) {
   let settings = {enabled:false,paused:false,maxPlayers:24,size:130};
   let profiles = Object.create(null);
@@ -33,8 +42,8 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
     if(cmd==='!перс'){if(!character)return false;p.character=character.id;flush();return true;}
     if(now()<p.readyAt || fighters.size>=settings.maxPlayers)return false;
     if(character)p.character=character.id;
-    const hp=100+(level(p.xp)-1)*5;
-    fighters.set(key,{id:key,name:String(m.username||m.user||user).slice(0,40),character:p.character,hp,maxHp:hp,x:0.08+random()*.84,lane:Math.floor(random()*3),pose:0,face:1,next:now()+1000,lastActive:now(),target:null});publish();return true;
+    const stats=statsForLevel(level(p.xp)),hp=stats.maxHp;
+    fighters.set(key,{id:key,name:String(m.username||m.user||user).slice(0,40),character:p.character,hp,...stats,x:0.08+random()*.84,lane:Math.floor(random()*3),pose:0,face:1,next:now()+1000,lastActive:now(),target:null});publish();return true;
   }
   function tick(){
     if(!settings.enabled || settings.paused)return;
@@ -45,19 +54,25 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
       if(f.next>t)continue;
       const p=profiles[f.id];
       if(f.pose===1){
-        const target=fighters.get(f.target);f.pose=2;f.next=t+300;
+        const target=fighters.get(f.target);f.pose=2;f.next=t+Math.round(f.attackIntervalMs*.35);
         if(!target || target.hp<=0 || Math.abs(target.x-f.x)>.075)continue;
-        const damage=8+Math.floor(random()*7)+Math.min(12,level(p.xp)-1);
+        const {damage,critical}=rollDamage(f.strength,random);
         target.hp=Math.max(0,target.hp-damage);
         // A hit reaction is visual: it must never cancel the victim's scheduled
         // windup, otherwise the first attacker can stun-lock every opponent.
         target.hurtUntil=t+220;
         if(!target.hp){target.pose=4;target.next=t+3000;}
         target.lastActive=t;f.lastActive=t;
-        effects.push({id:++effectId,at:t,attackerId:f.id,targetId:target.id,character:f.character,x:target.x,damage,knockout:target.hp===0,face:f.face});
-        effects=effects.filter(e=>t-e.at<1000).slice(-60);
         p.xp+=3;dirty=true;
         if(!target.hp){const victim=profiles[target.id];victim.deaths++;victim.readyAt=t+30000;p.xp+=30;p.wins++;}
+        // Apply earned stats immediately, preserving missing HP on level-up.
+        const nextStats=statsForLevel(level(p.xp));
+        f.hp=Math.min(nextStats.maxHp,f.hp+Math.max(0,nextStats.maxHp-f.maxHp));
+        Object.assign(f,nextStats);
+        const heal=target.hp===0?Math.min(f.maxHp-f.hp,Math.ceil(f.maxHp*.25)):0;
+        f.hp+=heal;
+        effects.push({id:++effectId,at:t,attackerId:f.id,targetId:target.id,character:f.character,x:target.x,damage,critical,heal,healX:f.x,knockout:target.hp===0,face:f.face});
+        effects=effects.filter(e=>t-e.at<1000).slice(-60);
         continue;
       }
       f.pose=0;
@@ -66,7 +81,7 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
       const target=opponents[0];if(!target){f.next=t+300;continue;}
       f.face=target.x>=f.x?1:-1;f.lane=target.lane;
       if(Math.abs(target.x-f.x)>.065){f.x=Math.max(.06,Math.min(.94,f.x+f.face*.012));f.next=t+100;}
-      else {f.target=target.id;f.pose=1;f.next=t+450+Math.floor(random()*250);}
+      else {f.target=target.id;f.pose=1;f.next=t+Math.round(f.attackIntervalMs*.65*(.8+random()*.4));}
     }
     if(fighters.size)publish();else if(tick.hadFighters)publish();tick.hadFighters=fighters.size>0;
   }
@@ -74,4 +89,4 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
   const saver=autoStart?setInterval(flush,5000):null;saver?.unref();
   return {state,save,clear,command,tick,flush,close(){clearInterval(timer);clearInterval(saver);flush();}};
 }
-module.exports={createArena,level};
+module.exports={createArena,level,statsForLevel,rollDamage};
