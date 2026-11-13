@@ -1,6 +1,6 @@
 {
   "name": "tchat",
-  "version": "1.5.16",
+  "version": "1.5.17",
   "description": "Standalone-агрегатор стримерских чатов и OBS-виджетов.",
   "main": "main.js",
   "scripts": {

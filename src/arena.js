@@ -6,12 +6,14 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
   let profiles = Object.create(null);
   const fighters = new Map(), seen = new Set();
   let dirty = false;
+  let effectId = 0;
+  let effects = [];
   if (file) try { const saved=JSON.parse(fs.readFileSync(file,'utf8')); Object.assign(settings,saved.settings); profiles=Object.assign(Object.create(null),saved.profiles); } catch(error) { if(error.code !== 'ENOENT') console.warn('Arena: cannot load progress',error.message); }
   function flush() { if (!file || !dirty) return; try {fs.writeFileSync(file+'.tmp',JSON.stringify({settings,profiles}));fs.renameSync(file+'.tmp',file);dirty=false;} catch(error){console.warn('Arena: cannot save progress',error.message);} }
-  function state(){return {settings:{...settings},catalog:CATALOG,fighters:[...fighters.values()].map(f=>({...f,level:level(profiles[f.id].xp),xp:profiles[f.id].xp})),time:now()};}
+  function state(){return {effects:effects.filter(e=>now()-e.at<1000).map(e=>({...e})),settings:{...settings},catalog:CATALOG,fighters:[...fighters.values()].map(f=>({...f,pose:f.hp>0 && f.hurtUntil>now() && f.pose===0?3:f.pose,level:level(profiles[f.id].xp),xp:profiles[f.id].xp})),time:now()};}
   function publish(){emit('arena:state',state());}
-  function save(input={}){for(const k of ['enabled','paused']) if(typeof input[k]==='boolean') settings[k]=input[k]; for(const [k,min,max] of [['maxPlayers',2,50],['size',70,200]]) if(Number.isFinite(Number(input[k]))) settings[k]=Math.min(max,Math.max(min,Math.round(Number(input[k])))); if(!settings.enabled) fighters.clear();dirty=true;flush();publish();return state();}
-  function clear(){fighters.clear();publish();return state();}
+  function save(input={}){for(const k of ['enabled','paused']) if(typeof input[k]==='boolean') settings[k]=input[k]; for(const [k,min,max] of [['maxPlayers',2,50],['size',70,200]]) if(Number.isFinite(Number(input[k]))) settings[k]=Math.min(max,Math.max(min,Math.round(Number(input[k])))); if(!settings.enabled) {fighters.clear();effects=[];}dirty=true;flush();publish();return state();}
+  function clear(){fighters.clear();effects=[];publish();return state();}
   function command(m={}){
     if(!settings.enabled || settings.paused || m.systemEvent) return false;
     const parts=String(m.text||'').trim().toLowerCase().split(/\s+/), cmd=parts[0];
@@ -44,7 +46,14 @@ function createArena({file, emit = () => {}, now = Date.now, random = Math.rando
         const target=fighters.get(f.target);f.pose=2;f.next=t+300;
         if(!target || target.hp<=0 || Math.abs(target.x-f.x)>.075)continue;
         const damage=8+Math.floor(random()*7)+Math.min(12,level(p.xp)-1);
-        target.hp=Math.max(0,target.hp-damage);target.pose=target.hp?3:4;target.next=t+(target.hp?350:3000);target.lastActive=t;f.lastActive=t;
+        target.hp=Math.max(0,target.hp-damage);
+        // A hit reaction is visual: it must never cancel the victim's scheduled
+        // windup, otherwise the first attacker can stun-lock every opponent.
+        target.hurtUntil=t+220;
+        if(!target.hp){target.pose=4;target.next=t+3000;}
+        target.lastActive=t;f.lastActive=t;
+        effects.push({id:++effectId,at:t,attackerId:f.id,targetId:target.id,character:f.character,x:target.x,damage,knockout:target.hp===0,face:f.face});
+        effects=effects.filter(e=>t-e.at<1000).slice(-60);
         p.xp+=3;dirty=true;
         if(!target.hp){const victim=profiles[target.id];victim.deaths++;victim.readyAt=t+30000;p.xp+=30;p.wins++;}
         continue;
