@@ -1,0 +1,29 @@
+name: Release publication tests
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-publication-tests.yml
+      - deploy/publish-github-release.js
+      - deploy/publish-github-release.test.js
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-publication-tests.yml
+      - deploy/publish-github-release.js
+      - deploy/publish-github-release.test.js
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test deploy/publish-github-release.test.js
