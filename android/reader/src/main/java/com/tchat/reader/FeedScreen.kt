@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -32,7 +34,6 @@ import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -40,7 +41,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -49,9 +51,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tchat.stream.*
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlin.math.PI
@@ -197,12 +196,12 @@ internal fun FeedScreen(
 @Composable
 private fun StatusBar(statuses: Map<Source, String>, viewers: Map<Source, Long>, onSettings: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Surface(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+    Surface(Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(horizontal = 10.dp, vertical = 3.dp),
         shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerLow,
         border = BorderStroke(0.75.dp, colors.outlineVariant.copy(alpha = 0.78f))) {
-        Row(Modifier.padding(start = 15.dp, end = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(13.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 12.dp, end = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f, fill = false).padding(end = 10.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (viewers.isNotEmpty()) Icon(Icons.Outlined.Visibility, "Зрители онлайн", Modifier.size(16.dp), tint = colors.onSurfaceVariant)
                 val sources = Source.entries.filter { it in statuses || it in viewers }
                 if (sources.isEmpty()) Text("Нет подключений", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
@@ -234,25 +233,6 @@ private fun StatusBar(statuses: Map<Source, String>, viewers: Map<Source, Long>,
 }
 
 @Composable
-private fun SourceMark(source: Source, modifier: Modifier) {
-    val glyph = when (source) {
-        Source.VK -> R.drawable.glyph_vk
-        Source.TWITCH -> R.drawable.glyph_twitch
-        Source.YOUTUBE -> R.drawable.glyph_youtube
-        Source.RUTUBE -> R.drawable.glyph_rutube
-        else -> source.icon
-    }
-    val ink = when (source) {
-        Source.VK -> Color(0xFF8AAFD9)
-        Source.TWITCH -> Color(0xFFB89DDB)
-        Source.YOUTUBE -> Color(0xFFD78E90)
-        Source.RUTUBE -> Color(0xFF82AEBF)
-        else -> null
-    }
-    Image(painterResource(glyph), source.label, modifier, colorFilter = ink?.let { ColorFilter.tint(it) })
-}
-
-@Composable
 private fun MessageList(messages: List<FeedItem>, font: Float, onSelect: (ChatMessage) -> Unit) {
     val list = rememberLazyListState()
     var follow by rememberSaveable { mutableStateOf(true) }
@@ -261,12 +241,12 @@ private fun MessageList(messages: List<FeedItem>, font: Float, onSelect: (ChatMe
             .collect { atStart -> if (atStart != null) follow = atStart }
     }
     LaunchedEffect(messages.first().message.key) { if (follow) list.requestScrollToItem(0) }
-    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 1.dp)) {
         items(messages, key = { it.message.key }) { item -> MessageRow(item, font, onSelect) }
     }
 }
 
-private val clockFormat = DateTimeFormatter.ofPattern("HH:mm")
+private const val PLATFORM_MARK = "reader-platform"
 
 internal fun eventPulseAlpha(remaining: Long): Float {
     if (remaining <= 0L) return 0f
@@ -288,21 +268,30 @@ private fun MessageRow(item: FeedItem, font: Float, onSelect: (ChatMessage) -> U
         ChatKind.NOTICE -> "Событие"
         else -> ""
     }
-    val nameSize = (font * 0.88f).coerceAtLeast(12f)
-    val header = remember(message, item.source, colors, font) { buildAnnotatedString {
-        withStyle(SpanStyle(color = nickColor(item.source, message.author, message.authorColor), fontWeight = FontWeight.SemiBold)) {
+    val source = item.source
+    val line = remember(message, source, colors, font) { buildAnnotatedString {
+        appendInlineContent(PLATFORM_MARK, source.label)
+        append('\u00A0')
+        withStyle(SpanStyle(color = nickColor(source, message.author, message.authorColor), fontWeight = FontWeight.SemiBold)) {
             append(message.author.ifBlank { "Аноним" })
         }
-        if (kind.isNotEmpty()) withStyle(SpanStyle(color = colors.onSurfaceVariant, fontSize = (nameSize * 0.84f).sp)) {
-            append("  ·  $kind")
+        if (kind.isNotEmpty()) withStyle(SpanStyle(color = colors.onSurfaceVariant, fontSize = (font * 0.87f).sp)) {
+            append(" · $kind")
         }
         if (message.amountLabel.isNotBlank()) withStyle(SpanStyle(color = Color(0xFFE9CCA2), fontWeight = FontWeight.SemiBold)) {
-            append("  " + message.amountLabel)
+            append(" " + message.amountLabel)
+        }
+        if (message.text.isNotBlank()) {
+            append(": ")
+            appendChatParts(message.parts)
         }
     } }
-    val body = remember(message.parts) { buildAnnotatedString { appendChatParts(message.parts) } }
-    val clock = remember(message.timeMillis) {
-        if (message.timeMillis > 0) clockFormat.format(Instant.ofEpochMilli(message.timeMillis).atZone(ZoneId.systemDefault())) else ""
+    val iconSize = font.sp
+    val emotes = chatInlineEmotes(message.parts, (font * 1.28f).sp)
+    val inlineContent = remember(source, iconSize, emotes) {
+        emotes + (PLATFORM_MARK to InlineTextContent(Placeholder(iconSize, iconSize, PlaceholderVerticalAlign.TextCenter)) {
+            Image(painterResource(source.icon), null, Modifier.fillMaxSize())
+        })
     }
     val tint = when (message.kind) {
         ChatKind.DONATION -> Color(0xFFFFC276)
@@ -324,26 +313,12 @@ private fun MessageRow(item: FeedItem, font: Float, onSelect: (ChatMessage) -> U
         }
         intensity.floatValue = 0f
     }
-    Row(Modifier.fillMaxWidth().drawBehind {
+    Text(line, Modifier.fillMaxWidth().drawBehind {
         val alpha = intensity.floatValue
         if (alpha > 0f) drawRoundRect(Brush.horizontalGradient(listOf(tint.copy(alpha = alpha), tint.copy(alpha = alpha * 0.18f))),
             cornerRadius = CornerRadius(9.dp.toPx()))
     }.combinedClickable(onClick = {}, onLongClickLabel = "Скрыть из чата", onLongClick = { onSelect(message) })
-        .padding(start = 1.dp, end = 3.dp, top = 8.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        SourceMark(item.source, Modifier.padding(top = 1.dp).size((nameSize * 1.4f).dp))
-        Column(Modifier.weight(1f)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(header, Modifier.weight(1f), fontFamily = ReaderFont, fontSize = nameSize.sp,
-                    lineHeight = (nameSize * 1.25f).sp, letterSpacing = (-0.12).sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (clock.isNotEmpty()) Text(clock, style = MaterialTheme.typography.labelSmall.copy(
-                    fontFeatureSettings = "tnum", fontSize = (font * 0.68f).coerceIn(10f, 18f).sp, letterSpacing = 0.25.sp),
-                    color = Color(0xFF929196))
-            }
-            if (body.isNotBlank()) Text(body, Modifier.padding(top = 2.dp), inlineContent = chatInlineEmotes(message.parts, (font * 1.35f).sp),
-                style = MaterialTheme.typography.bodyLarge, fontSize = font.sp, lineHeight = (font * 1.38f).sp, color = colors.onSurface)
-        }
-    }
-    HorizontalDivider(Modifier.padding(start = (nameSize * 1.4f + 8f).dp), thickness = 0.5.dp,
-        color = colors.outlineVariant.copy(alpha = 0.50f))
+        .padding(vertical = 3.dp), inlineContent = inlineContent, style = MaterialTheme.typography.bodyLarge,
+        fontSize = font.sp, lineHeight = (font * 1.32f).sp, color = colors.onSurface)
+    HorizontalDivider(thickness = 0.5.dp, color = colors.outlineVariant.copy(alpha = 0.42f))
 }

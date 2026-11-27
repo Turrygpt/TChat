@@ -25,6 +25,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -37,6 +40,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val bar = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         enableEdgeToEdge(statusBarStyle = bar, navigationBarStyle = bar)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.statusBars())
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) { model.watch() }
@@ -66,7 +73,8 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = ReaderColors, typography = ReaderTypography, shapes = ReaderShapes) {
                 Surface(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
-                        Box(Modifier.widthIn(max = 680.dp).fillMaxSize()) {
+                        val screenWidth = if (editing) Modifier.widthIn(max = 680.dp) else Modifier
+                        Box(screenWidth.fillMaxSize()) {
                             if (editing) {
                                 SourceSettings(
                                     settings = settings,

@@ -51,7 +51,7 @@ PORT=8080 npm run serve  # другой порт
 - **Android (TChat Reader)** объединяет чаты VK Видео Live, Twitch и YouTube на телефоне.
   Чат, фолловеры, подписки, рейды, награды и донаты отображаются текстом. Режим «Из TChat»
   получает ленту работающего настольного приложения по сети.
-  [Скачать TChat Reader 1.4 для Android](https://github.com/Turrygpt/TChat/releases/download/reader-v1.4/TChat-Reader-1.4.apk) · [Установка и подключение источников](android/README.md#tchat-reader).
+  [Скачать TChat Reader 1.5 для Android](https://github.com/Turrygpt/TChat/releases/download/reader-v1.5/TChat-Reader-1.5.apk) · [Установка и подключение источников](android/README.md#tchat-reader).
 
 - **Android (TChat Stream)** ведёт эфир с камеры телефона по RTMP, читает чат VK Видео Live
   и выводит в кадр алерты о фолловерах, рейдах и донатах. Приложение поддерживает

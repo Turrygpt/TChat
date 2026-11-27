@@ -4,12 +4,18 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tchat.stream.*
@@ -64,6 +70,35 @@ class MobileReaderTest {
         val parsed = parseTwitchChatMessage("@id=x;color=#112233;display-name=Spark;emotes=25:0-4 :spark!s PRIVMSG #c :Kappa")!!
         assertEquals("#112233", parsed.authorColor)
         assertTrue(parsed.parts.first() is ChatPart.Emote)
+    }
+
+    @Test fun platformAuthorAndMessageWrapInOneParagraph() {
+        val body = "Привет всем! " + "Длинная строка чата. ".repeat(4).trimEnd()
+        val sources = listOf(Source.VK, Source.TWITCH, Source.YOUTUBE)
+        val feed = ReaderFeed()
+        sources.forEachIndexed { index, source ->
+            val message = line(index.toLong(), ChatKind.VIEWER).copy(parts = listOf(ChatPart.Text(body)))
+            feed.update(source, listOf(message), false)
+        }
+        compose.setContent {
+            MaterialTheme(colorScheme = ReaderColors) {
+                Box(Modifier.width(260.dp)) { FeedScreen(feed.items, emptyMap()) {} }
+            }
+        }
+        for (source in sources) {
+            val expected = "${source.label}\u00A0Мира: $body"
+            compose.onNodeWithText(expected, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { getLayout ->
+                val results = mutableListOf<TextLayoutResult>()
+                assertTrue(getLayout(results))
+                val paragraph = results.single()
+                val badge = requireNotNull(paragraph.placeholderRects.single())
+                assertEquals(expected, paragraph.layoutInput.text.text)
+                assertEquals(0, paragraph.getLineForOffset(expected.indexOf("Привет")))
+                assertTrue(paragraph.lineCount > 1)
+                assertEquals(0f, badge.left, 1f)
+                assertEquals(badge.left, paragraph.getLineLeft(1), 1f)
+            }
+        }
     }
 
     @Test fun compactFeedZoomsAndCanHideAndRestoreAnAuthor() {
