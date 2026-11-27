@@ -82,11 +82,11 @@ private val nickPalette = listOf(
     0xFFff9f68, 0xFFb8f46a, 0xFFf78cff, 0xFF8ee3ff, 0xFFe06c75, 0xFF98c379,
     0xFF61afef, 0xFFe5c07b, 0xFFc678dd, 0xFF56b6c2, 0xFFd19a66, 0xFF7ec8e3,
     0xFFf4a261, 0xFF2a9d8f, 0xFFe76f51, 0xFFa8dadc, 0xFF457b9d, 0xFFfab283,
-).map(::Color)
+).map { readableNickColor(Color(it)) }
 private val hexColor = Regex("#[0-9a-fA-F]{6}")
 
 internal fun nickColor(source: Source, author: String, supplied: String): Color {
-    if (hexColor.matches(supplied)) return Color(0xFF000000 or supplied.drop(1).toLong(16))
+    if (hexColor.matches(supplied)) return readableNickColor(Color(0xFF000000 or supplied.drop(1).toLong(16)))
     val platform = when (source) {
         Source.DONATION_ALERTS -> "donationalerts"
         Source.DONATE_PAY -> "donatepay"
@@ -251,7 +251,8 @@ private const val PLATFORM_MARK = "reader-platform"
 internal fun eventPulseAlpha(remaining: Long): Float {
     if (remaining <= 0L) return 0f
     val age = HIGHLIGHT_DURATION_MS - remaining.coerceAtMost(HIGHLIGHT_DURATION_MS)
-    return (0.04 + 0.17 * (1 + cos(age * 2 * PI / 1800)) / 2).toFloat()
+    val wave = ((1 + cos(age * 2 * PI / 1800)) / 2).toFloat()
+    return 0.04f + (EVENT_PULSE_MAX_ALPHA - 0.04f) * wave
 }
 
 @Composable
@@ -293,11 +294,7 @@ private fun MessageRow(item: FeedItem, font: Float, onSelect: (ChatMessage) -> U
             Image(painterResource(source.icon), null, Modifier.fillMaxSize())
         })
     }
-    val tint = when (message.kind) {
-        ChatKind.DONATION -> Color(0xFFFFC276)
-        ChatKind.RAID -> Color(0xFFBD9AFF)
-        else -> MaterialTheme.colorScheme.primary
-    }
+    val tint = eventTint(message.kind)
     val intensity = remember(item.highlightUntil) { mutableFloatStateOf(0f) }
     LaunchedEffect(item.highlightUntil) {
         val deadline = item.highlightUntil

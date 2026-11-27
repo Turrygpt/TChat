@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.net.Uri
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -11,11 +12,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.ColorUtils
+import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tchat.stream.*
@@ -70,6 +74,39 @@ class MobileReaderTest {
         val parsed = parseTwitchChatMessage("@id=x;color=#112233;display-name=Spark;emotes=25:0-4 :spark!s PRIVMSG #c :Kappa")!!
         assertEquals("#112233", parsed.authorColor)
         assertTrue(parsed.parts.first() is ChatPart.Emote)
+    }
+
+    @Test fun paletteAndPlatformNicknamesStayReadableThroughoutEventHighlights() {
+        val surface = ReaderColors.surface.toArgb()
+        val peak = eventPulseAlpha(HIGHLIGHT_DURATION_MS)
+        val highlighted = listOf(ChatKind.DONATION, ChatKind.RAID, ChatKind.FOLLOW, ChatKind.SUBSCRIPTION).map { kind ->
+            ColorUtils.compositeColors(eventTint(kind).copy(alpha = peak).toArgb(), surface)
+        }
+        val palette = ('A'..'X').map { nickColor(Source.YOUTUBE, it.toString(), "") }
+        assertEquals(24, palette.distinct().size)
+        val supplied = listOf("#000000", "#101113", "#000080", "#2F4F4F", "#008000", "#FF0000", "#888888", "#FFFFFF")
+        val custom = supplied.map { nickColor(Source.TWITCH, "Мира", it) }
+        for (color in palette + custom) {
+            assertTrue("Feed contrast for $color", ColorUtils.calculateContrast(color.toArgb(), surface) >= 8.0)
+            for (background in highlighted) {
+                assertTrue("Highlight contrast for $color", ColorUtils.calculateContrast(color.toArgb(), background) >= 4.5)
+            }
+        }
+        val navy = nickColor(Source.TWITCH, "Мира", "#000080")
+        assertTrue(navy.blue > navy.red && navy.red == navy.green)
+        assertEquals(navy, nickColor(Source.VK, "Другой", "#000080"))
+        assertEquals(Color.White, custom.last())
+    }
+
+    @Test fun readerWindowKeepsTheScreenOnAfterRecreation() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun checkWindow() = scenario.onActivity { activity ->
+                assertTrue(activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
+            }
+            checkWindow()
+            scenario.recreate()
+            checkWindow()
+        }
     }
 
     @Test fun platformAuthorAndMessageWrapInOneParagraph() {
