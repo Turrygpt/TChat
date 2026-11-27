@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,20 +24,11 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
-
-internal val ReaderColors = darkColorScheme(
-    primary = Color(0xFFB3F3BF), onPrimary = Color(0xFF113B22),
-    secondaryContainer = Color(0xFF264536), onSecondaryContainer = Color(0xFFD5F9D9),
-    background = Color(0xFF101615), surface = Color(0xFF101615),
-    onSurface = Color(0xFFE8F0EB), onSurfaceVariant = Color(0xFFAEBCB4),
-    outline = Color(0xFF738179), outlineVariant = Color(0xFF35403A),
-)
 
 class MainActivity : ComponentActivity() {
     private val model by viewModels<ReaderModel>()
@@ -73,7 +63,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }.mapValues { (_, value) -> value?.ifBlank { "Подключено" } ?: "Подключение…" }
-            MaterialTheme(colorScheme = ReaderColors) {
+            MaterialTheme(colorScheme = ReaderColors, typography = ReaderTypography, shapes = ReaderShapes) {
                 Surface(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
                         Box(Modifier.widthIn(max = 680.dp).fillMaxSize()) {

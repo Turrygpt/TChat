@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
@@ -208,7 +209,7 @@ internal fun UpdateSettings(updater: ReaderUpdater) {
         is UpdateState.Ready -> installNotice.ifEmpty { "APK проверен. Установку подтвердит Android." }
         else -> "TChat Reader ${BuildConfig.VERSION_NAME}"
     }
-    ListItem(headlineContent = { Text(label) }, supportingContent = { Text(detail) },
+    ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(label) }, supportingContent = { Text(detail) },
         leadingContent = { Icon(Icons.Outlined.SystemUpdate, null) },
         modifier = Modifier.clickable(enabled = state !is UpdateState.Downloading && state != UpdateState.Checking) {
             when (state) {

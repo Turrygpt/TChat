@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -28,6 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -35,6 +40,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -147,41 +153,12 @@ internal fun FeedScreen(
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else key(tab) { MessageList(visible, font) { chosen = it } }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (viewers.isNotEmpty()) Icon(Icons.Outlined.Visibility, "Зрители онлайн", Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                val sources = Source.entries.filter { it in statuses || it in viewers }
-                if (sources.isEmpty()) Text("Нет подключений", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                sources.forEach { source ->
-                    val status = statuses[source] ?: "Нет данных о подключении"
-                    val count = viewers[source]
-                    val dot = when (status) {
-                        "Подключено" -> Color(0xFF76DAA2)
-                        "Подключение…" -> Color(0xFFE8BB70)
-                        else -> Color(0xFFE38A86)
-                    }
-                    Row(Modifier.clearAndSetSemantics { contentDescription = "${source.label}, $status" +
-                        (count?.let { ", зрителей $it" } ?: "") }, verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.size(24.dp)) {
-                            Image(painterResource(source.icon), null, Modifier.size(20.dp))
-                            Box(Modifier.align(Alignment.BottomEnd).size(10.dp).background(MaterialTheme.colorScheme.surface, CircleShape)
-                                .padding(2.dp).background(dot, CircleShape))
-                        }
-                        if (count != null) Text(count.toString(), style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-            IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.Settings, "Настройки") }
-        }
+        StatusBar(statuses, viewers, onSettings = { menu = true })
     }
-    if (menu) ModalBottomSheet(onDismissRequest = { menu = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    if (menu) ModalBottomSheet(onDismissRequest = { menu = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
-            Text("Настройки", style = MaterialTheme.typography.titleLarge)
+            Text("Настройки", Modifier.padding(bottom = 5.dp), style = MaterialTheme.typography.titleLarge)
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 FeedFilter.entries.forEachIndexed { index, option ->
                     SegmentedButton(selected = tab == option, onClick = { tab = option; menu = false }, icon = {},
@@ -191,11 +168,11 @@ internal fun FeedScreen(
                     }
                 }
             }
-            ListItem(headlineContent = { Text("Источники") }, leadingContent = { Icon(Icons.Outlined.Hub, null) },
+            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text("Источники") }, leadingContent = { Icon(Icons.Outlined.Hub, null) },
                 modifier = Modifier.clickable { menu = false; onSources() })
-            ListItem(headlineContent = { Text("Фильтры чата") }, leadingContent = { Icon(Icons.Outlined.Tune, null) },
+            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text("Фильтры чата") }, leadingContent = { Icon(Icons.Outlined.Tune, null) },
                 modifier = Modifier.clickable { menu = false; editFilters = true })
-            if (donationAction != null) ListItem(headlineContent = { Text(donationLabel) },
+            if (donationAction != null) ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(donationLabel) },
                 supportingContent = { if (donationState.isNotBlank()) Text(donationState) },
                 leadingContent = { Image(painterResource(Source.DONATION_ALERTS.icon), null, Modifier.size(24.dp)) },
                 modifier = Modifier.clickable(onClick = donationAction))
@@ -209,11 +186,70 @@ internal fun FeedScreen(
                     Icon(Icons.Outlined.Add, "Увеличить шрифт")
                 }
             }
+            HorizontalDivider(Modifier.padding(vertical = 5.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
             updateControls()
         }
     }
     if (editFilters) ChatFiltersDialog(filters, onFilters) { editFilters = false }
     chosen?.let { message -> HideMessageDialog(message, filters, { onFilters(it); chosen = null }, { chosen = null }) }
+}
+
+@Composable
+private fun StatusBar(statuses: Map<Source, String>, viewers: Map<Source, Long>, onSettings: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+        shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerLow,
+        border = BorderStroke(0.75.dp, colors.outlineVariant.copy(alpha = 0.78f))) {
+        Row(Modifier.padding(start = 15.dp, end = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (viewers.isNotEmpty()) Icon(Icons.Outlined.Visibility, "Зрители онлайн", Modifier.size(16.dp), tint = colors.onSurfaceVariant)
+                val sources = Source.entries.filter { it in statuses || it in viewers }
+                if (sources.isEmpty()) Text("Нет подключений", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                sources.forEach { source ->
+                    val status = statuses[source] ?: "Нет данных о подключении"
+                    val count = viewers[source]
+                    val dot = when (status) {
+                        "Подключено" -> Color(0xFF88C9A9)
+                        "Подключение…" -> Color(0xFFE5BD80)
+                        else -> Color(0xFFDE8E87)
+                    }
+                    Row(Modifier.clearAndSetSemantics { contentDescription = "${source.label}, $status" +
+                        (count?.let { ", зрителей $it" } ?: "") }, verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(23.dp)) {
+                            Image(painterResource(source.icon), null, Modifier.size(18.dp).align(Alignment.CenterStart))
+                            Box(Modifier.align(Alignment.BottomEnd).size(10.dp).background(colors.surfaceContainerLow, CircleShape)
+                                .padding(2.dp).background(dot, CircleShape))
+                        }
+                        if (count != null) Text(count.toString(), style = MaterialTheme.typography.labelLarge.copy(
+                            fontFeatureSettings = "tnum", fontWeight = FontWeight.SemiBold))
+                    }
+                }
+            }
+            VerticalDivider(Modifier.height(19.dp), thickness = 0.75.dp, color = colors.outlineVariant)
+            IconButton(onClick = onSettings) { Icon(Icons.Outlined.Settings, "Настройки", Modifier.size(20.dp), tint = colors.primary) }
+        }
+    }
+}
+
+@Composable
+private fun SourceMark(source: Source, modifier: Modifier) {
+    val glyph = when (source) {
+        Source.VK -> R.drawable.glyph_vk
+        Source.TWITCH -> R.drawable.glyph_twitch
+        Source.YOUTUBE -> R.drawable.glyph_youtube
+        Source.RUTUBE -> R.drawable.glyph_rutube
+        else -> source.icon
+    }
+    val ink = when (source) {
+        Source.VK -> Color(0xFF8AAFD9)
+        Source.TWITCH -> Color(0xFFB89DDB)
+        Source.YOUTUBE -> Color(0xFFD78E90)
+        Source.RUTUBE -> Color(0xFF82AEBF)
+        else -> null
+    }
+    Image(painterResource(glyph), source.label, modifier, colorFilter = ink?.let { ColorFilter.tint(it) })
 }
 
 @Composable
@@ -225,7 +261,7 @@ private fun MessageList(messages: List<FeedItem>, font: Float, onSelect: (ChatMe
             .collect { atStart -> if (atStart != null) follow = atStart }
     }
     LaunchedEffect(messages.first().message.key) { if (follow) list.requestScrollToItem(0) }
-    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp)) {
         items(messages, key = { it.message.key }) { item -> MessageRow(item, font, onSelect) }
     }
 }
@@ -241,30 +277,33 @@ internal fun eventPulseAlpha(remaining: Long): Float {
 @Composable
 private fun MessageRow(item: FeedItem, font: Float, onSelect: (ChatMessage) -> Unit) {
     val message = item.message
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val text = remember(item, muted, font) { buildAnnotatedString {
-        if (message.timeMillis > 0) withStyle(SpanStyle(color = muted, fontSize = (font * 0.75f).sp)) {
-            append(clockFormat.format(Instant.ofEpochMilli(message.timeMillis).atZone(ZoneId.systemDefault())) + "  ")
-        }
-        val kind = when (message.kind) {
-            ChatKind.DONATION -> "Донат"
-            ChatKind.RAID -> "Рейд"
-            ChatKind.FOLLOW -> "Фолловер"
-            ChatKind.SUBSCRIPTION -> "Подписка"
-            ChatKind.REWARD -> "Награда"
-            ChatKind.MUSIC -> "Заказ"
-            ChatKind.NOTICE -> "Событие"
-            else -> ""
-        }
-        if (kind.isNotEmpty()) withStyle(SpanStyle(color = muted)) { append("$kind · ") }
-        withStyle(SpanStyle(color = nickColor(item.source, message.author, message.authorColor), fontWeight = FontWeight.Bold)) {
+    val colors = MaterialTheme.colorScheme
+    val kind = when (message.kind) {
+        ChatKind.DONATION -> "Донат"
+        ChatKind.RAID -> "Рейд"
+        ChatKind.FOLLOW -> "Фолловер"
+        ChatKind.SUBSCRIPTION -> "Подписка"
+        ChatKind.REWARD -> "Награда"
+        ChatKind.MUSIC -> "Заказ"
+        ChatKind.NOTICE -> "Событие"
+        else -> ""
+    }
+    val nameSize = (font * 0.88f).coerceAtLeast(12f)
+    val header = remember(message, item.source, colors, font) { buildAnnotatedString {
+        withStyle(SpanStyle(color = nickColor(item.source, message.author, message.authorColor), fontWeight = FontWeight.SemiBold)) {
             append(message.author.ifBlank { "Аноним" })
         }
-        if (message.amountLabel.isNotBlank()) withStyle(SpanStyle(color = Color(0xFFFAD098), fontWeight = FontWeight.Bold)) {
+        if (kind.isNotEmpty()) withStyle(SpanStyle(color = colors.onSurfaceVariant, fontSize = (nameSize * 0.84f).sp)) {
+            append("  ·  $kind")
+        }
+        if (message.amountLabel.isNotBlank()) withStyle(SpanStyle(color = Color(0xFFE9CCA2), fontWeight = FontWeight.SemiBold)) {
             append("  " + message.amountLabel)
         }
-        if (message.text.isNotBlank()) { append(" — "); appendChatParts(message.parts) }
     } }
+    val body = remember(message.parts) { buildAnnotatedString { appendChatParts(message.parts) } }
+    val clock = remember(message.timeMillis) {
+        if (message.timeMillis > 0) clockFormat.format(Instant.ofEpochMilli(message.timeMillis).atZone(ZoneId.systemDefault())) else ""
+    }
     val tint = when (message.kind) {
         ChatKind.DONATION -> Color(0xFFFFC276)
         ChatKind.RAID -> Color(0xFFBD9AFF)
@@ -286,11 +325,25 @@ private fun MessageRow(item: FeedItem, font: Float, onSelect: (ChatMessage) -> U
         intensity.floatValue = 0f
     }
     Row(Modifier.fillMaxWidth().drawBehind {
-        if (intensity.floatValue > 0f) drawRect(tint.copy(alpha = intensity.floatValue))
+        val alpha = intensity.floatValue
+        if (alpha > 0f) drawRoundRect(Brush.horizontalGradient(listOf(tint.copy(alpha = alpha), tint.copy(alpha = alpha * 0.18f))),
+            cornerRadius = CornerRadius(9.dp.toPx()))
     }.combinedClickable(onClick = {}, onLongClickLabel = "Скрыть из чата", onLongClick = { onSelect(message) })
-        .padding(horizontal = 4.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Image(painterResource(item.source.icon), item.source.label, Modifier.padding(top = 2.dp).size((font * 1.2f).dp))
-        Text(text = text, inlineContent = chatInlineEmotes(message.parts, (font * 1.35f).sp), fontSize = font.sp, lineHeight = (font * 1.4f).sp)
+        .padding(start = 1.dp, end = 3.dp, top = 8.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        SourceMark(item.source, Modifier.padding(top = 1.dp).size((nameSize * 1.4f).dp))
+        Column(Modifier.weight(1f)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(header, Modifier.weight(1f), fontFamily = ReaderFont, fontSize = nameSize.sp,
+                    lineHeight = (nameSize * 1.25f).sp, letterSpacing = (-0.12).sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (clock.isNotEmpty()) Text(clock, style = MaterialTheme.typography.labelSmall.copy(
+                    fontFeatureSettings = "tnum", fontSize = (font * 0.68f).coerceIn(10f, 18f).sp, letterSpacing = 0.25.sp),
+                    color = Color(0xFF929196))
+            }
+            if (body.isNotBlank()) Text(body, Modifier.padding(top = 2.dp), inlineContent = chatInlineEmotes(message.parts, (font * 1.35f).sp),
+                style = MaterialTheme.typography.bodyLarge, fontSize = font.sp, lineHeight = (font * 1.38f).sp, color = colors.onSurface)
+        }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    HorizontalDivider(Modifier.padding(start = (nameSize * 1.4f + 8f).dp), thickness = 0.5.dp,
+        color = colors.outlineVariant.copy(alpha = 0.50f))
 }
