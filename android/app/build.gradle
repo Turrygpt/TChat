@@ -3,6 +3,13 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
+def personalProfile = new Properties()
+def localProperties = rootProject.file('local.properties')
+def includePersonalProfile = providers.gradleProperty('tchatPersonalProfile').map { it.toBoolean() }.getOrElse(true)
+if (includePersonalProfile && localProperties.isFile()) {
+    localProperties.withInputStream { personalProfile.load(it) }
+}
+
 android {
     namespace 'com.tchat.stream'
     compileSdk 37
@@ -11,8 +18,11 @@ android {
         applicationId "com.tchat.stream"
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 16
+        versionName "1.5.1"
+        buildConfigField 'String', 'PERSONAL_RTMP_URL', groovy.json.JsonOutput.toJson(personalProfile.getProperty('tchatRtmpUrl', ''))
+        buildConfigField 'String', 'PERSONAL_STREAM_KEY', groovy.json.JsonOutput.toJson(personalProfile.getProperty('tchatStreamKey', ''))
+        buildConfigField 'String', 'PERSONAL_VK_CHANNEL', groovy.json.JsonOutput.toJson(personalProfile.getProperty('tchatVkChannel', ''))
     }
 
     buildTypes {
@@ -27,8 +37,20 @@ android {
     }
     buildFeatures {
         compose true
+        buildConfig true
+    }
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('personalDonationAssets').get().asFile)
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('donationWidget').get().asFile)
+    androidResources {
+        noCompress += ['mp3', 'wav', 'm4a', 'ogg', 'flac']
     }
 }
+
+def copyDonationStyles = tasks.register('copyDonationStyles', Copy) {
+    from(rootProject.file('../widgets/widget.css'))
+    into(layout.buildDirectory.dir('donationWidget/alerts'))
+}
+tasks.named('preBuild').configure { dependsOn(copyDonationStyles) }
 
 dependencies {
     implementation platform('androidx.compose:compose-bom:2026.06.01')
@@ -38,6 +60,10 @@ dependencies {
     implementation 'androidx.activity:activity-compose:1.11.0'
     implementation 'androidx.core:core-ktx:1.16.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'io.coil-kt.coil3:coil-compose:3.3.0'
+    implementation 'io.coil-kt.coil3:coil-network-okhttp:3.3.0'
+    implementation 'io.coil-kt.coil3:coil-gif:3.3.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     // Стриминговый движок: RTMP + камера + GL.
     implementation 'com.github.pedroSG94.RootEncoder:library:2.8.0'
