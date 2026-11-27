@@ -12,6 +12,7 @@ import org.json.JSONObject
 
 private const val VK_API = "https://api.live.vkvideo.ru/v1/blog"
 private const val VK_CHAT_BOT_ID = 12529926L
+private val VK_CHANNEL_SLUG = Regex("[a-zA-Z0-9_.-]{1,100}")
 private val FOLLOW = Regex("""^теперь отслеживает канал[.!]?$""", RegexOption.IGNORE_CASE)
 private val RAID = Regex("""^начинает на вас рейд с (\d+) зрител\p{L}*[.!]?$""", RegexOption.IGNORE_CASE)
 
@@ -21,6 +22,16 @@ internal enum class VkAlertType(val title: String) {
 }
 
 internal data class VkAlert(val type: VkAlertType, val name: String, val viewers: Int? = null)
+
+internal fun vkChannelSlug(value: String): String? {
+    val input = value.trim()
+    val uri = Uri.parse(input).normalizeScheme()
+    val slug = if (uri.scheme == null) input.trim('/') else {
+        if (uri.scheme != "https" || !uri.host.equals("live.vkvideo.ru", ignoreCase = true) || uri.userInfo != null) return null
+        uri.pathSegments.firstOrNull() ?: return null
+    }
+    return slug.takeIf { it != "." && it != ".." && VK_CHANNEL_SLUG.matches(it) }
+}
 
 internal class VkLiveChat(private val channel: String) {
     suspend fun monitor(
@@ -57,10 +68,9 @@ internal class VkLiveChat(private val channel: String) {
         }
     }
 
-    suspend fun viewerCount(): Long? {
+    suspend fun streamInfo(): JSONObject {
         val payload = JSONObject(fetch(""))
-        val stream = if (payload.has("count") || payload.has("isOnline")) payload else payload.optJSONObject("data") ?: payload
-        return parseVkViewerCount(stream)
+        return if (payload.has("count") || payload.has("isOnline")) payload else payload.optJSONObject("data") ?: payload
     }
 
     private suspend fun fetch(path: String) = requestText(
@@ -93,7 +103,7 @@ private fun parseVkChatMessage(item: JSONObject): ChatMessage? {
     val id = item.optLong("id").takeIf { it > 0L } ?: return null
     val author = item.optJSONObject("author") ?: return null
     val name = displayName(author).takeIf(String::isNotEmpty) ?: return null
-    val data = item.optJSONArray("data") ?: return null
+    val data = item.optJSONArray("data") ?: JSONArray()
     val parts = (0 until data.length()).mapNotNull(data::optJSONObject)
     val content = parts.mapNotNull { part ->
         when (part.optString("type")) {
@@ -104,19 +114,37 @@ private fun parseVkChatMessage(item: JSONObject): ChatMessage? {
             else -> null
         }
     }
-    val isBot = author.optLong("id") == VK_CHAT_BOT_ID
+    val isBot = author.optLong("id") == VK_CHAT_BOT_ID || (!author.has("id") && name.equals("ChatBot", true))
     val alert = if (isBot) parseBotAlert(parts) else null
     val botText = if (isBot) parts.filter { it.optString("type") == "text" }.joinToString(" ", transform = ::decodedText) else ""
+    val reward = item.optJSONObject("reward") ?: item.optJSONObject("rewardInfo")
+    val rewardName = reward?.let { listOf("name", "title", "rewardName").firstNotNullOfOrNull { field ->
+        it.optString(field).takeIf(String::isNotBlank)
+    } }
     val kind = when {
         alert?.type == VkAlertType.FOLLOW -> ChatKind.FOLLOW
         alert?.type == VkAlertType.RAID -> ChatKind.RAID
-        botText.contains("наград", ignoreCase = true) || item.optJSONObject("reward") != null -> ChatKind.REWARD
-        botText.contains("подписк", ignoreCase = true) -> ChatKind.SUBSCRIPTION
+        botText.contains("наград", ignoreCase = true) || rewardName != null -> ChatKind.REWARD
+        botText.contains("подпис", ignoreCase = true) -> ChatKind.SUBSCRIPTION
+        botText.contains("из портала", ignoreCase = true) -> ChatKind.NOTICE
         isBot -> ChatKind.BOT
         else -> ChatKind.VIEWER
     }
     val createdAt = unixTimeMillis(item.optLong("createdAt"))
-    return ChatMessage(id, name, content, kind, createdAt, alert = alert).takeIf { it.text.isNotEmpty() }
+    val details = if (rewardName != null) {
+        val cost = reward.optInt("price", reward.optInt("cost"))
+        listOfNotNull("активировал «$rewardName»", if (cost > 0) "$cost баллов" else null,
+            reward.optString("message").ifBlank { content.joinToString("") { it.text } }.takeIf(String::isNotBlank))
+            .joinToString(" · ")
+    } else null
+    val actor = alert?.name ?: if (isBot && kind in setOf(ChatKind.SUBSCRIPTION, ChatKind.REWARD, ChatKind.NOTICE))
+        parts.firstOrNull { it.optString("type") == "mention" }?.let(::displayName) else null
+    val displayParts = when {
+        details != null -> listOf(ChatPart.Text(details))
+        actor != null && botText.isNotBlank() -> listOf(ChatPart.Text(botText))
+        else -> content
+    }
+    return ChatMessage(id, actor?.ifBlank { name } ?: name, displayParts, kind, createdAt, alert = alert).takeIf { it.text.isNotEmpty() }
 }
 
 private fun decodeEmote(part: JSONObject): ChatPart {

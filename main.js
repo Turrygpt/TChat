@@ -196,6 +196,7 @@ let countdownTickTimer = null;
 const DEFAULT_COUNTDOWN_SECONDS = 7200;
 const DEFAULT_TEXTS_FONT_SIZE = 32;
 let alertQueue = [];
+const recentChatEvents = new Map();
 let musicQueue = [];
 let firstMessageGreetingDay = getChatDayKey();
 let firstMessageGreetingUsers = new Set();
@@ -2733,6 +2734,7 @@ function enqueueStickerFromReward(event = {}) {
   }
   const rule = findStickerRule(event);
 
+  publishChatEvent('reward', event);
   rememberReward({ ...event, matched: Boolean(rule) });
 
   if (!rule) {
@@ -3363,6 +3365,7 @@ function createLocalServer() {
     socket.emit('chat:filters', chatHiddenFilters);
     socket.emit('chat:status', getChatStatusPayload());
     socket.emit('chat:history', getRecentChatMessages(20));
+    socket.emit('chat:events', [...recentChatEvents.values()]);
     socket.emit('widgets:state', getStreamWidgetsPayload());
     socket.emit('stickers:settings', stickerSettings);
 
@@ -3776,6 +3779,17 @@ function broadcastChatMessage(message) {
   broadcastChatStatus();
 }
 
+// Текстовые события доступны читателям и при выключенных правилах показа в OBS.
+function publishChatEvent(type, event) {
+  if (!event?.id || (event.isTest && !event.showInChat)) return;
+  const key = JSON.stringify([type, event.platform || event.source, event.id]);
+  if (recentChatEvents.has(key)) return;
+  const item = { type, event };
+  recentChatEvents.set(key, item);
+  if (recentChatEvents.size > 100) recentChatEvents.delete(recentChatEvents.keys().next().value);
+  socketServer?.emit('chat:event', item);
+}
+
 function broadcastChatUiSettings() {
   socketServer?.emit('chat:ui-settings', chatUiSettings);
   mainWindow?.webContents.send('chat:ui-settings', chatUiSettings);
@@ -4033,6 +4047,7 @@ function maybeEnqueuePortalAlert(message = {}) {
 
 function enqueueSubscriberAlert(subscriber = {}) {
   const normalized = normalizeSubscriber(subscriber);
+  publishChatEvent('subscriber', normalized);
   const changes = advanceSubscriberGoals(streamWidgets, normalized);
   if (changes.length) {
     saveStreamWidgets(streamWidgets);
@@ -4067,6 +4082,7 @@ function enqueueSubscriberAlert(subscriber = {}) {
 
 function enqueueSubscriptionRenewalAlert(renewal = {}) {
   const normalized = normalizeSubscriptionRenewal(renewal);
+  publishChatEvent('renewal', normalized);
   const rule = getSystemAlertRule('subscriptionRenewal');
   if (!rule.enabled) {
     return null;
@@ -4095,6 +4111,7 @@ function enqueueSubscriptionRenewalAlert(renewal = {}) {
 
 function enqueueRaidAlert(raid = {}) {
   const normalized = normalizeRaid(raid);
+  publishChatEvent('raid', normalized);
   const rule = getSystemAlertRule('raid');
   if (!rule.enabled) {
     return null;
@@ -4163,6 +4180,7 @@ function normalizeRaid(payload = {}) {
 
 function enqueueDonationAlert(donation, { registerDonor = true } = {}) {
   const normalizedDonation = normalizeDonation(donation);
+  publishChatEvent('donation', { ...normalizedDonation, source: donation?.source || '' });
   addDonationToGoal(normalizedDonation.amount);
   if (registerDonor && String(donation?.username || '').trim()) {
     registerDonationGiveawayDonor({ ...normalizedDonation, username: donation.username });
@@ -5988,6 +6006,8 @@ async function pollVkChatOnce() {
 
     broadcastChatMessage({
       platform: 'vk',
+      id: message.id,
+      readerEventId: message.subscriptionRenewalEvent?.id || message.subscriberEvent?.id || message.rewardEvent?.id,
       platformIcon: getPlatformIconUrl('vk'),
       user: message.user,
       text: message.text,

@@ -21,9 +21,11 @@ import java.util.concurrent.TimeUnit
 
 internal class ChatFeedUpdates(
     val messages: (List<ChatMessage>, replace: Boolean) -> Unit,
-    val viewers: (Long?) -> Unit,
+    val viewers: ((Long?) -> Unit)? = null,
     val notice: (String) -> Unit,
-    val alert: (VkAlert) -> Unit,
+    val alert: (VkAlert) -> Unit = {},
+    val includeVkLikes: Boolean = false,
+    val history: (List<ChatMessage>) -> Unit = { messages(it, false) },
 )
 
 internal suspend fun watchChatPlatform(
@@ -37,16 +39,39 @@ internal suspend fun watchChatPlatform(
     when (platform) {
         ChatPlatform.VK -> {
             val vk = VkLiveChat(address)
-            launch { pollViewerCount(countInterval, updates.viewers, vk::viewerCount) }
+            var lastLikes: Long? = null
+            var lastStream = ""
+            var page = emptyList<ChatMessage>()
+            val likes = ArrayDeque<ChatMessage>()
+            updates.viewers?.let { onCount -> launch {
+                pollViewerCount(countInterval, onCount) {
+                    val stream = vk.streamInfo()
+                    if (updates.includeVkLikes && receiveMessages) {
+                        val id = stream.optString("id").ifBlank { stream.optString("vid") }
+                        val total = stream.optJSONObject("count")?.optLong("likes", -1)?.takeIf { it >= 0 }
+                        val before = lastLikes
+                        if (before != null && total != null && id == lastStream && total > before && stream.optBoolean("isOnline", true)) {
+                            val time = System.currentTimeMillis()
+                            likes.addFirst(ChatMessage(time, address, listOf(ChatPart.Text("Отметки «Нравится» · +${total - before}")),
+                                ChatKind.NOTICE, time, platformKey = "vk:likes:$id:$total"))
+                            if (likes.size > 30) likes.removeLast()
+                            updates.messages(page + likes, true)
+                        }
+                        lastLikes = total
+                        lastStream = id
+                    }
+                    parseVkViewerCount(stream)
+                }
+            } }
             if (receiveMessages) vk.monitor(
                 interval = if (economy) 5_000L else 3_000L,
-                onMessages = { updates.messages(it, true); updates.notice("") },
+                onMessages = { page = it; updates.messages(it + likes, true); updates.notice("") },
                 onError = { updates.notice("Чат VK недоступен. Повторяем…") },
                 onAlert = updates.alert,
             )
         }
         ChatPlatform.TWITCH -> {
-            launch { pollViewerCount(countInterval, updates.viewers) { twitchViewerCount(address) } }
+            updates.viewers?.let { launch { pollViewerCount(countInterval, it) { twitchViewerCount(address) } } }
             if (receiveMessages) watchTwitchChat(address, updates)
         }
         ChatPlatform.YOUTUBE -> watchYouTube(address, receiveMessages, countInterval, updates)
@@ -73,8 +98,10 @@ internal val chatHttp = OkHttpClient.Builder()
     .readTimeout(9, TimeUnit.SECONDS)
     .build()
 
-internal suspend fun requestText(request: Request): String = suspendCancellableCoroutine { continuation ->
-    val call = chatHttp.newCall(request)
+internal class FeedHttpError(val status: Int, val retryAfterSeconds: Long?) : IOException("HTTP $status")
+
+internal suspend fun requestText(request: Request, client: OkHttpClient = chatHttp): String = suspendCancellableCoroutine { continuation ->
+    val call = client.newCall(request)
     continuation.invokeOnCancellation { call.cancel() }
     call.enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) = continuation.resumeWithException(e)
@@ -82,7 +109,7 @@ internal suspend fun requestText(request: Request): String = suspendCancellableC
         override fun onResponse(call: Call, response: Response) {
             val result = runCatching {
                 response.use {
-                    if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+                    if (!it.isSuccessful) throw FeedHttpError(it.code, it.header("Retry-After")?.toLongOrNull())
                     it.body?.string() ?: throw IOException("Empty response")
                 }
             }

@@ -26,30 +26,6 @@ const val MIN_BITRATE_KBPS = 3000
 const val MAX_BITRATE_KBPS = 6000
 const val DEFAULT_BITRATE_KBPS = 4500
 
-private val VK_CHANNEL_SLUG = Regex("[a-zA-Z0-9_.-]{1,100}")
-
-internal enum class ChatPlatform(val label: String, val addressHint: String) {
-    VK("VK", "Ник или ссылка на канал"),
-    TWITCH("Twitch", "Ник или ссылка на канал"),
-    YOUTUBE("YouTube", "@ник канала или ссылка на эфир");
-
-    fun normalize(input: String): String? = when (this) {
-        VK -> vkChannelSlug(input)
-        TWITCH -> twitchChannelName(input)
-        YOUTUBE -> youTubeAddress(input)
-    }
-}
-
-internal fun vkChannelSlug(value: String): String? {
-    val input = value.trim()
-    val uri = Uri.parse(input).normalizeScheme()
-    val slug = if (uri.scheme == null) input.trim('/') else {
-        if (uri.scheme != "https" || !uri.host.equals("live.vkvideo.ru", ignoreCase = true)) return null
-        uri.pathSegments.firstOrNull() ?: return null
-    }
-    return slug.takeIf { it != "." && it != ".." && VK_CHANNEL_SLUG.matches(it) }
-}
-
 internal data class StreamSettings(
     val rtmpUrl: String = "",
     val streamKey: String = "",

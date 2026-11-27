@@ -1,15 +1,5 @@
 package com.tchat.stream
 
-internal enum class ChatKind(val label: String) {
-    VIEWER("Сообщения зрителей"),
-    BOT("Сообщения бота"),
-    FOLLOW("Фолловеры"),
-    RAID("Рейды"),
-    SUBSCRIPTION("Подписки"),
-    REWARD("Награды"),
-    DONATION("Донаты"),
-}
-
 private val whitespace = Regex("\\s+")
 
 internal fun chatFilterKey(value: String) = value.trim().replace(whitespace, " ").lowercase()

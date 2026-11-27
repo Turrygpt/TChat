@@ -118,29 +118,61 @@ private fun twitchLines(channelName: String) = callbackFlow {
 internal fun parseTwitchChatMessage(line: String): ChatMessage? {
     val match = twitchIrcMessage.matchEntire(line) ?: return null
     val (rawTags, prefix, command, text) = match.destructured
-    val tags = rawTags.split(';').associate { it.substringBefore('=') to it.substringAfter('=', "") }
+    val tags = rawTags.split(';').associate { it.substringBefore('=') to decodeIrcTag(it.substringAfter('=', "")) }
     val id = tags["id"]?.takeIf(String::isNotBlank) ?: return null
     val time = tags["tmi-sent-ts"]?.toLongOrNull() ?: System.currentTimeMillis()
-    val alert = if (tags["msg-id"] == "raid") {
-        val raider = tags["msg-param-displayName"]?.takeIf(String::isNotBlank) ?: return null
+    val type = if (tags["msg-id"] == "sharedchatnotice") tags["source-msg-id"] else tags["msg-id"]
+    val alert = if (type == "raid") {
+        val raider = tags["msg-param-displayName"] ?: tags["msg-param-login"] ?: tags["display-name"] ?: "Зритель"
         VkAlert(VkAlertType.RAID, raider, tags["msg-param-viewerCount"]?.toIntOrNull())
     } else null
-    val name = alert?.name ?: tags["display-name"]?.takeIf(String::isNotBlank) ?: prefix.substringBefore('!')
+    val name = if (type?.startsWith("anon") == true) "Аноним" else
+        alert?.name ?: tags["display-name"]?.takeIf(String::isNotBlank) ?: tags["login"] ?: prefix.substringBefore('!')
+    val bits = tags["bits"]?.toLongOrNull()?.takeIf { it > 0L }
+    val plan = when (tags["msg-param-sub-plan"]?.lowercase()) {
+        "prime" -> " (Prime)"
+        "1000" -> " (Tier 1)"
+        "2000" -> " (Tier 2)"
+        "3000" -> " (Tier 3)"
+        else -> ""
+    }
+    val eventText = if (command == "USERNOTICE") when (type) {
+        "sub" -> "оформил подписку$plan"
+        "resub" -> "продлил подписку$plan" + (tags["msg-param-cumulative-months"]?.let { " · месяцев $it" } ?: "")
+        "subgift", "anonsubgift" -> "подарил подписку$plan" +
+            ((tags["msg-param-recipient-display-name"] ?: tags["msg-param-recipient-user-name"])?.let { " зрителю $it" } ?: "")
+        "submysterygift", "anonsubmysterygift" -> "подарил подписки$plan" +
+            (tags["msg-param-mass-gift-count"]?.let { " · количество $it" } ?: "")
+        "giftpaidupgrade", "anongiftpaidupgrade", "primepaidupgrade" -> "перешёл на платную подписку$plan"
+        "raid" -> "привёл рейд" + (alert?.viewers?.let { " · зрителей $it" } ?: "")
+        "unraid" -> "отменил рейд"
+        "announcement" -> "Объявление"
+        else -> tags["system-msg"].orEmpty()
+    } else ""
     val kind = when {
         alert != null -> ChatKind.RAID
-        command == "USERNOTICE" && tags["msg-id"] in setOf("sub", "resub", "subgift") -> ChatKind.SUBSCRIPTION
-        command != "PRIVMSG" -> return null
-        tags["custom-reward-id"]?.isNotBlank() == true -> ChatKind.REWARD
+        command == "USERNOTICE" && type in setOf("sub", "resub", "subgift", "anonsubgift", "submysterygift",
+            "anonsubmysterygift", "giftpaidupgrade", "anongiftpaidupgrade", "primepaidupgrade") -> ChatKind.SUBSCRIPTION
+        command == "USERNOTICE" -> ChatKind.NOTICE
+        bits != null -> ChatKind.DONATION
+        tags["custom-reward-id"]?.isNotBlank() == true || type == "highlighted-message" -> ChatKind.REWARD
         else -> ChatKind.VIEWER
     }
-    val content = text.ifBlank {
-        if (alert != null) listOfNotNull("Рейд", alert.viewers?.let { "зрителей: $it" }).joinToString(" · ")
-        else "Подписка"
+    val parts = buildList {
+        if (eventText.isNotBlank()) add(ChatPart.Text(eventText + if (text.isBlank()) "" else " — "))
+        if (text.isNotBlank()) addAll(twitchMessageParts(text, tags["emotes"].orEmpty()))
     }
+    if (parts.isEmpty()) return null
     return ChatMessage(
-        time, name, twitchMessageParts(content, tags["emotes"].orEmpty()), kind, time,
-        alert = alert, platformKey = "twitch:$id",
+        time, name, parts, kind, time,
+        amountLabel = bits?.let { "$it Bits" }.orEmpty(), alert = alert, platformKey = "twitch:$id",
+        authorColor = tags["color"].orEmpty(),
     )
+}
+
+private val escapedTag = Regex("""\\(.)""")
+private fun decodeIrcTag(value: String) = escapedTag.replace(value) {
+    when (val c = it.groupValues[1]) { "s" -> " "; ":" -> ";"; "r", "n" -> " "; else -> c }
 }
 
 private fun twitchMessageParts(text: String, tags: String): List<ChatPart> {

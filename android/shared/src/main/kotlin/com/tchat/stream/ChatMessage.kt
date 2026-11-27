@@ -1,5 +1,17 @@
 package com.tchat.stream
 
+internal enum class ChatKind(val label: String) {
+    VIEWER("Сообщения зрителей"),
+    BOT("Сообщения бота"),
+    FOLLOW("Фолловеры"),
+    RAID("Рейды"),
+    SUBSCRIPTION("Подписки"),
+    REWARD("Награды"),
+    NOTICE("События эфира"),
+    MUSIC("Музыкальные заявки"),
+    DONATION("Донаты"),
+}
+
 internal sealed interface ChatPart {
     val text: String
 
@@ -18,6 +30,7 @@ internal data class ChatMessage(
     val amountLabel: String = "",
     val alert: VkAlert? = null,
     val platformKey: String? = null,
+    val authorColor: String = "",
 ) {
     val key = platformKey ?: if (kind == ChatKind.DONATION) "donationalerts:$id" else "vk:$id"
     val text = parts.joinToString("") { it.text }.trim()

@@ -49,7 +49,12 @@ private const val MAX_BODY = 16_384
 private const val FIRST_POLL_ALERT_AGE_MS = 120_000L
 private const val STORED_DONATION_IDS = 200
 
-internal class DonationAccount(context: Context, private val scope: CoroutineScope) {
+internal class DonationAccount(
+    context: Context,
+    private val scope: CoroutineScope,
+    private val returnUri: Uri? = null,
+    private val donationsUrl: URL = URL(DONATIONS_URL),
+) {
     private val prefs = context.getSharedPreferences("tchat_donation_account", Context.MODE_PRIVATE)
     private val _token = MutableStateFlow(prefs.getString("accessToken", "").orEmpty())
     val token = _token.asStateFlow()
@@ -67,19 +72,25 @@ internal class DonationAccount(context: Context, private val scope: CoroutineSco
 
     fun authorize(clientId: String, openBrowser: (Uri) -> Unit) {
         if (clientId.isEmpty() || login?.isActive == true) return
+        val previous = login
+        _authorizing.value = true
+        _notice.value = "Подтвердите чтение донатов в браузере"
         login = scope.launch {
-            _authorizing.value = true
-            _notice.value = "Подтверди доступ в браузере"
             try {
-                val grant = browserGrant(clientId, openBrowser)
+                previous?.join()
+                val grant = browserGrant(clientId, returnUri, openBrowser)
+                _notice.value = "Проверяем доступ к донатам…"
                 // Check read access before replacing any previously saved session.
-                val history = withContext(Dispatchers.IO) { fetchDonations(grant) }
+                val history = withContext(Dispatchers.IO) { fetchDonations(grant, donationsUrl) }
                 clearDonations()
                 publishDonations(history.distinctBy(Donation::id), emptyList(), System.currentTimeMillis())
+                rememberSeen(history)
                 saveToken(grant)
                 _notice.value = "Подключено"
             } catch (failure: LoginError) {
                 _notice.value = failure.message.orEmpty()
+            } catch (_: java.net.BindException) {
+                _notice.value = "Вход уже открыт в другом приложении на телефоне. Закройте его и повторите."
             } catch (_: AccessDenied) {
                 _notice.value = "DonationAlerts не предоставил доступ к донатам"
             } catch (_: IOException) {
@@ -87,27 +98,30 @@ internal class DonationAccount(context: Context, private val scope: CoroutineSco
             } catch (_: JSONException) {
                 _notice.value = "Не удалось проверить доступ к DonationAlerts"
             } finally {
-                _authorizing.value = false
+                if (login == currentCoroutineContext()[Job]) _authorizing.value = false
             }
         }
     }
 
     fun cancelAuthorization() {
         login?.cancel()
+        _authorizing.value = false
         _notice.value = if (_token.value.isEmpty()) "Вход не выполнен" else "Подключено"
     }
 
     fun disconnect() {
         login?.cancel()
+        _authorizing.value = false
         saveToken("")
         clearDonations()
         _notice.value = "Вход не выполнен"
     }
 
-    suspend fun monitor(accessToken: String, onDonation: (Donation) -> Unit) {
+    suspend fun monitor(accessToken: String, onDonation: (Donation) -> Unit, onPage: ((List<ChatMessage>) -> Unit)? = null) {
+        _notice.value = "Подключение…"
         while (currentCoroutineContext().isActive) {
             val page = try {
-                withContext(Dispatchers.IO) { fetchDonations(accessToken) }
+                withContext(Dispatchers.IO) { fetchDonations(accessToken, donationsUrl) }
             } catch (_: AccessDenied) {
                 if (_token.value == accessToken) {
                     saveToken("")
@@ -120,6 +134,7 @@ internal class DonationAccount(context: Context, private val scope: CoroutineSco
             } catch (_: JSONException) {
                 null
             }
+            if (_token.value != accessToken) return
             if (page == null) {
                 _notice.value = "Ошибка связи. Повторяем подключение…"
             } else {
@@ -135,6 +150,7 @@ internal class DonationAccount(context: Context, private val scope: CoroutineSco
                     }
                 }.sortedBy(Donation::id)
                 publishDonations(donations, arriving, now)
+                onPage?.invoke(_chat.value)
                 rememberSeen(donations)
                 arriving.forEach(onDonation)
                 _notice.value = "Подключено"
@@ -179,8 +195,8 @@ internal class DonationAccount(context: Context, private val scope: CoroutineSco
 private class AccessDenied : IOException()
 private class LoginError(message: String) : IOException(message)
 
-private fun fetchDonations(token: String): List<Donation> {
-    val connection = (URL(DONATIONS_URL).openConnection() as HttpURLConnection).apply {
+private fun fetchDonations(token: String, url: URL): List<Donation> {
+    val connection = (url.openConnection() as HttpURLConnection).apply {
         connectTimeout = 8000
         readTimeout = 8000
         instanceFollowRedirects = false
@@ -193,30 +209,30 @@ private fun fetchDonations(token: String): List<Donation> {
             200 -> Unit
             else -> throw IOException("DonationAlerts request failed")
         }
-        val payload = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-        val rows = payload.getJSONArray("data")
-        return (0 until rows.length()).mapNotNull { index ->
-            val row = rows.optJSONObject(index) ?: return@mapNotNull null
-            val id = row.optLong("id", row.optLong("alert_id")).takeIf { it > 0L } ?: return@mapNotNull null
-            val amount = row.optDouble("amount", row.optDouble("amount_in_user_currency", 0.0))
-                .takeIf(Double::isFinite) ?: 0.0
-            Donation(
-                id,
-                row.string("username"),
-                amount,
-                row.string("currency").ifEmpty { row.string("currency_code") }.ifEmpty { "RUB" }.uppercase(),
-                row.string("message"),
-                row.donationTimeMillis(),
-            )
-        }
+        return connection.inputStream.bufferedReader(Charsets.UTF_8).use { parseDonationAlertsPage(it.readText()) }
     } finally {
         connection.disconnect()
     }
 }
 
+internal fun parseDonationAlertsPage(body: String): List<Donation> =
+    JSONObject(body).getJSONArray("data").objects().mapNotNull { row ->
+        val id = row.optLong("id", row.optLong("alert_id")).takeIf { it > 0L } ?: return@mapNotNull null
+        val amount = row.optDouble("amount", row.optDouble("amount_in_user_currency", 0.0))
+            .takeIf(Double::isFinite) ?: 0.0
+        Donation(
+            id,
+            row.string("username"),
+            amount,
+            row.string("currency").ifEmpty { row.string("currency_code") }.ifEmpty { "RUB" }.uppercase(),
+            row.string("message"),
+            row.donationTimeMillis(),
+        )
+    }
+
 private fun JSONObject.string(key: String) = if (isNull(key)) "" else optString(key).trim()
 
-private fun JSONObject.donationTimeMillis(): Long {
+internal fun JSONObject.donationTimeMillis(): Long {
     val timestamp = unixTimeMillis(optLong("created_at_ts"))
     if (timestamp > 0L) return timestamp
     val text = string("created_at").replaceFirst(' ', 'T')
@@ -226,17 +242,17 @@ private fun JSONObject.donationTimeMillis(): Long {
         .getOrDefault(0L)
 }
 
-private fun Donation.chatMessage(timeMillis: Long): ChatMessage {
+internal fun Donation.chatMessage(timeMillis: Long = createdAtMillis, platformKey: String? = null): ChatMessage {
     val number = NumberFormat.getNumberInstance(Locale.forLanguageTag("ru-RU")).apply { maximumFractionDigits = 2 }
     val symbol = if (currency == "RUB") "₽" else currency
     return ChatMessage(
-        id, username, if (message.isEmpty()) emptyList() else listOf(ChatPart.Text(message)),
-        ChatKind.DONATION, timeMillis, amountLabel = "${number.format(amount)} $symbol",
+        id, username.ifBlank { "Аноним" }, if (message.isEmpty()) emptyList() else listOf(ChatPart.Text(message)),
+        ChatKind.DONATION, timeMillis, amountLabel = "${number.format(amount)} $symbol", platformKey = platformKey,
     )
 }
 
 /** The registered TChat callback runs on the phone only while the browser is authorizing. */
-private suspend fun browserGrant(clientId: String, openBrowser: (Uri) -> Unit): String = withContext(Dispatchers.IO) {
+private suspend fun browserGrant(clientId: String, returnUri: Uri?, openBrowser: (Uri) -> Unit): String = withContext(Dispatchers.IO) {
     val state = UUID.randomUUID().toString()
     val url = Uri.parse(AUTHORIZE_URL).buildUpon()
         .appendQueryParameter("client_id", clientId)
@@ -260,7 +276,7 @@ private suspend fun browserGrant(clientId: String, openBrowser: (Uri) -> Unit): 
         while (SystemClock.elapsedRealtime() < deadline) {
             currentCoroutineContext().ensureActive()
             val callback = try {
-                listener.accept().use { it.readGrant(state) }
+                listener.accept().use { it.readGrant(state, returnUri) }
             } catch (failure: LoginError) {
                 throw failure
             } catch (_: IOException) {
@@ -272,7 +288,7 @@ private suspend fun browserGrant(clientId: String, openBrowser: (Uri) -> Unit): 
     throw LoginError("Время входа истекло. Открой DonationAlerts ещё раз.")
 }
 
-private fun Socket.readGrant(state: String): String? {
+private fun Socket.readGrant(state: String, returnUri: Uri?): String? {
     soTimeout = 2500
     val reader = getInputStream().bufferedReader(Charsets.UTF_8)
     val line = reader.readLine()?.split(' ', limit = 3) ?: return null
@@ -285,7 +301,10 @@ private fun Socket.readGrant(state: String): String? {
         return null
     }
     if (method == "GET") {
-        respond(200, "OK", CALLBACK_PAGE, "text/html; charset=utf-8")
+        val link = returnUri?.let {
+            """<a id="back" href="${android.text.TextUtils.htmlEncode(it.toString())}" hidden>Вернуться в чат</a>"""
+        }.orEmpty()
+        respond(200, "OK", CALLBACK_PAGE.replace("<!-- return -->", link), "text/html; charset=utf-8")
         return null
     }
     if (method != "POST" || length !in 1..MAX_BODY) {
@@ -317,7 +336,7 @@ private fun Socket.readGrant(state: String): String? {
         respond(400, "Bad Request", "Доступ не предоставлен")
         throw LoginError("Вход в DonationAlerts отменён")
     }
-    respond(200, "OK", "Вернись в TChat Stream")
+    respond(200, "OK", "Подтверждение получено. Вернитесь в TChat.")
     return token
 }
 
@@ -347,7 +366,7 @@ private fun Socket.respond(code: Int, status: String, body: String, type: String
 private const val CALLBACK_PAGE = """<!doctype html><html lang="ru"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'">
-<title>TChat Stream</title><h1>TChat Stream</h1><p id="result">Проверяем доступ к донатам…</p>
+<title>DonationAlerts · TChat</title><h1>DonationAlerts</h1><p id="result">Проверяем доступ к донатам…</p><!-- return -->
 <script>
 const result = document.getElementById('result');
 const data = new URLSearchParams(location.hash.length > 1 ? location.hash.slice(1) : location.search.slice(1));
@@ -355,9 +374,9 @@ history.replaceState(null, '', location.pathname);
 if (data.has('state')) {
   fetch(location.pathname, {method: 'POST', body: data})
     .then(response => response.text())
-    .then(message => { result.textContent = message; })
-    .catch(() => { result.textContent = 'Вернись в TChat Stream и повтори вход.'; });
+    .then(message => { result.textContent = message; const back = document.getElementById('back'); if (back) back.hidden = false; })
+    .catch(() => { result.textContent = 'Вернись в TChat и повтори вход.'; });
 } else {
-  result.textContent = 'Вернись в TChat Stream и повтори вход.';
+  result.textContent = 'Вернись в TChat и повтори вход.';
 }
 </script></html>"""

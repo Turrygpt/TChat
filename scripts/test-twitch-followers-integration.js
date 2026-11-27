@@ -112,6 +112,9 @@ async function run() {
     notify({ ...event, user_id: '789', user_name: 'AnotherFollower' });
     assert.equal((await invoke('chat:get-history')).length, 2);
     assert.equal((await invoke('alerts:get-queue')).queue.length, 1, 'disabled alerts leave chat and goals working');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(packets.some(([name, item]) => name === 'chat:event' && item.type === 'subscriber'
+      && item.event.username === 'AnotherFollower'), 'mobile readers receive followers with OBS alerts disabled');
     assert.equal((await invoke('widgets:get-state')).items.find((item) => item.id === goalId).current, 2);
     const saved = JSON.parse(fs.readFileSync(path.join(storage, 'settings', 'stream-widgets.json'), 'utf8'));
     assert.equal(saved.items.find((item) => item.id === goalId).current, 2);

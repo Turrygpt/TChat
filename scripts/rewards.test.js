@@ -26,9 +26,11 @@ test('real VK parsers feed the shared sticker pipeline once per purchase', () =>
   const names = ['parseVkChatBotMessage', 'parseVkStructuredReward', 'parseVkRewardEvent', 'enqueueStickerFromReward'];
   const shown = [];
   const logged = [];
+  const readerEvents = [];
   const context = vm.createContext({
     seenRewards: new Set(), findStickerRule: (event) => findRewardRule([{ reward: 'Классный стрим', image: '/like.svg' }], event),
     rememberReward: (event) => logged.push(event), showSticker: (event) => shown.push(event),
+    publishChatEvent: (type, event) => readerEvents.push({ type, event }),
     chibis: { reward: () => {} },
     stickerSettings: { displaySeconds: 8 }, logInfo: () => {},
   });
@@ -50,6 +52,8 @@ test('real VK parsers feed the shared sticker pipeline once per purchase', () =>
   assert.equal(shown.length, 2);
   assert.equal(shown[1].username, 'Viewer2');
   assert.equal(logged.length, 2);
+  assert.equal(readerEvents.length, 2);
+  assert.equal(readerEvents[0].event.price, 900);
   assert.equal(context.parseVkRewardEvent({ author: { displayName: 'Viewer' }, data: [{ type: 'text', content: 'награда «Классный стрим»' }] }), null);
 });
 

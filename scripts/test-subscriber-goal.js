@@ -9,13 +9,16 @@ const items = [goal('all'), goal('tw', 'twitch'), goal('hidden', 'all', false), 
 const events = [], published = [];
 let saves = 0, broadcasts = 0;
 const source = fs.readFileSync(require.resolve('../main.js'), 'utf8');
-const context = vm.createContext({ advanceSubscriberGoals, streamWidgets: items, normalizeSubscriber: x => x, getSystemAlertRule: () => ({ enabled: false }), saveStreamWidgets: () => saves++, broadcastStreamWidgets: () => broadcasts++, socketServer: { emit: (name, payload) => events.push({ name, payload }) } });
+const readerEvents = [];
+const context = vm.createContext({ publishChatEvent: (type, item) => readerEvents.push({ type, item }), advanceSubscriberGoals, streamWidgets: items, normalizeSubscriber: x => x, getSystemAlertRule: () => ({ enabled: false }), saveStreamWidgets: () => saves++, broadcastStreamWidgets: () => broadcasts++, socketServer: { emit: (name, payload) => events.push({ name, payload }) } });
 vm.runInContext(source.slice(source.indexOf('function enqueueSubscriberAlert('), source.indexOf('function enqueueSubscriptionRenewalAlert(')), context);
 const client = new EventEmitter();
 registerTwitchSubscriptions(client, { publish: x => published.push(x), subscriberAlert: context.enqueueSubscriberAlert, renewalAlert: () => {} });
 client.emit('subscription', '#channel', 'Alice', { plan: '1000' }, '', { id: '1' });
 assert.deepEqual(items.map(w => w.current), [1, 1, 1, 0]);
 assert.equal(saves, 1); assert.equal(broadcasts, 1); // independent of disabled alert rule
+assert.equal(readerEvents[0].type, 'subscriber');
+assert.equal(readerEvents[0].item.username, 'Alice');
 client.emit('subscription', '#channel', 'Alice', { plan: '1000' }, '', { id: '1' });
 assert.equal(saves, 1); // deduplicate replay
 client.emit('resub', '#channel', 'Alice', 3, '', { id: 'renewal' });

@@ -28,6 +28,7 @@ assets/chat/emotes/
 android/.gradle/
 android/build/
 android/app/build/
+android/reader/build/
 android/local.properties
 android/.idea/
 *.apk
