@@ -54,7 +54,7 @@ internal class DonationProfile private constructor(
                 )
             }
             return DonationProfile(
-                json.optString("clientId"),
+                json.optString("clientId").ifBlank { "19533" },
                 json.optJSONObject("layout") ?: JSONObject(),
                 maxOf(json.optLong("displaySeconds", 8L), 15L) * 1000L,
                 rules,

@@ -6,6 +6,10 @@ import android.os.PowerManager
 import android.provider.Settings as SystemSettings
 import android.view.Window
 import android.view.WindowManager
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -13,33 +17,46 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 
-internal val StreamAccent = Color(0xFF89E5D7)
-internal val StreamChrome = Color(0xEE121925)
-internal val StreamOutline = Color(0xFF354354)
-internal val StreamMuted = Color(0xFFACB8CA)
-internal val StreamRed = Color(0xFFD90F3F)
+internal val StreamAccent = Color(0xFFD5FA72)
+internal val StreamChrome = Color(0xF0171B18)
+internal val StreamOutline = Color(0xFF424940)
+internal val StreamMuted = Color(0xFFBCC4B7)
+internal val StreamInk = Color(0xFF171B18)
+internal val StreamRed = Color(0xFFFF786E)
 
 private val streamColors = darkColorScheme(
     primary = StreamAccent,
-    onPrimary = Color(0xFF063832),
-    surface = Color(0xFF111924),
-    onSurface = Color(0xFFF4F7FC),
-    surfaceContainer = Color(0xFF1A2331),
-    surfaceContainerHigh = Color(0xFF212D3D),
-    background = Color(0xFF080D15),
-    onBackground = Color(0xFFF4F7FC),
+    onPrimary = StreamInk,
+    primaryContainer = Color(0xFF343F26),
+    onPrimaryContainer = StreamAccent,
+    secondary = StreamMuted,
+    surface = Color(0xFF161A17),
+    onSurface = Color(0xFFF3F5EF),
+    surfaceContainer = Color(0xFF202521),
+    surfaceContainerHigh = Color(0xFF2B322B),
+    background = Color(0xFF101310),
+    onBackground = Color(0xFFF3F5EF),
     onSurfaceVariant = StreamMuted,
     outline = StreamOutline,
-    error = Color(0xFFFFB2B9),
+    error = StreamRed,
 )
 
 @Composable
 internal fun StreamTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = streamColors, content = content)
+}
+
+@Composable
+internal fun StreamMark(modifier: Modifier = Modifier) {
+    Image(painterResource(R.drawable.ic_stream_mark), null,
+        modifier.background(StreamInk, RoundedCornerShape(25)).padding(5.dp))
 }
 
 internal enum class ThermalLevel { NORMAL, WARM, HOT }

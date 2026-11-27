@@ -1,6 +1,7 @@
 package com.tchat.stream
 
 import android.content.Intent
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Bundle
@@ -26,13 +27,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,6 +62,8 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextDecrease
 import androidx.compose.material.icons.filled.TextIncrease
@@ -84,6 +88,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -146,19 +151,48 @@ private fun hasPermissions(ctx: android.content.Context) = PERMISSIONS.all {
 private fun App(store: Settings, window: Window, applyOrientation: (StreamOrientation) -> Unit) {
     val context = LocalContext.current
     var granted by remember { mutableStateOf(hasPermissions(context)) }
-
+    var blocked by rememberSaveable { mutableStateOf(false) }
+    var showUpdates by rememberSaveable { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) granted = hasPermissions(context)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { granted = hasPermissions(context) }
-
-    LaunchedEffect(Unit) { if (!granted) launcher.launch(PERMISSIONS) }
+    ) {
+        granted = hasPermissions(context)
+        blocked = !granted && PERMISSIONS.any { permission ->
+            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED &&
+                (context as? Activity)?.shouldShowRequestPermissionRationale(permission) == false
+        }
+    }
 
     if (!granted) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Нужен доступ к камере и микрофону", color = Color.White)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { launcher.launch(PERMISSIONS) }) { Text("Разрешить") }
+        BackHandler(enabled = showUpdates) { showUpdates = false }
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding(),
+            contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = 400.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (showUpdates) {
+                    Text("Обновления", style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                    StreamUpdatePanel(installEnabled = true)
+                    TextButton(onClick = { showUpdates = false }) { Text("Назад") }
+                } else {
+                    StreamMark(Modifier.size(58.dp))
+                    Text("TChat Stream", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Разрешите доступ к камере и микрофону, чтобы вести эфир с телефона.", color = StreamMuted)
+                    Button(onClick = {
+                        if (blocked) {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:${context.packageName}")))
+                        } else launcher.launch(PERMISSIONS)
+                    }) { Text(if (blocked) "Открыть настройки Android" else "Разрешить доступ") }
+                    TextButton(onClick = { showUpdates = true }) { Text("Обновления") }
+                }
             }
         }
         return
@@ -184,7 +218,7 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
         store.save(value)
     }
 
-    var settingsPage by remember { mutableStateOf<SettingsPage?>(null) }
+    var settingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     var surface by remember { mutableStateOf<SurfaceView?>(null) }
     val platform = settings.chatPlatform
     val channel = platform.normalize(settings.chatAddress).orEmpty()
@@ -210,7 +244,7 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
     val canChangeQuality = !publishing && status.state != LiveState.STOPPING
     var showControls by remember(publishing) { mutableStateOf(false) }
     var showDetails by remember(publishing) { mutableStateOf(false) }
-    var confirmStop by remember(publishing) { mutableStateOf(false) }
+    var confirmBroadcast by remember(publishing) { mutableStateOf(false) }
     var screenLight by remember(frontCamera) { mutableStateOf(false) }
     val screenLightActive = frontCamera && screenLight && !hot
     var lastControlUse by remember { mutableLongStateOf(0L) }
@@ -228,8 +262,8 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
         }
     }
 
-    LaunchedEffect(showControls, lastControlUse, settingsPage, confirmStop) {
-        if (showControls && settingsPage == null && !confirmStop) {
+    LaunchedEffect(showControls, lastControlUse, settingsPage, confirmBroadcast) {
+        if (showControls && settingsPage == null && !confirmBroadcast) {
             delay(6_000)
             showControls = false
         }
@@ -253,7 +287,7 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
         }
     }
     LaunchedEffect(hot) { if (hot) screenLight = false }
-    BackHandler(enabled = publishing && settingsPage == null && !confirmStop) { confirmStop = true }
+    BackHandler(enabled = publishing && settingsPage == null && !confirmBroadcast) { confirmBroadcast = true }
     StreamDisplayPower(window, publishing, settings.economy, thermal, screenLightActive)
     if (screenLightActive && foreground) {
         DisposableEffect(window) {
@@ -406,8 +440,8 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
         }
 
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-            val compactControls = maxWidth < 376.dp
-            val buttonSize = if (compactControls) 40.dp else 46.dp
+            val compactControls = maxWidth < 400.dp
+            val buttonSize = 48.dp
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -415,12 +449,12 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.weight(1f)) {
-                        StatusChip(status, settings.resolution, liveViewers, showDetails) {
+                        StatusChip(status, settings.resolution, settings.streamFps, liveViewers, showDetails) {
                             showDetails = !showDetails
                         }
                     }
                     if (publishing && !controlsVisible) {
-                        RoundIconButton(Icons.Default.Tune, "Показать управление", size = 44.dp, onClick = ::revealControls)
+                        RoundIconButton(Icons.Default.Tune, "Показать управление", onClick = ::revealControls)
                     }
                     if (frontCamera && (controlsVisible || screenLightActive)) {
                         RoundIconButton(
@@ -428,7 +462,6 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
                             if (screenLightActive) "Выключить подсветку экрана" else "Включить подсветку экрана",
                             tint = if (screenLightActive) StreamAccent else Color.White,
                             enabled = cameraReady && !hot,
-                            size = 44.dp,
                         ) { screenLight = !screenLight }
                     } else if (status.cameraControls.torchAvailable && (controlsVisible || status.cameraControls.torchEnabled)) {
                         val torch = status.cameraControls.torchEnabled
@@ -437,9 +470,11 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
                             if (torch) "Выключить вспышку" else "Включить вспышку",
                             tint = if (torch) StreamAccent else Color.White,
                             enabled = cameraReady && (!hot || torch),
-                            size = 44.dp,
                             onClick = controller::toggleTorch,
                         )
+                    }
+                    if (controlsVisible) {
+                        RoundIconButton(Icons.Default.Settings, "Настройки") { settingsPage = SettingsPage.STREAM }
                     }
                 }
                 val notice = status.cameraError.ifBlank { status.widgetError }
@@ -498,18 +533,15 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
                 modifier = Modifier.align(Alignment.BottomCenter).padding(start = 7.dp, end = 7.dp, bottom = 10.dp),
             ) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(26.dp)).background(StreamChrome)
-                        .border(1.dp, StreamOutline, RoundedCornerShape(26.dp)).padding(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(if (compactControls) 3.dp else 6.dp, Alignment.CenterHorizontally),
+                    Modifier.clip(CircleShape).background(StreamChrome)
+                        .border(1.dp, StreamOutline, CircleShape).padding(horizontal = 5.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (compactControls) 0.dp else 4.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RoundIconButton(Icons.Default.Settings, "Настройки", size = buttonSize) {
-                        settingsPage = SettingsPage.STREAM
-                    }
                     RoundIconButton(
                         Icons.Default.Cameraswitch, "Переключить камеру",
                         enabled = controller.canSwitch && (status.cameraReady || status.cameraError.isNotBlank()),
-                        size = buttonSize,
+                        size = buttonSize, inDock = true,
                     ) {
                         keepControlsOpen()
                         controller.switchCamera()
@@ -519,7 +551,7 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
                             Icons.Default.PictureInPictureAlt, "Камера в окне",
                             tint = if (status.pictureInPicture) StreamAccent else Color.White,
                             enabled = status.cameraReady && !hot,
-                            size = buttonSize,
+                            size = buttonSize, inDock = true,
                         ) {
                             keepControlsOpen()
                             controller.togglePictureInPicture()
@@ -528,42 +560,41 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
 
                     Button(
                         onClick = {
-                            when {
-                                publishing -> confirmStop = true
-                                hasDestination -> controller.startStream(settings.fullUrl)
-                                else -> settingsPage = SettingsPage.STREAM
-                            }
+                            if (publishing || hasDestination) confirmBroadcast = true
+                            else settingsPage = SettingsPage.STREAM
                         },
                         enabled = status.state != LiveState.STOPPING && (publishing || status.cameraReady || !hasDestination),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (publishing) Color(0xFF842241) else StreamRed,
+                            containerColor = if (publishing) StreamRed else StreamAccent,
+                            contentColor = StreamInk,
                         ),
-                        shape = RoundedCornerShape(18.dp),
-                        contentPadding = PaddingValues(horizontal = 9.dp),
-                        modifier = Modifier.widthIn(min = if (compactControls) 76.dp else 88.dp).height(48.dp),
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = if (compactControls) 10.dp else 17.dp),
+                        modifier = Modifier.widthIn(min = 88.dp).height(48.dp),
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                if (publishing) "СТОП" else "LIVE",
-                                fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1,
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                            if (channel.isNotBlank()) ViewerCount(liveViewers)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(if (publishing) Icons.Default.Stop else Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                                Text(if (publishing) "Стоп" else "В эфир", fontWeight = FontWeight.Bold, maxLines = 1,
+                                    style = MaterialTheme.typography.labelLarge)
+                            }
+                            if (channel.isNotBlank()) ViewerCount(liveViewers, StreamInk)
                         }
                     }
 
                     RoundIconButton(
                         if (status.micMuted) Icons.Default.MicOff else Icons.Default.Mic,
                         if (status.micMuted) "Включить микрофон" else "Выключить микрофон",
-                        size = buttonSize,
+                        tint = if (status.micMuted) StreamRed else Color.White,
+                        size = buttonSize, inDock = true,
                     ) {
                         keepControlsOpen()
                         controller.setMicMuted(!status.micMuted)
                     }
                     RoundIconButton(
-                        Icons.AutoMirrored.Filled.Chat, "Чат на телефоне",
+                        Icons.AutoMirrored.Filled.Chat, if (settings.chatEnabled && hasChat) "Скрыть чат" else "Открыть чат",
                         tint = if (settings.chatEnabled && hasChat) StreamAccent else Color.White,
-                        size = buttonSize,
+                        size = buttonSize, inDock = true,
                     ) {
                         keepControlsOpen()
                         if (!hasChat) {
@@ -592,18 +623,29 @@ private fun StreamContent(store: Settings, window: Window, applyOrientation: (St
             onSave = { update(it); settingsPage = null; showControls = false },
         )
     }
-    if (confirmStop && publishing) {
+    if (confirmBroadcast) {
         AlertDialog(
-            title = { Text("Остановить трансляцию?") },
-            onDismissRequest = { confirmStop = false },
+            title = { Text(if (publishing) "Остановить трансляцию?" else "Начать трансляцию?") },
+            text = if (publishing) null else ({
+                val host = android.net.Uri.parse(settings.rtmpUrl).host.orEmpty()
+                Text("$host · ${settings.resolution.label} · ${settings.streamFps} к/с")
+            }),
+            onDismissRequest = { confirmBroadcast = false },
             dismissButton = {
-                TextButton(onClick = { confirmStop = false }) { Text("Продолжить эфир") }
+                TextButton(onClick = { confirmBroadcast = false }) {
+                    Text(if (publishing) "Продолжить эфир" else "Отмена")
+                }
             },
             confirmButton = {
-                Button(onClick = {
-                    confirmStop = false
-                    controller.stopStream()
-                }) { Text("Остановить") }
+                Button(
+                    onClick = {
+                        confirmBroadcast = false
+                        if (publishing) controller.stopStream() else controller.startStream(settings.fullUrl)
+                    },
+                    enabled = publishing || (canChangeQuality && cameraReady && hasDestination),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (publishing) StreamRed else StreamAccent,
+                        contentColor = StreamInk),
+                ) { Text(if (publishing) "Остановить" else "Начать эфир") }
             },
         )
     }
@@ -737,7 +779,7 @@ private fun ChatWindow(
             .absoluteOffset(left.dp, top.dp)
             .size(visibleWidth.dp, visibleHeight.dp)
             .alpha(alpha)
-            .clip(RoundedCornerShape(14.dp)).background(Color(0xB8111924), RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp)).background(StreamInk.copy(alpha = 0.78f), RoundedCornerShape(14.dp))
             .border(1.dp, StreamOutline.copy(alpha = 0.65f), RoundedCornerShape(14.dp)),
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -857,15 +899,15 @@ private fun MiniButton(icon: androidx.compose.ui.graphics.vector.ImageVector, la
 }
 
 @Composable
-private fun StatusChip(status: StreamStatus, resolution: Resolution, viewers: Long?, expanded: Boolean, onToggle: () -> Unit) {
+private fun StatusChip(status: StreamStatus, resolution: Resolution, fps: Int, viewers: Long?, expanded: Boolean, onToggle: () -> Unit) {
     val (label, tint) = when (status.state) {
-        LiveState.IDLE -> "Не в эфире" to StreamMuted
+        LiveState.IDLE -> "Предпросмотр" to StreamMuted
         LiveState.CONNECTING -> "Подключение…" to Color(0xFFFFCB88)
         LiveState.RETRYING -> "Переподключение…" to Color(0xFFFFCB88)
         LiveState.WAITING_NETWORK -> "Ждём сеть…" to Color(0xFFFFCB88)
         LiveState.STOPPING -> "Завершение эфира…" to StreamMuted
         LiveState.FAILED -> status.error.ifBlank { "Ошибка" } to MaterialTheme.colorScheme.error
-        LiveState.LIVE -> "LIVE" to Color(0xFFFF5779)
+        LiveState.LIVE -> "LIVE" to StreamRed
     }
     val shape = RoundedCornerShape(16.dp)
     val chip = Modifier.clip(shape).background(StreamChrome).border(1.dp, StreamOutline, shape)
@@ -878,14 +920,20 @@ private fun StatusChip(status: StreamStatus, resolution: Resolution, viewers: Lo
     } else chip
     Column(clickableChip.padding(horizontal = 11.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Box(Modifier.size(7.dp).background(tint, CircleShape))
-            Text(
-                label,
-                color = if (status.state == LiveState.LIVE) Color.White else tint,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (status.state == LiveState.IDLE) StreamMark(Modifier.size(29.dp))
+            else Box(Modifier.size(7.dp).background(tint, CircleShape))
+            Column {
+                Text(
+                    label,
+                    color = if (status.state == LiveState.LIVE) Color.White else tint,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (status.state == LiveState.IDLE) {
+                    Text("${resolution.label} · $fps к/с", style = MaterialTheme.typography.labelSmall, color = StreamMuted)
+                }
+            }
             if (status.state == LiveState.LIVE) ViewerCount(viewers)
         }
         if (expanded && status.isPublishing) {
@@ -907,10 +955,10 @@ private fun StatusChip(status: StreamStatus, resolution: Resolution, viewers: Lo
 }
 
 @Composable
-private fun ViewerCount(viewers: Long?) {
+private fun ViewerCount(viewers: Long?, color: Color = Color.White) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Icon(Icons.Default.Visibility, "Зрители", modifier = Modifier.size(13.dp), tint = Color.White.copy(alpha = 0.88f))
-        Text(viewers?.toString() ?: "—", color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Icon(Icons.Default.Visibility, "Зрители", modifier = Modifier.size(13.dp), tint = color)
+        Text(viewers?.toString() ?: "—", color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 
@@ -925,10 +973,12 @@ private fun RoundIconButton(
     label: String,
     tint: Color = Color.White,
     enabled: Boolean = true,
-    size: Dp = 52.dp,
+    size: Dp = 48.dp,
+    inDock: Boolean = false,
     onClick: () -> Unit,
 ) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(size).background(StreamChrome, CircleShape)) {
+    val surface = if (inDock) Modifier else Modifier.background(StreamChrome, CircleShape).border(1.dp, StreamOutline, CircleShape)
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(size).then(surface)) {
         Icon(icon, label, modifier = Modifier.size(22.dp), tint = if (enabled) tint else tint.copy(alpha = 0.35f))
     }
 }

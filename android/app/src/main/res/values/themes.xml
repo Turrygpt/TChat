@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.TChatStream" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.TChatStream" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/stream_ink</item>
+        <item name="android:colorAccent">@color/stream_lime</item>
+    </style>
 </resources>

@@ -56,7 +56,7 @@ PORT=8080 npm run serve  # другой порт
 - **Android (TChat Stream)** ведёт эфир с камеры телефона по RTMP, читает чат VK Видео Live
   и выводит в кадр алерты о фолловерах, рейдах и донатах. Приложение поддерживает
   плавающее окно чата и вторую камеру в кадре.
-  См. **[android/README.md](android/README.md)**.
+  [Скачать APK для Android](https://github.com/Turrygpt/TChat/releases/download/stream-v1.6.0/TChat-Stream-1.6.0.apk) · [Установка и обновление с телефона](android/README.md#tchat-stream).
 
 ## Главное
 

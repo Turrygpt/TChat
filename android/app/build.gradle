@@ -5,7 +5,8 @@ plugins {
 
 def personalProfile = new Properties()
 def localProperties = rootProject.file('local.properties')
-def includePersonalProfile = providers.gradleProperty('tchatPersonalProfile').map { it.toBoolean() }.getOrElse(true)
+def includePersonalProfile = providers.gradleProperty('tchatPersonalProfile').map { it.toBoolean() }.getOrElse(false)
+def releaseStore = file(System.getenv('TCHAT_STREAM_KEYSTORE') ?: new File(System.getProperty('user.home'), '.android/tchat-stream-release.keystore'))
 if (includePersonalProfile && localProperties.isFile()) {
     localProperties.withInputStream { personalProfile.load(it) }
 }
@@ -18,17 +19,27 @@ android {
         applicationId "com.tchat.stream"
         minSdk 26
         targetSdk 35
-        versionCode 16
-        versionName "1.5.1"
+        versionCode 17
+        versionName "1.6.0"
         buildConfigField 'String', 'PERSONAL_RTMP_URL', groovy.json.JsonOutput.toJson(personalProfile.getProperty('tchatRtmpUrl', ''))
         buildConfigField 'String', 'PERSONAL_STREAM_KEY', groovy.json.JsonOutput.toJson(personalProfile.getProperty('tchatStreamKey', ''))
         buildConfigField 'String', 'PERSONAL_VK_CHANNEL', groovy.json.JsonOutput.toJson(personalProfile.getProperty('tchatVkChannel', ''))
     }
 
+    signingConfigs {
+        if (releaseStore.isFile()) {
+            streamRelease {
+                storeFile releaseStore
+                storePassword System.getenv('TCHAT_STREAM_STORE_PASSWORD') ?: 'android'
+                keyAlias System.getenv('TCHAT_STREAM_KEY_ALIAS') ?: 'androiddebugkey'
+                keyPassword System.getenv('TCHAT_STREAM_KEY_PASSWORD') ?: storePassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            signingConfig releaseStore.isFile() ? signingConfigs.streamRelease : signingConfigs.debug
         }
     }
     compileOptions {
@@ -40,7 +51,9 @@ android {
         buildConfig true
     }
     sourceSets.main.kotlin.srcDir(rootProject.file('shared/src/main/kotlin'))
-    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('personalDonationAssets').get().asFile)
+    if (includePersonalProfile) {
+        sourceSets.main.assets.srcDir(layout.buildDirectory.dir('personalDonationAssets').get().asFile)
+    }
     sourceSets.main.assets.srcDir(layout.buildDirectory.dir('donationWidget').get().asFile)
     androidResources {
         noCompress += ['mp3', 'wav', 'm4a', 'ogg', 'flac']
